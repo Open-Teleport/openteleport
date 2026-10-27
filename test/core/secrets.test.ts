@@ -90,6 +90,24 @@ const SAMPLES: Sample[] = [
     preview: "-----B…",
   },
   {
+    name: "DSA PEM header",
+    kind: "private-key",
+    token: "-----BEGIN " + "DSA PRIVATE KEY-----",
+    preview: "-----B…",
+  },
+  {
+    name: "encrypted PEM header",
+    kind: "private-key",
+    token: "-----BEGIN " + "ENCRYPTED PRIVATE KEY-----",
+    preview: "-----B…",
+  },
+  {
+    name: "PGP private key block",
+    kind: "private-key",
+    token: "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----",
+    preview: "-----B…",
+  },
+  {
     name: "Google API key",
     kind: "google-api-key",
     token: "AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
@@ -101,6 +119,12 @@ const SAMPLES: Sample[] = [
     kind: "bearer-token",
     token: "Bearer " + "abcdefghijklmnopqrstuvwxyz0123456789",
     preview: "Bearer…",
+  },
+  {
+    name: "lowercase bearer token",
+    kind: "bearer-token",
+    token: "bearer " + "abcdefghijklmnopqrstuvwxyz0123456789",
+    preview: "bearer…",
   },
 ];
 
@@ -171,21 +195,15 @@ describe("scanSecrets: false positives", () => {
   const NEGATIVES: { rule: string; text: string }[] = [
     { rule: "sk- inside the word task-123", text: "Close task-123 today." },
     { rule: "sk- with fewer than 20 characters", text: `The id is sk-${filler(19)}.` },
-    { rule: "sk- inside a longer word", text: `See risk-${filler(30)} and ask-${filler(30)}.` },
-    { rule: "sk- after a hyphen", text: `Name it my-sk-${filler(30)}.` },
     { rule: "a bare sk-ant- prefix", text: `The prefix is sk-ant- and nothing more.` },
     { rule: "ghp_ with a short body", text: `A token starts with ghp_ or ghp_${filler(10)}.` },
     { rule: "github_pat_ with a short body", text: `Prefix github_pat_${filler(10)} is too short.` },
-    { rule: "ghp_ inside an identifier", text: `Call my_ghp_${filler(30)}().` },
     { rule: "xoxb- with a short body", text: "Slack tokens look like xoxb-123 or xoxp-abc." },
-    { rule: "xox- inside a word", text: `The word is fooxoxb-${filler(30)}.` },
     { rule: "AKIA with a short body", text: `Key AKIA${"A".repeat(15)} is too short.` },
     { rule: "AKIA with a long body", text: `Key AKIA${"A".repeat(17)} is too long.` },
-    { rule: "AKIA inside a word", text: `Value XAKIA${"A".repeat(16)} is not a key.` },
     { rule: "a public key header", text: "-----BEGIN " + "PUBLIC KEY-----" },
     { rule: "a certificate header", text: "-----BEGIN " + "CERTIFICATE-----" },
     { rule: "AIza with a short body", text: `Key AIza${filler(34)} is too short.` },
-    { rule: "AIza inside a word", text: `Value xAIza${filler(35)} is not a key.` },
     {
       rule: "a JWT with two segments",
       text: "eyJhbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiIxIn0 has no signature.",
@@ -193,11 +211,58 @@ describe("scanSecrets: false positives", () => {
     { rule: "eyJ without a body", text: "The segments eyJ.a.b are empty." },
     { rule: "a dotted version number", text: "Released as 1.2.3 and eyJ is only a prefix." },
     { rule: "the phrase Bearer of bad news", text: "Nobody likes being the Bearer of bad news." },
+    { rule: "the phrase bearer of bad news", text: "Nobody likes being the bearer of bad news." },
+    { rule: "a PEM header that is not private", text: "-----BEGIN " + "PGP PUBLIC KEY BLOCK-----" },
     { rule: "a short bearer token", text: "Send Authorization: Bearer abc123 to test." },
   ];
 
   it.each(NEGATIVES)("ignores $rule", ({ text }) => {
     expect(scanSecrets(bundleWith({ instructions: text }))).toStrictEqual([]);
+  });
+});
+
+describe("scanSecrets: tokens glued to other text", () => {
+  // A gate before export prefers a false positive to a missed secret, so no pattern needs a word
+  // boundary: raw JSON, logs and shell scripts put escapes and identifiers right before a token.
+  const PREFIXES = ["\\n", "\\t", "\\u0020", "%3D", "KEY_"];
+  const inConfig = (json: string): SecretFinding[] =>
+    scanSecrets(bundleWith({ files: [file("config.json", json)] }));
+
+  it.each(PREFIXES)("finds every kind right after %s inside a JSON string", (prefix) => {
+    for (const { name, kind, token, preview } of SAMPLES) {
+      expect(inConfig(`{"text":"key:${prefix}${token}"}`), `${name} after ${prefix}`).toStrictEqual([
+        { path: "files/config.json", line: 1, kind, preview },
+      ]);
+    }
+  });
+
+  it("finds an AWS key inside an identifier, before or after it", () => {
+    for (const text of [`KEY_${AWS_KEY}`, `id${AWS_KEY}`, `${AWS_KEY}_ID`, `${AWS_KEY}abc`]) {
+      expect(scanSecrets(bundleWith({ instructions: text })), text).toStrictEqual([
+        { path: "AGENTS.md", line: 1, kind: "aws-access-key", preview: "AKIAIO…" },
+      ]);
+    }
+  });
+
+  it("reports a JWT after a JSON newline escape from its first segment", () => {
+    // Had the scan started at the payload (`eyJzdW…`), the first segment would be lost.
+    expect(inConfig(`{"text":"key:\\n${JWT}"}`)).toStrictEqual([
+      { path: "files/config.json", line: 1, kind: "jwt", preview: "eyJhbG…" },
+    ]);
+  });
+
+  it("reports a JWT whose header itself contains eyJ", () => {
+    const jwt = "eyJabcdef" + "eyJghijkl" + "." + "eyJzdWIiOiIxIn0" + "." + "c2lnbmF0dXJl";
+
+    expect(inConfig(`{"text":"${jwt}"}`)).toStrictEqual([
+      { path: "files/config.json", line: 1, kind: "jwt", preview: "eyJghi…" },
+    ]);
+  });
+
+  it("prefers a false positive: a key that ends a longer word is reported", () => {
+    expect(scanSecrets(bundleWith({ instructions: `See risk-${"a".repeat(30)}.` }))).toStrictEqual([
+      { path: "AGENTS.md", line: 1, kind: "openai-api-key", preview: "sk-aaa…" },
+    ]);
   });
 });
 
@@ -464,9 +529,16 @@ describe("scanSecrets: hostile input", () => {
   };
 
   it("stays fast on a long line of repeated prefixes", () => {
-    for (const unit of ["eyJ", "sk-", "Bearer ", "AIza", "xoxb-", "ghp_", "AKIA", "eyJ."]) {
-      timed(unit.repeat(Math.floor(150_000 / unit.length)));
-    }
+    const units = [
+      ...["eyJ", "eyJ_", "eyJ-", "eyJ.", "eyJa.", "eyJa.b.", "eyJ1.", "eyJa.b"],
+      ...["sk-", "sk-ant-", "Bearer ", "bearer ", "AIza", "xoxb-", "ghp_", "github_pat_", "AKIA"],
+      ...["-----BEGIN ", "-----BEGIN A ", "-----BEGIN A PRIVATE ", "PRIVATE KEY-----"],
+    ];
+    for (const unit of units) timed(unit.repeat(Math.floor(100_000 / unit.length)));
+  });
+
+  it("stays fast on one long list of PEM header words", () => {
+    timed("-----BEGIN " + "A ".repeat(500_000));
   });
 
   it("stays fast on one long run of token characters", () => {

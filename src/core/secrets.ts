@@ -12,48 +12,37 @@ export type SecretFinding = {
 
 export type SecretPattern = { kind: string; regex: RegExp };
 
-// A token prefix only counts at the start of a word, so that `task-123`, `risk-...` or
-// `my_ghp_...` stay quiet. None of the regexes is global or sticky: they keep no state between
-// calls. The lookbehind also keeps the scan linear: a match can only start at the beginning of a
-// run of token characters, so a long run is read once, not once per position.
-const NOT_TOKEN_CHAR_BEFORE = "(?<![A-Za-z0-9_-])";
+// This is the gate before a bundle leaves the machine, so it prefers a false positive to a
+// missed secret: no pattern is anchored at the start. A token glued to a JSON escape (a backslash
+// and `n`), to `%3D` or to an identifier (`KEY_sk-...`) is still found, at the price of the odd
+// hit such as `risk-` followed by 20 key characters. None of the regexes is global or sticky, so
+// they keep no state between calls, and none backtracks over more than the run of token
+// characters it is in.
+//
+// The JWT pattern needs care for that last point. Its first segment may not run into another
+// `eyJ`, so a long run of token characters is read once, not once per `eyJ` inside it. (A header
+// that itself contains `eyJ` is matched from that inner `eyJ`: the finding is still reported.)
 
 /**
  * What counts as a credential, in the order findings are reported. A line that matches several
- * patterns reports each of them once. `sk-` takes the remaining 20 or more characters from the
- * key alphabet; the Anthropic prefix `sk-ant-` is told apart from the generic one by lookahead,
- * so one key never reports twice.
+ * patterns reports each of them once. `sk-` takes 20 or more characters from the key alphabet;
+ * the Anthropic prefix `sk-ant-` is told apart from the generic one by lookahead, so one key
+ * never reports twice. A private key is any PEM `... PRIVATE KEY` header (`RSA`, `EC`, `DSA`,
+ * `OPENSSH`, `ENCRYPTED`, `PGP ... BLOCK`). The `Bearer` scheme may start with either case.
  */
 export const SECRET_PATTERNS: readonly SecretPattern[] = [
-  {
-    kind: "openai-api-key",
-    regex: new RegExp(`${NOT_TOKEN_CHAR_BEFORE}sk-(?!ant-)[A-Za-z0-9_-]{20,}`),
-  },
-  {
-    kind: "anthropic-api-key",
-    regex: new RegExp(`${NOT_TOKEN_CHAR_BEFORE}sk-(?=ant-)[A-Za-z0-9_-]{20,}`),
-  },
-  {
-    kind: "github-token",
-    regex: /\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/,
-  },
-  { kind: "slack-token", regex: /\bxox[bp]-[A-Za-z0-9-]{10,}/ },
-  { kind: "aws-access-key", regex: /\bAKIA[0-9A-Z]{16}\b/ },
-  {
-    kind: "private-key",
-    regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-  },
-  {
-    kind: "google-api-key",
-    regex: new RegExp(`${NOT_TOKEN_CHAR_BEFORE}AIza[0-9A-Za-z_-]{35}`),
-  },
+  { kind: "openai-api-key", regex: /sk-(?!ant-)[A-Za-z0-9_-]{20,}/ },
+  { kind: "anthropic-api-key", regex: /sk-(?=ant-)[A-Za-z0-9_-]{20,}/ },
+  { kind: "github-token", regex: /(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/ },
+  { kind: "slack-token", regex: /xox[bp]-[A-Za-z0-9-]{10,}/ },
+  { kind: "aws-access-key", regex: /AKIA[0-9A-Z]{16}(?![0-9A-Z])/ },
+  { kind: "private-key", regex: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
+  { kind: "google-api-key", regex: /AIza[0-9A-Za-z_-]{35}/ },
   {
     kind: "jwt",
-    regex: new RegExp(
-      `${NOT_TOKEN_CHAR_BEFORE}eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+`,
-    ),
+    regex: /eyJ(?:(?!eyJ)[A-Za-z0-9_-])+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,
   },
-  { kind: "bearer-token", regex: /Bearer [A-Za-z0-9._-]{20,}/ },
+  { kind: "bearer-token", regex: /[Bb]earer [A-Za-z0-9._-]{20,}/ },
 ];
 
 const PREVIEW_CHARS = 6;
