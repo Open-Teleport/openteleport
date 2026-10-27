@@ -1,0 +1,51 @@
+{
+  "jobs": [
+    {
+      "id": "3f6c1a52-8d0e-4b7a-9c11-0a2b3c4d5e01",
+      "name": "Morning digest",
+      "agentId": "ada",
+      "disabled": false,
+      "createdAtMs": 1792483200000,
+      "sessionTarget": "isolated",
+      "schedule": { "kind": "cron", "expr": "30 8 * * 1-5", "tz": "Europe/Warsaw" },
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Summarise new papers and unread mail into a five-line digest."
+      },
+      "state": { "nextRunAtMs": 1793089800000 }
+    },
+    {
+      "id": "3f6c1a52-8d0e-4b7a-9c11-0a2b3c4d5e02",
+      "name": "Inbox sweep",
+      "agentId": "ada",
+      "disabled": true,
+      "createdAtMs": 1792483260000,
+      "sessionTarget": "isolated",
+      "schedule": { "kind": "every", "everyMs": 1800000 },
+      "payload": { "kind": "agentTurn", "message": "Check the inbox and flag anything urgent." },
+      "state": {}
+    },
+    {
+      "id": "3f6c1a52-8d0e-4b7a-9c11-0a2b3c4d5e03",
+      "name": "Session wrap-up",
+      "agentId": "ada",
+      "disabled": false,
+      "createdAtMs": 1792483320000,
+      "sessionTarget": "main",
+      "schedule": { "kind": "on-exit" },
+      "payload": { "kind": "agentTurn", "message": "Write what you learned today to memory/." },
+      "state": {}
+    },
+    {
+      "id": "3f6c1a52-8d0e-4b7a-9c11-0a2b3c4d5e04",
+      "name": "Deploy queue check",
+      "agentId": "ops",
+      "disabled": false,
+      "createdAtMs": 1792483380000,
+      "sessionTarget": "isolated",
+      "schedule": { "kind": "cron", "expr": "*/15 * * * *" },
+      "payload": { "kind": "agentTurn", "message": "Check the deploy queue." },
+      "state": {}
+    }
+  ]
+}

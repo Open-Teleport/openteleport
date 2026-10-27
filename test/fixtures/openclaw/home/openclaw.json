@@ -1,0 +1,25 @@
+// OpenClaw configuration for the read adapter tests.
+// JSON5, as OpenClaw writes it: comments, unquoted keys and trailing commas.
+{
+  agents: {
+    entries: {
+      ada: {
+        name: "Research agent",
+        identity: {
+          name: "Ada",
+          theme: "Research assistant",
+          emoji: "🔎",
+          avatar: "avatars/ada.png",
+        },
+        model: {
+          primary: "anthropic/claude-opus-5-5",
+          fallbacks: ["openai/gpt-5.5"],
+        },
+        // Allowlist: skills/scratch in the workspace is not on it.
+        skills: ["web-brief"],
+      },
+      /* No identity, model or skills: everything falls back to the defaults. */
+      bare: {},
+    },
+  },
+}
