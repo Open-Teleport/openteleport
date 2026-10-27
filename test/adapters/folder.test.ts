@@ -1,13 +1,37 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, parse, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import folderAdapter, { folderAdapter as namedExport } from "../../src/adapters/folder/index.js";
 import type { Ctx, WriteOpts } from "../../src/adapters/types.js";
 import { readBundle } from "../../src/core/bundle.js";
 import type { Bundle, Routine } from "../../src/core/schema.js";
+
+// Replacing removes folders, so every removal in this suite goes through a check that it stays
+// inside the temp tree the suite builds: a regression in the adapter's guard has to fail a test,
+// not delete a real folder.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, rm: vi.fn(actual.rm) };
+});
+
+/** Whether this machine lets the suite make a symbolic link (a junction on Windows). */
+function canLink(): boolean {
+  const probe = mkdtempSync(join(tmpdir(), "openteleport-folder-probe-"));
+  try {
+    mkdirSync(join(probe, "a"));
+    symlinkSync(join(probe, "a"), join(probe, "b"), "junction");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+const LINKS_WORK = canLink();
 
 const ADA_DIR = fileURLToPath(new URL("../fixtures/jetpack/ada", import.meta.url));
 const NO_MANIFEST_DIR = fileURLToPath(new URL("../fixtures/folder/no-manifest", import.meta.url));
@@ -23,6 +47,14 @@ let ctx: Ctx;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "openteleport-folder-"));
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  vi.mocked(rm).mockImplementation(async (path, options) => {
+    const way = relative(root, String(path));
+    if (way.startsWith("..") || isAbsolute(way)) {
+      throw new Error(`test safety net: rm outside the temp tree: ${String(path)}`);
+    }
+    return actual.rm(path, options);
+  });
   const home = join(root, "home");
   const cwd = join(root, "cwd");
   await mkdir(home);
@@ -463,6 +495,12 @@ describe("folder adapter: write", () => {
   });
 
   describe("when the target already has content", () => {
+    const replaceInto = async (target: string, over: Partial<Ctx> = {}) =>
+      folderAdapter.write({ ...ctx, ...over, targetDir: target }, await ada(), {
+        ...WRITE,
+        onConflict: "replace",
+      });
+
     it("copy writes next to it as -2, then -3", async () => {
       const copy: WriteOpts = { ...WRITE, onConflict: "copy" };
       const first = await folderAdapter.write(ctx, await ada(), copy);
@@ -533,7 +571,7 @@ describe("folder adapter: write", () => {
       await put(join(target, "notes.txt"), "mine\n");
       await expect(
         folderAdapter.write({ ...ctx, targetDir: target }, await ada(), WRITE),
-      ).rejects.toThrow(/--copy/);
+      ).rejects.toThrow(/holds no jetpack\.json.*--copy/);
       expect(await readdir(target)).toEqual(["notes.txt"]);
     });
 
@@ -560,19 +598,27 @@ describe("folder adapter: write", () => {
       ]);
     });
 
-    it("replace also clears a folder that was never an export", async () => {
+    it("replace refuses a non-empty folder that is not an earlier export", async () => {
       const target = join(root, "out");
-      await put(join(target, "foreign.txt"));
-      await folderAdapter.write({ ...ctx, targetDir: target }, await ada(), {
-        ...WRITE,
-        onConflict: "replace",
-      });
-      expect(await exists(join(target, "foreign.txt"))).toBe(false);
+      await put(join(target, "foreign.txt"), "mine\n");
+      await expect(replaceInto(target)).rejects.toThrow(/holds no jetpack\.json.*--copy/);
+      expect(await readdir(target)).toEqual(["foreign.txt"]);
+      expect(await text(join(target, "foreign.txt"))).toBe("mine\n");
+    });
+
+    it("replace works on a folder under cwd, such as the default target", async () => {
+      await folderAdapter.write(ctx, await ada(), WRITE);
+      const target = join(ctx.cwd, "ada");
+      await put(join(target, "stale.txt"));
+      const result = await replaceInto(target);
+      expect(result.targetAgentId).toBe(target);
+      expect(await exists(join(target, "stale.txt"))).toBe(false);
       expect(await exists(join(target, "AGENTS.md"))).toBe(true);
     });
 
     it("replace keeps the old folder when the bundle cannot be written", async () => {
       const target = join(root, "out");
+      await folderAdapter.write({ ...ctx, targetDir: target }, await ada(), WRITE);
       await put(join(target, "precious.txt"), "keep me\n");
       const invalid = withName(await ada(), "Ada");
       invalid.manifest = { ...invalid.manifest, id: "" };
@@ -582,21 +628,63 @@ describe("folder adapter: write", () => {
           ...WRITE,
           onConflict: "replace",
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/manifest is invalid: id:/);
       expect(await text(join(target, "precious.txt"))).toBe("keep me\n");
+      expect(await exists(join(target, "jetpack.json"))).toBe(true);
     });
 
-    it("replace will not remove the home folder or a folder above it", async () => {
-      await put(join(ctx.home, "precious.txt"), "keep me\n");
-      for (const target of [ctx.home, root]) {
-        await expect(
-          folderAdapter.write({ ...ctx, targetDir: target }, await ada(), {
-            ...WRITE,
-            onConflict: "replace",
-          }),
-        ).rejects.toThrow(/home/i);
-      }
-      expect(await text(join(ctx.home, "precious.txt"))).toBe("keep me\n");
+    describe("replace refuses to remove", () => {
+      it("the home folder", async () => {
+        await put(join(ctx.home, "precious.txt"), "keep me\n");
+        await expect(replaceInto(ctx.home)).rejects.toThrow(/home folder/);
+        expect(await text(join(ctx.home, "precious.txt"))).toBe("keep me\n");
+      });
+
+      it("a folder above the home folder", async () => {
+        await put(join(ctx.home, "precious.txt"), "keep me\n");
+        await expect(replaceInto(root)).rejects.toThrow(/home folder/);
+        expect(await text(join(ctx.home, "precious.txt"))).toBe("keep me\n");
+      });
+
+      it("the working folder, even when it looks like an export", async () => {
+        await put(join(ctx.cwd, "precious.txt"), "keep me\n");
+        await put(join(ctx.cwd, "jetpack.json"), "{}\n");
+        await expect(replaceInto(ctx.cwd)).rejects.toThrow(/working folder/);
+        expect(await text(join(ctx.cwd, "precious.txt"))).toBe("keep me\n");
+      });
+
+      it("a folder above the working folder", async () => {
+        const project = join(root, "work", "project");
+        await mkdir(project, { recursive: true });
+        await put(join(root, "work", "precious.txt"), "keep me\n");
+        await expect(replaceInto(join(root, "work"), { cwd: project })).rejects.toThrow(
+          /working folder/,
+        );
+        expect(await text(join(root, "work", "precious.txt"))).toBe("keep me\n");
+      });
+
+      it("a filesystem root", async () => {
+        const top = parse(tmpdir()).root;
+        // The suite's rm check turns a missing guard into a failure here, not a deleted drive.
+        await expect(replaceInto(top)).rejects.toThrow(/filesystem root/);
+        expect(vi.mocked(rm).mock.calls.map(([path]) => String(path))).not.toContain(top);
+      });
+
+      it.skipIf(!LINKS_WORK)("a link that leads to the home folder", async () => {
+        await put(join(ctx.home, "precious.txt"), "keep me\n");
+        const alias = join(root, "home-alias");
+        await symlink(ctx.home, alias, "junction");
+        await expect(replaceInto(alias)).rejects.toThrow(/home folder/);
+        expect(await text(join(ctx.home, "precious.txt"))).toBe("keep me\n");
+      });
+
+      it.skipIf(!LINKS_WORK)("a link that leads to the working folder", async () => {
+        await put(join(ctx.cwd, "precious.txt"), "keep me\n");
+        const alias = join(root, "cwd-alias");
+        await symlink(ctx.cwd, alias, "junction");
+        await expect(replaceInto(alias)).rejects.toThrow(/working folder/);
+        expect(await text(join(ctx.cwd, "precious.txt"))).toBe("keep me\n");
+      });
     });
 
     it("update and replace refuse a target that is a file, copy goes around it", async () => {

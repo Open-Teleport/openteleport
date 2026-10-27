@@ -1,9 +1,9 @@
 // The universal adapter: an agent that lives in a plain folder, in the same layout a `.jetpack`
 // archive uses (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/`, ...). It reads any folder with an
 // `AGENTS.md`, with or without a `jetpack.json`, and writes the full layout, `jetpack.json` too.
-import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
 import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle } from "../../core/schema.js";
@@ -165,6 +165,41 @@ function isWithin(ancestor: string, path: string): boolean {
   return way === "" || (way !== ".." && !way.startsWith(`..${sep}`) && !isAbsolute(way));
 }
 
+/**
+ * `path` with every symbolic link and junction resolved. A part that does not exist yet is
+ * kept as written, below the deepest ancestor that does exist.
+ */
+async function canonical(path: string): Promise<string> {
+  const absolute = resolve(path);
+  try {
+    return await realpath(absolute);
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+    const parent = dirname(absolute);
+    if (parent === absolute) return absolute;
+    return join(await canonical(parent), basename(absolute));
+  }
+}
+
+/**
+ * Throws unless `wanted` may be removed whole: it must not be a filesystem root, the home
+ * folder or a folder above it, or the working folder or a folder above it. The comparison is
+ * made on real paths, so a link or junction that leads to such a folder is caught as well.
+ */
+async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
+  const [target, home, cwd] = await Promise.all([
+    canonical(wanted),
+    canonical(resolve(ctx.cwd, ctx.home)),
+    canonical(ctx.cwd),
+  ]);
+  const refuse = (why: string): never => {
+    throw new Error(`Refusing to replace ${wanted}: ${why}. Delete it yourself if you mean it.`);
+  };
+  if (parse(target).root === target) refuse("it is a filesystem root");
+  if (isWithin(target, home)) refuse("it is the home folder or contains it");
+  if (isWithin(target, cwd)) refuse("it is the working folder or contains it");
+}
+
 /** Free means nothing is there, or there is an empty folder to write into. */
 async function isFree(path: string): Promise<boolean> {
   const info = await statOrUndefined(path);
@@ -194,22 +229,20 @@ async function claimTarget(
   const info = await statOrUndefined(wanted);
   if (!info?.isDirectory()) throw new Error(`${wanted} exists and is not a folder`);
 
-  if (onConflict === "update") {
-    if (!(await namesIn(wanted)).includes(MANIFEST_FILE)) {
-      throw new Error(
-        `${wanted} is not empty and holds no ${MANIFEST_FILE}, so it is not an agent folder ` +
-          "OpenTeleport wrote. Use --copy to write next to it, or --replace to overwrite it.",
-      );
-    }
-    return wanted;
+  // Replacing removes the folder whole, so `replace` needs the same proof as `update` that the
+  // folder is an agent OpenTeleport wrote, and more: a folder that holds our files may still be
+  // the user's home or working folder.
+  if (onConflict === "replace") await assertRemovable(ctx, wanted);
+  if (!(await namesIn(wanted)).includes(MANIFEST_FILE)) {
+    throw new Error(
+      `${wanted} is not empty and holds no ${MANIFEST_FILE}, so it is not an agent folder ` +
+        "OpenTeleport wrote. Delete it yourself, or use --copy to write next to it.",
+    );
   }
-
-  // replace
-  if (isWithin(wanted, ctx.home)) {
-    throw new Error(`Refusing to replace ${wanted}: it is the home folder or contains it`);
+  if (onConflict === "replace") {
+    bundleToEntries(bundle); // throws for a Bundle that cannot be written, before anything is lost
+    await rm(wanted, { recursive: true, force: true });
   }
-  bundleToEntries(bundle); // throws for a Bundle that cannot be written, before anything is lost
-  await rm(wanted, { recursive: true, force: true });
   return wanted;
 }
 
