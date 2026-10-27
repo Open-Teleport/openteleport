@@ -222,9 +222,11 @@ describe("scanSecrets: false positives", () => {
 });
 
 describe("scanSecrets: tokens glued to other text", () => {
-  // A gate before export prefers a false positive to a missed secret, so no pattern needs a word
-  // boundary: raw JSON, logs and shell scripts put escapes and identifiers right before a token.
-  const PREFIXES = ["\\n", "\\t", "\\u0020", "%3D", "KEY_"];
+  // A gate before export prefers a false positive to a missed secret, so a prefix only has to be
+  // free of a letter or digit right in front of it: raw JSON, logs and shell scripts put escapes,
+  // punctuation and identifier parts like `KEY_` right before a token.
+  const PREFIXES = ["\\n", "\\t", "\\r", "\\b", "\\f", "\\u0020", "%3D", "%0A", "KEY_"];
+  const PUNCTUATION = [":", "=", " ", "-", "_", "/", "(", "'", '\\"', "\t"];
   const inConfig = (json: string): SecretFinding[] =>
     scanSecrets(bundleWith({ files: [file("config.json", json)] }));
 
@@ -236,12 +238,26 @@ describe("scanSecrets: tokens glued to other text", () => {
     }
   });
 
-  it("finds an AWS key inside an identifier, before or after it", () => {
-    for (const text of [`KEY_${AWS_KEY}`, `id${AWS_KEY}`, `${AWS_KEY}_ID`, `${AWS_KEY}abc`]) {
+  it.each(PUNCTUATION)("finds every kind right after %j", (prefix) => {
+    for (const { name, kind, token, preview } of SAMPLES) {
+      expect(inConfig(`key${prefix}${token}`), `${name} after ${prefix}`).toStrictEqual([
+        { path: "files/config.json", line: 1, kind, preview },
+      ]);
+    }
+  });
+
+  it("finds an AWS key behind an identifier part and before a suffix", () => {
+    for (const text of [`KEY_${AWS_KEY}`, `${AWS_KEY}_ID`, `${AWS_KEY}abc`, `${AWS_KEY}-1`]) {
       expect(scanSecrets(bundleWith({ instructions: text })), text).toStrictEqual([
         { path: "AGENTS.md", line: 1, kind: "aws-access-key", preview: "AKIAIO…" },
       ]);
     }
+  });
+
+  it("finds an sk- key behind a key name and a colon", () => {
+    expect(scanSecrets(bundleWith({ instructions: `key:${OPENAI_KEY}` }))).toStrictEqual([
+      { path: "AGENTS.md", line: 1, kind: "openai-api-key", preview: "sk-pro…" },
+    ]);
   });
 
   it("reports a JWT after a JSON newline escape from its first segment", () => {
@@ -259,10 +275,37 @@ describe("scanSecrets: tokens glued to other text", () => {
     ]);
   });
 
-  it("prefers a false positive: a key that ends a longer word is reported", () => {
-    expect(scanSecrets(bundleWith({ instructions: `See risk-${"a".repeat(30)}.` }))).toStrictEqual([
-      { path: "AGENTS.md", line: 1, kind: "openai-api-key", preview: "sk-aaa…" },
+  it("ignores kebab-case words whose tail looks like a key prefix", () => {
+    for (const text of [
+      "task-management-dashboard-component",
+      "risk-assessment-framework-document",
+      `risk-${"a".repeat(30)}`,
+      `ask-${"b".repeat(30)}`,
+    ]) {
+      expect(scanSecrets(bundleWith({ instructions: `See ${text}.` })), text).toStrictEqual([]);
+    }
+  });
+
+  it("reports a key body that contains sk- only once, as the Anthropic key", () => {
+    const key = "sk-ant-" + "api03-AAAAsk-" + "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+    expect(scanSecrets(bundleWith({ instructions: `key ${key}` }))).toStrictEqual([
+      { path: "AGENTS.md", line: 1, kind: "anthropic-api-key", preview: "sk-ant…" },
     ]);
+  });
+
+  // The one accepted miss: a prefix glued directly to a letter or digit is read as part of a
+  // longer word (`risk-...`), so `keysk-...` is not reported. Real credentials sit behind
+  // punctuation, an escape or an `_`/`-`, which the tests above cover.
+  it.each(["key", "k1", "X"])("does not report a prefix glued to %s", (glue) => {
+    const tokens = [OPENAI_KEY, ANTHROPIC_KEY, GITHUB_TOKEN, GITHUB_PAT, AWS_KEY];
+    const slack = "xoxb-" + "123456789012-1234567890123-abcdefghijklmnopqrstuvwx";
+    const google = "AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+
+    for (const token of [...tokens, slack, google]) {
+      const findings = scanSecrets(bundleWith({ instructions: `${glue}${token}` }));
+      expect(findings, `${glue} + ${token.slice(0, 7)}`).toStrictEqual([]);
+    }
   });
 });
 

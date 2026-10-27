@@ -12,32 +12,46 @@ export type SecretFinding = {
 
 export type SecretPattern = { kind: string; regex: RegExp };
 
-// This is the gate before a bundle leaves the machine, so it prefers a false positive to a
-// missed secret: no pattern is anchored at the start. A token glued to a JSON escape (a backslash
-// and `n`), to `%3D` or to an identifier (`KEY_sk-...`) is still found, at the price of the odd
-// hit such as `risk-` followed by 20 key characters. None of the regexes is global or sticky, so
-// they keep no state between calls, and none backtracks over more than the run of token
-// characters it is in.
+// This is the gate before a bundle leaves the machine, so it prefers a false positive to a missed
+// secret, but not at any price: export stops on any finding, and ordinary kebab-case prose such as
+// `task-management-dashboard-component` must not stop it.
 //
-// The JWT pattern needs care for that last point. Its first segment may not run into another
-// `eyJ`, so a long run of token characters is read once, not once per `eyJ` inside it. (A header
-// that itself contains `eyJ` is matched from that inner `eyJ`: the finding is still reported.)
+// The six patterns that start with a fixed prefix therefore begin with one shared boundary. It
+// rejects a prefix glued to a letter or digit (`task-...`, `risk-...`) and allows everything else
+// that can sit in front of a token in raw text: `_` and `-` (`KEY_sk-...`), `=`, `:`, quotes,
+// whitespace, a JSON escape (a backslash and one of `n r t b f`, or `\u` and four hex digits) and
+// a percent escape (`%3D`). A token glued directly to a letter or digit (`keysk-...`) is the one
+// accepted miss.
+//
+// None of the regexes is global or sticky, so they keep no state between calls, and none
+// backtracks over more than the run of token characters it is in. The JWT pattern needs care for
+// that: its first segment may not run into another `eyJ`, so a long run of token characters is
+// read once, not once per `eyJ` inside it. (A header that itself contains `eyJ` is matched from
+// that inner `eyJ`: the finding is still reported.)
+const TOKEN_BOUNDARY =
+  /(?:(?<![A-Za-z0-9])|(?<=\\[nrtbf])|(?<=\\u[0-9A-Fa-f]{4})|(?<=%[0-9A-Fa-f]{2}))/.source;
+
+const afterBoundary = (pattern: RegExp): RegExp => new RegExp(TOKEN_BOUNDARY + pattern.source);
 
 /**
  * What counts as a credential, in the order findings are reported. A line that matches several
  * patterns reports each of them once. `sk-` takes 20 or more characters from the key alphabet;
- * the Anthropic prefix `sk-ant-` is told apart from the generic one by lookahead, so one key
- * never reports twice. A private key is any PEM `... PRIVATE KEY` header (`RSA`, `EC`, `DSA`,
+ * the Anthropic prefix `sk-ant-` is told apart from the generic one by lookahead, and the
+ * boundary keeps an `sk-` inside an Anthropic key's body from reporting again, so one key never
+ * reports twice. A private key is any PEM `... PRIVATE KEY` header (`RSA`, `EC`, `DSA`,
  * `OPENSSH`, `ENCRYPTED`, `PGP ... BLOCK`). The `Bearer` scheme may start with either case.
  */
 export const SECRET_PATTERNS: readonly SecretPattern[] = [
-  { kind: "openai-api-key", regex: /sk-(?!ant-)[A-Za-z0-9_-]{20,}/ },
-  { kind: "anthropic-api-key", regex: /sk-(?=ant-)[A-Za-z0-9_-]{20,}/ },
-  { kind: "github-token", regex: /(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/ },
-  { kind: "slack-token", regex: /xox[bp]-[A-Za-z0-9-]{10,}/ },
-  { kind: "aws-access-key", regex: /AKIA[0-9A-Z]{16}(?![0-9A-Z])/ },
+  { kind: "openai-api-key", regex: afterBoundary(/sk-(?!ant-)[A-Za-z0-9_-]{20,}/) },
+  { kind: "anthropic-api-key", regex: afterBoundary(/sk-(?=ant-)[A-Za-z0-9_-]{20,}/) },
+  {
+    kind: "github-token",
+    regex: afterBoundary(/(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/),
+  },
+  { kind: "slack-token", regex: afterBoundary(/xox[bp]-[A-Za-z0-9-]{10,}/) },
+  { kind: "aws-access-key", regex: afterBoundary(/AKIA[0-9A-Z]{16}(?![0-9A-Z])/) },
   { kind: "private-key", regex: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
-  { kind: "google-api-key", regex: /AIza[0-9A-Za-z_-]{35}/ },
+  { kind: "google-api-key", regex: afterBoundary(/AIza[0-9A-Za-z_-]{35}/) },
   {
     kind: "jwt",
     regex: /eyJ(?:(?!eyJ)[A-Za-z0-9_-])+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,
