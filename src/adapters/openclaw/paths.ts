@@ -43,16 +43,20 @@ function expandHome(path: string, home: string): string {
 
 /**
  * Where an OpenClaw install keeps its state. The state directory is `sourceDir`, else
- * `targetDir`, else `OPENCLAW_STATE_DIR`, else `<home>/.openclaw`; the config file is
- * `OPENCLAW_CONFIG_PATH`, else `<state dir>/openclaw.json`. Every path has `~` expanded to
+ * `targetDir`, else `OPENCLAW_STATE_DIR`, else `<home>/.openclaw`. A directory passed in
+ * explicitly (`sourceDir` or `targetDir`) holds its own config, `<dir>/openclaw.json`; only
+ * without one does `OPENCLAW_CONFIG_PATH` name the config file. Every path has `~` expanded to
  * `ctx.home` and is made absolute against `ctx.cwd`.
  */
 export function openclawPaths(ctx: Ctx): OpenClawPaths {
   const absolute = (path: string): string => resolve(ctx.cwd, expandHome(path, ctx.home));
+  const explicitDir = ctx.sourceDir ?? ctx.targetDir;
   const stateDir = absolute(
-    ctx.sourceDir ?? ctx.targetDir ?? ctx.env.OPENCLAW_STATE_DIR ?? join(ctx.home, ".openclaw"),
+    explicitDir ?? ctx.env.OPENCLAW_STATE_DIR ?? join(ctx.home, ".openclaw"),
   );
-  const configFile = absolute(ctx.env.OPENCLAW_CONFIG_PATH ?? join(stateDir, "openclaw.json"));
+  const configOverride = explicitDir === undefined ? ctx.env.OPENCLAW_CONFIG_PATH : undefined;
+  const configFile =
+    configOverride === undefined ? join(stateDir, "openclaw.json") : absolute(configOverride);
 
   /**
    * The entry's own `workspace`; else `<agents.defaults.workspace>/<id>`; else

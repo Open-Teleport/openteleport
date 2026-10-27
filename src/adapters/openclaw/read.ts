@@ -359,7 +359,8 @@ async function readSkills(
 /** The zone a cron job without one runs in: the Gateway's, assumed to be this machine's. */
 const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-function toRoutine(job: JobRow): { routine: Routine } | { warning: string } {
+/** A routine with, optionally, a note about it; or the warning that says why the job is skipped. */
+function toRoutine(job: JobRow): { routine: Routine; note?: string } | { warning: string } {
   const skipped = (reason: string) => ({ warning: `automation '${job.name}' skipped: ${reason}` });
   const kind = isRecord(job.schedule) ? label(job.schedule.kind) : undefined;
   if (kind === undefined) return skipped("it has no schedule kind");
@@ -370,7 +371,8 @@ function toRoutine(job: JobRow): { routine: Routine } | { warning: string } {
   }
   if (job.message === undefined) return skipped("no message to run");
   // An interval has no zone, and a one-off time is already in UTC.
-  const timezone = converted.timezone ?? (kind === "cron" ? hostTimeZone() : "UTC");
+  const assumed = converted.timezone === undefined && kind === "cron" ? hostTimeZone() : undefined;
+  const timezone = converted.timezone ?? assumed ?? "UTC";
   const parsed = RoutineSchema.safeParse({
     name: job.name,
     instruction: job.message,
@@ -384,7 +386,11 @@ function toRoutine(job: JobRow): { routine: Routine } | { warning: string } {
       issue ? `${issue.path.join(".")}: ${issue.message}` : "it is not a valid routine",
     );
   }
-  return { routine: parsed.data };
+  if (assumed === undefined) return { routine: parsed.data };
+  return {
+    routine: parsed.data,
+    note: `automation '${job.name}' has no timezone; assuming ${assumed}`,
+  };
 }
 
 /** The agent's jobs as routines. Without the CLI the agent is still exported, without routines. */
@@ -404,8 +410,12 @@ async function readRoutines(
   for (const job of jobs) {
     if ((job.agentId ?? DEFAULT_AGENT_ID) !== agentId) continue;
     const result = toRoutine(job);
-    if ("warning" in result) warnings.push(result.warning);
-    else routines.push(result.routine);
+    if ("warning" in result) {
+      warnings.push(result.warning);
+      continue;
+    }
+    routines.push(result.routine);
+    if (result.note !== undefined) warnings.push(result.note);
   }
   return { routines, warnings };
 }

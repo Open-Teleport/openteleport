@@ -20,8 +20,9 @@
 //   `automation.id`.
 // - Output may start with log lines; the JSON document is the rest, from the first line that
 //   opens an array or an object.
-// - `--json` asks every command for JSON output. If `config set` instead reads it as "parse the
-//   value as JSON5", `configSet` needs a value written as JSON5.
+// - `--json` asks a command for JSON output. `config set` is the exception: there `--json` may
+//   mean "parse the value as JSON5", so `configSet` runs without it and passes the value as
+//   written.
 // - A command this OpenClaw does not have fails with "unknown command" on stderr.
 import type { Ctx } from "../types.js";
 
@@ -117,8 +118,8 @@ function toJobRow(raw: unknown, index: number): JobRow | { skipped: string } {
 const UNKNOWN_COMMAND = /unknown (?:sub)?command|no such command/i;
 
 /**
- * Runs `openclaw` for one install. Every command gets `--json` and runs with
- * `OPENCLAW_STATE_DIR` set to that install's state directory, on top of `ctx.env`.
+ * Runs `openclaw` for one install. Every command runs with `OPENCLAW_STATE_DIR` set to that
+ * install's state directory, on top of `ctx.env`, and gets `--json` unless noted otherwise.
  */
 export class OpenClawCli {
   private readonly ctx: Ctx;
@@ -129,8 +130,9 @@ export class OpenClawCli {
     this.stateDir = stateDir;
   }
 
-  private async run(args: readonly string[]): Promise<string> {
-    const { stdout } = await this.ctx.exec("openclaw", [...args, "--json"], { env: this.env() });
+  private async run(args: readonly string[], json = true): Promise<string> {
+    const argv = json ? [...args, "--json"] : [...args];
+    const { stdout } = await this.ctx.exec("openclaw", argv, { env: this.env() });
     return stdout;
   }
 
@@ -213,10 +215,13 @@ export class OpenClawCli {
     await this.run(["automations", "disable", id]);
   }
 
-  /** Sets a config value. `false` when this OpenClaw has no such command; other failures throw. */
+  /**
+   * Sets a config value. `false` when this OpenClaw has no such command; other failures throw.
+   * Runs without `--json`, which `config set` may read as "parse the value as JSON5".
+   */
   async configSet(path: string, value: string): Promise<boolean> {
     try {
-      await this.run(["config", "set", path, value]);
+      await this.run(["config", "set", path, value], false);
       return true;
     } catch (error) {
       const { message, stderr } = error as { message?: unknown; stderr?: unknown };
@@ -227,7 +232,7 @@ export class OpenClawCli {
 
   /**
    * The version `openclaw --version` prints, or `undefined` when OpenClaw is not installed or the
-   * command fails. The one command run without `--json`.
+   * command fails. Runs without `--json`.
    */
   async version(): Promise<string | undefined> {
     try {

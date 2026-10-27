@@ -236,11 +236,24 @@ describe("openclawPaths", () => {
     expect(openclawPaths(base({ env: { OPENCLAW_STATE_DIR: "~" } })).stateDir).toBe(home);
   });
 
-  it("reads the config from OPENCLAW_CONFIG_PATH, else from <state dir>/openclaw.json", () => {
+  it("reads the config from <state dir>/openclaw.json", () => {
     expect(openclawPaths(ctx).configFile).toBe(join(stateDir, "openclaw.json"));
+    expect(openclawPaths(base({})).configFile).toBe(join(home, ".openclaw", "openclaw.json"));
+  });
+
+  it("takes OPENCLAW_CONFIG_PATH only when no directory is passed in", () => {
     const custom = join(scratch, "elsewhere", "claw.json5");
-    expect(openclawPaths(makeCtx({ env: { OPENCLAW_CONFIG_PATH: custom } })).configFile).toBe(
-      custom,
+    const env = { OPENCLAW_CONFIG_PATH: custom, OPENCLAW_STATE_DIR: join(scratch, "env-state") };
+    expect(openclawPaths(base({ env })).configFile).toBe(custom);
+    expect(openclawPaths(base({ env: { OPENCLAW_CONFIG_PATH: "~/c.json" } })).configFile).toBe(
+      join(home, "c.json"),
+    );
+    expect(openclawPaths(base({ sourceDir: stateDir, env })).configFile).toBe(
+      join(stateDir, "openclaw.json"),
+    );
+    const target = join(scratch, "target");
+    expect(openclawPaths(base({ targetDir: target, env })).configFile).toBe(
+      join(target, "openclaw.json"),
     );
   });
 
@@ -311,7 +324,7 @@ describe("OpenClawCli", () => {
     return new OpenClawCli(makeCtx({ env }, reply), stateDir);
   }
 
-  it("runs every command with --json and OPENCLAW_STATE_DIR, keeping the other env", async () => {
+  it("runs commands with OPENCLAW_STATE_DIR, keeping the other env, and --json", async () => {
     const cli = cliWith(
       (args) => {
         if (args[0] === "automations" && args[1] === "add") return '{"id":"job-9"}';
@@ -343,7 +356,8 @@ describe("OpenClawCli", () => {
       "openclaw agents set-identity --agent ada --name Ada --json",
       "openclaw automations add --name Morning digest --every 30m --json",
       "openclaw automations disable job-9 --json",
-      "openclaw config set agents.entries.ada.model anthropic/claude-opus-5-5 --json",
+      // `config set` alone runs without --json, which there may mean "parse the value as JSON5".
+      "openclaw config set agents.entries.ada.model anthropic/claude-opus-5-5",
     ]);
     for (const call of calls) {
       expect(call.env).toEqual({ PATH: "/usr/bin", OPENCLAW_STATE_DIR: stateDir });
@@ -553,6 +567,19 @@ describe("readOpenClawAgent", () => {
     const { bundle } = await readOpenClawAgent(makeCtx({ env }), "ada");
     expect(bundle.manifest.name).toBe("Ada");
     expect(calls.map((call) => call.env.OPENCLAW_STATE_DIR)).toEqual([stateDir]);
+  });
+
+  it("reads <sourceDir>/openclaw.json even when OPENCLAW_CONFIG_PATH names another", async () => {
+    const other = join(scratch, "other.json5");
+    await writeFile(other, '{ agents: { entries: { ada: { name: "Wrong", model: "x/y" } } } }');
+    const { bundle } = await readOpenClawAgent(
+      makeCtx({ env: { OPENCLAW_CONFIG_PATH: other } }),
+      "ada",
+    );
+    expect(bundle).toStrictEqual(await expectedAda(stateDir));
+    expect(await openclawAdapter.list(makeCtx({ env: { OPENCLAW_CONFIG_PATH: other } }))).toEqual(
+      await openclawAdapter.list(ctx),
+    );
   });
 
   it("throws for an agent without a workspace", async () => {
@@ -877,6 +904,7 @@ describe("readOpenClawAgent", () => {
     });
 
     it("reads each supported schedule kind and names every job it skips", async () => {
+      const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const { bundle, warnings } = await readJobs([
         job("Cron, no zone", { kind: "cron", expr: "0 9 * * *" }),
         job("Once", { kind: "at", at: "2026-11-01T10:00:00+01:00" }),
@@ -898,7 +926,7 @@ describe("readOpenClawAgent", () => {
           name: "Cron, no zone",
           instruction: "Run Cron, no zone.",
           enabled: true,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          timezone: hostZone,
           schedule: { kind: "cron", expression: "0 9 * * *" },
         },
         {
@@ -918,11 +946,33 @@ describe("readOpenClawAgent", () => {
       ]);
       expect(warnings).toEqual([
         CAPABILITIES_WARNING,
+        `automation 'Cron, no zone' has no timezone; assuming ${hostZone}`,
         "automation 'Odd interval' skipped: its 'every' schedule cannot be expressed as a routine",
         "automation 'Streamed' skipped: unsupported schedule kind 'stream'",
         "automation 'No schedule' skipped: it has no schedule kind",
         "automation 'Bad zone' skipped: timezone: Not an IANA time zone",
         "automation 'Silent' skipped: no message to run",
+      ]);
+    });
+
+    it("assumes this machine's zone for the fixture's cron job without tz", async () => {
+      await writeTree(stateDir, { "workspace-ops/AGENTS.md": "Watch the deploys.\n" });
+      const { bundle, warnings } = await readOpenClawAgent(ctx, "ops");
+      const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      expect(bundle.routines).toStrictEqual([
+        {
+          name: "Deploy queue check",
+          instruction: "Check the deploy queue.",
+          enabled: true,
+          timezone: hostZone,
+          schedule: { kind: "cron", expression: "*/15 * * * *" },
+        },
+      ]);
+      expect(warnings).toEqual([
+        "SOUL.md not found",
+        "IDENTITY.md not found",
+        CAPABILITIES_WARNING,
+        `automation 'Deploy queue check' has no timezone; assuming ${hostZone}`,
       ]);
     });
 
@@ -1073,12 +1123,14 @@ describe("openclawAdapter", () => {
       });
     });
 
-    it("looks for the config at OPENCLAW_CONFIG_PATH", async () => {
+    it("looks for the config at OPENCLAW_CONFIG_PATH when no directory is passed in", async () => {
       const elsewhere = join(scratch, "elsewhere.json5");
-      const env = { OPENCLAW_CONFIG_PATH: elsewhere };
-      expect((await openclawAdapter.detect(makeCtx({ env }))).found).toBe(false);
-      await writeFile(elsewhere, "{}");
+      const env = { OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: elsewhere };
+      const fromEnv = (): Ctx => makeCtx({ sourceDir: undefined, env });
+      expect((await openclawAdapter.detect(fromEnv())).found).toBe(false);
       expect((await openclawAdapter.detect(makeCtx({ env }))).found).toBe(true);
+      await writeFile(elsewhere, "{}");
+      expect((await openclawAdapter.detect(fromEnv())).found).toBe(true);
     });
   });
 
