@@ -100,7 +100,7 @@ describe("write", () => {
     const parsed = parseAgentFile(await readFile(file, "utf8"));
     expect(parsed).toEqual({
       name: "ada",
-      description: "Research assistant",
+      description: "Reads papers and web pages so you do not have to.",
       model: "claude-opus-5-5",
       body: lf(mergeInstructions(ada.persona, ada.instructions)),
       ignored: [],
@@ -354,6 +354,43 @@ describe("write", () => {
       field: "capabilities",
       detail: "no Claude Code tools list; the agent gets every tool the session allows",
     });
+  });
+
+  it("keeps all 300 characters of a Claude Code description on a move to another project", async () => {
+    const full = `Use this agent when ${"a long review is needed ".repeat(12)}`.slice(0, 299) + ".";
+    expect(full).toHaveLength(300);
+    await writeFile(
+      join(project, ".claude", "agents", "long.md"),
+      `---\nname: long\ndescription: ${full}\n---\nReview it.\n`,
+    );
+    const source = await claudeCodeAdapter.read({ ...ctx, sourceDir: project }, "long");
+    const target = join(root, "target");
+    await mkdir(target);
+
+    await claudeCodeAdapter.write({ ...ctx, targetDir: target }, source.bundle, COPY);
+
+    const parsed = parseAgentFile(await readFile(agentFile(target, "long"), "utf8"));
+    expect(parsed.description).toBe(full);
+    expect(parsed.description).toHaveLength(300);
+  });
+
+  it("prefers the description to the title, and the title to the instructions", async () => {
+    const both = bundleOf({
+      manifest: { title: "Short title", description: "The whole description, never cut." },
+      instructions: "From the instructions.\n",
+    });
+    const titleOnly = bundleOf({
+      manifest: { name: "Bea", title: "Short title" },
+      instructions: "From the instructions.\n",
+    });
+
+    await claudeCodeAdapter.write(ctx, both, COPY);
+    await claudeCodeAdapter.write(ctx, titleOnly, COPY);
+
+    const description = async (stem: string) =>
+      parseAgentFile(await readFile(agentFile(project, stem), "utf8")).description;
+    expect(await description("ada")).toBe("The whole description, never cut.");
+    expect(await description("bea")).toBe("Short title");
   });
 
   it("describes an agent without a title by the first sentence of its instructions", async () => {

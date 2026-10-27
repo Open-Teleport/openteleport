@@ -103,9 +103,12 @@ async function writeAgentFile(
       detail: "no Claude Code tools list; the agent gets every tool the session allows",
     });
   }
-  const title = manifest.title?.trim();
+  // The full description, never shortened; then the title; then the opening of the instructions.
   const description =
-    title || truncate(firstSentence(bundle.instructions), MAX_DESCRIPTION_CHARS) || manifest.name;
+    manifest.description?.trim() ||
+    manifest.title?.trim() ||
+    truncate(firstSentence(bundle.instructions), MAX_DESCRIPTION_CHARS) ||
+    manifest.name;
 
   const path = join(dir, `${slug}.md`);
   await mkdir(dir, { recursive: true });
