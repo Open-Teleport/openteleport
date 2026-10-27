@@ -87,11 +87,15 @@ async function writeAgentFile(
 ): Promise<{ slug: string; path: string }> {
   const { manifest } = bundle;
   const base = agentSlug(manifest.name);
-  const slug = opts.onConflict === "copy" ? await freeName(dir, base, ".md") : base;
+  let slug = opts.onConflict === "copy" ? await freeName(dir, base, ".md") : base;
   if (slug !== base) {
     items.warnings.push(
       `an agent named ${base} already exists in Claude Code; this one was written as ${slug}`,
     );
+  } else if ((await lstatOf(join(dir, `${base}.md`)))?.isSymbolicLink()) {
+    // Overwriting would write wherever the link points, so the agent gets a name of its own.
+    slug = await freeName(dir, base, ".md");
+    items.warnings.push(`agent file '${base}.md' is a symlink; written as '${slug}.md'`);
   }
 
   const model = manifest.models.find((pref) => pref.provider === "anthropic")?.model;
@@ -160,11 +164,44 @@ async function holdsSkill(dir: string, skill: Skill): Promise<boolean> {
 }
 
 /**
- * Skills go to `<project>/.claude/skills/<name>/`, where the whole project shares them. In every
- * conflict mode a folder that already holds the same files and bytes is reused as it is. Under
- * `replace` a real folder that differs is removed and written again; otherwise the skill goes to
- * the first free `<name>-N`, with a warning. A link in the place of the folder is never followed
- * or removed, so it always counts as different.
+ * The folder name to write `skill` under, or `undefined` to reuse a folder that already holds
+ * it. `<name>`, then `<name>-2`, `<name>-3`... are tried in order: the first real folder with the
+ * same files and bytes is reused. Under `replace` a real `<name>` folder that differs is removed
+ * and its name returned. Otherwise the first free name is returned, with a warning when it is
+ * not `<name>`. A link (symbolic link or junction) is never followed or removed: it counts as a
+ * taken name that differs.
+ */
+async function placeSkill(
+  dir: string,
+  skill: Skill,
+  opts: WriteOpts,
+  items: Items,
+): Promise<string | undefined> {
+  for (let n = 1; ; n += 1) {
+    const name = n === 1 ? skill.name : `${skill.name}-${n}`;
+    const path = join(dir, name);
+    const existing = await lstatOf(path);
+    if (existing === undefined) {
+      if (name !== skill.name) {
+        items.warnings.push(
+          `skill '${skill.name}' already exists with different content; written as '${name}'`,
+        );
+      }
+      return name;
+    }
+    // lstat: a symbolic link or junction is never a directory here.
+    if (!existing.isDirectory()) continue;
+    if (await holdsSkill(path, skill)) return undefined;
+    if (n === 1 && opts.onConflict === "replace") {
+      await rm(path, { recursive: true, force: true });
+      return name;
+    }
+  }
+}
+
+/**
+ * Skills go to `<project>/.claude/skills/<name>/`, where the whole project shares them, so one
+ * that is already there is reused rather than written again (see `placeSkill`).
  */
 async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: Items) {
   for (const skill of bundle.skills) {
@@ -175,22 +212,8 @@ async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: 
       });
       continue;
     }
-    const target = join(dir, skill.name);
-    const existing = await lstatOf(target);
-    let name = skill.name;
-    if (existing !== undefined) {
-      // lstat: a symbolic link or junction is never a directory here.
-      const realDir = existing.isDirectory();
-      if (realDir && (await holdsSkill(target, skill))) continue;
-      if (realDir && opts.onConflict === "replace") {
-        await rm(target, { recursive: true, force: true });
-      } else {
-        name = await freeName(dir, skill.name, "");
-        items.warnings.push(
-          `skill '${skill.name}' already exists with different content; written as '${name}'`,
-        );
-      }
-    }
+    const name = await placeSkill(dir, skill, opts, items);
+    if (name === undefined) continue;
     for (const file of skill.files) {
       const path = join(dir, name, ...file.path.split("/"));
       await mkdir(dirname(path), { recursive: true });
@@ -218,12 +241,24 @@ async function readText(path: string): Promise<string> {
   }
 }
 
+/** A skipped item for a memory file that is a link: it is never written through. */
+const linkedMemory = (field: "memory.facts" | "memory.notes", path: string): Item => ({
+  field,
+  detail: `${path} is a symlink; not written`,
+});
+
 /**
  * Appends the facts `MEMORY.md` does not hold yet as `- fact` lines, in the file's own line
- * endings and after a blank line when the file ends in prose.
+ * endings and after a blank line when the file ends in prose. A linked `MEMORY.md` is left
+ * alone and reported.
  */
-async function appendFacts(memoryDir: string, facts: readonly string[]): Promise<void> {
+async function appendFacts(memoryDir: string, facts: readonly string[], items: Items) {
+  if (facts.length === 0) return;
   const path = join(memoryDir, MEMORY_FILE);
+  if ((await lstatOf(path))?.isSymbolicLink()) {
+    items.skipped.push(linkedMemory("memory.facts", path));
+    return;
+  }
   const existing = await readText(path);
   const known = factsIn(existing);
   const fresh: string[] = [];
@@ -246,7 +281,10 @@ async function appendFacts(memoryDir: string, facts: readonly string[]): Promise
   await writeFile(path, `${existing}${separator}${appended}`);
 }
 
-/** Notes go next to `MEMORY.md` as `imported-<slug>-<note>.md`, overwriting earlier imports. */
+/**
+ * Notes go next to `MEMORY.md` as `imported-<slug>-<note>.md`, overwriting earlier imports. A
+ * note whose file is a link is left alone and reported.
+ */
 async function writeNotes(memoryDir: string, slug: string, bundle: Bundle, items: Items) {
   for (const note of bundle.notes) {
     const name = `imported-${slug}-${note.name}.md`;
@@ -254,8 +292,13 @@ async function writeNotes(memoryDir: string, slug: string, bundle: Bundle, items
       items.skipped.push({ field: `note:${note.name}`, detail: "its name is not safe to write" });
       continue;
     }
+    const path = join(memoryDir, name);
+    if ((await lstatOf(path))?.isSymbolicLink()) {
+      items.skipped.push(linkedMemory("memory.notes", path));
+      continue;
+    }
     await mkdir(memoryDir, { recursive: true });
-    await writeFile(join(memoryDir, name), note.text);
+    await writeFile(path, note.text);
   }
 }
 
@@ -287,7 +330,7 @@ export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Pro
   const agent = await writeAgentFile(paths.projectAgents, bundle, opts, items);
   await writeSkills(paths.projectSkills, bundle, opts, items);
   const memoryDir = paths.memoryDir(paths.projectDir);
-  await appendFacts(memoryDir, bundle.facts);
+  await appendFacts(memoryDir, bundle.facts, items);
   await writeNotes(memoryDir, agent.slug, bundle, items);
   items.skipped.push(...unsupported(bundle, opts));
 

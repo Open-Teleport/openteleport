@@ -90,6 +90,16 @@ const agentFile = (dir: string, stem: string): string => join(dir, ".claude", "a
 const adaSkill = (): Promise<string> =>
   readFile(join(ADA_DIR, "skills", "web-brief", "SKILL.md"), "utf8");
 
+/** A file symlink, or a skipped test where the system does not allow one. */
+async function fileLink(target: string, path: string, skip: () => void): Promise<void> {
+  try {
+    await symlink(target, path, "file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") skip();
+    throw error;
+  }
+}
+
 /** A Bundle with only the fields a test cares about filled in. */
 function bundleOf(overrides: Partial<Bundle> & { manifest?: Partial<Bundle["manifest"]> }): Bundle {
   const { manifest, ...rest } = overrides;
@@ -331,6 +341,96 @@ describe("write", () => {
     await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), UPDATE);
 
     expect(await exists(join(skills, "web-brief-2", "SKILL.md"))).toBe(true);
+  });
+
+  it.each([
+    ["update", UPDATE],
+    ["copy", COPY],
+  ])("reuses its own <name>-2 when the same agent moves in again on %s", async (_mode, opts) => {
+    const skills = join(project, ".claude", "skills");
+
+    const first = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), opts);
+    const skillFile = join(skills, "web-brief-2", "SKILL.md");
+    const old = new Date("2020-01-01T00:00:00Z");
+    await utimes(skillFile, old, old);
+    const second = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), opts);
+
+    expect(first.items.warnings).toContain(
+      "skill 'web-brief' already exists with different content; written as 'web-brief-2'",
+    );
+    expect(second.items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
+    expect((await stat(skillFile)).mtimeMs).toBe(old.getTime());
+    expect(await exists(join(skills, "web-brief-3"))).toBe(false);
+  });
+
+  it("skips a <name>-N that differs and reuses a later one that matches", async () => {
+    const skills = join(project, ".claude", "skills");
+    await mkdir(join(skills, "web-brief-2"));
+    await writeFile(join(skills, "web-brief-2", "SKILL.md"), "Someone else's.\n");
+    await cp(join(ADA_DIR, "skills", "web-brief"), join(skills, "web-brief-3"), { recursive: true });
+
+    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), COPY);
+
+    expect(await readFile(join(skills, "web-brief-2", "SKILL.md"), "utf8")).toBe("Someone else's.\n");
+    expect(await exists(join(skills, "web-brief-4"))).toBe(false);
+    expect(items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
+  });
+
+  it.for([
+    ["update", UPDATE],
+    ["replace", REPLACE],
+  ] as const)("writes <slug>-2.md instead of through a linked agent file on %s", async ([, opts], context) => {
+    const outside = join(root, "outside.md");
+    await writeFile(outside, "ORIGINAL\n");
+    await mkdir(join(project, ".claude", "agents"), { recursive: true });
+    await fileLink(outside, agentFile(project, "ada"), () => context.skip());
+
+    const result = await claudeCodeAdapter.write(ctx, bundleOf({}), opts);
+
+    expect(await readFile(outside, "utf8")).toBe("ORIGINAL\n");
+    expect((await lstat(agentFile(project, "ada"))).isSymbolicLink()).toBe(true);
+    expect(result.targetAgentId).toBe("ada-2");
+    expect(result.artifactPath).toBe(agentFile(project, "ada-2"));
+    expect(parseAgentFile(await readFile(agentFile(project, "ada-2"), "utf8")).name).toBe("ada-2");
+    expect(result.items.warnings).toContain("agent file 'ada.md' is a symlink; written as 'ada-2.md'");
+  });
+
+  it("does not append facts through a linked MEMORY.md", async (context) => {
+    const outside = join(root, "outside-memory.md");
+    await writeFile(outside, "- Elsewhere.\n");
+    const memoryFile = join(memoryOf(project), "MEMORY.md");
+    await rm(memoryFile);
+    await fileLink(outside, memoryFile, () => context.skip());
+
+    const { items } = await claudeCodeAdapter.write(ctx, bundleOf({ facts: ["New."] }), COPY);
+
+    expect(await readFile(outside, "utf8")).toBe("- Elsewhere.\n");
+    expect(items.skipped).toContainEqual({
+      field: "memory.facts",
+      detail: `${memoryFile} is a symlink; not written`,
+    });
+  });
+
+  it("does not write a note through a linked file and still writes the others", async (context) => {
+    const outside = join(root, "outside-note.md");
+    await writeFile(outside, "ORIGINAL\n");
+    const linked = join(memoryOf(project), "imported-ada-first.md");
+    await fileLink(outside, linked, () => context.skip());
+    const bundle = bundleOf({
+      notes: [
+        { name: "first", text: "One.\n" },
+        { name: "second", text: "Two.\n" },
+      ],
+    });
+
+    const { items } = await claudeCodeAdapter.write(ctx, bundle, COPY);
+
+    expect(await readFile(outside, "utf8")).toBe("ORIGINAL\n");
+    expect(await readFile(join(memoryOf(project), "imported-ada-second.md"), "utf8")).toBe("Two.\n");
+    expect(items.skipped).toContainEqual({
+      field: "memory.notes",
+      detail: `${linked} is a symlink; not written`,
+    });
   });
 
   it("writes every file of a skill, nested ones included", async () => {
