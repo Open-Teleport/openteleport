@@ -513,6 +513,45 @@ function unzip<T>(source: string, run: () => T): T {
 
 const isDirectoryEntry = (name: string): boolean => name.endsWith("/");
 
+/** What the central directory of a zip says about a file: sizes are declared, not verified. */
+type ZipRecord = Listing & { compressedSize: number; stored: boolean };
+
+/**
+ * Checks the compressed sizes a zip declares, which `validateListing` does not see. They cannot
+ * be trusted: records may point at the same data, and fflate copies the compressed size of a
+ * stored entry whatever uncompressed size is declared. So the compressed sizes together are at
+ * most the file, a stored entry's size equals its declared size, and an entry of the layout
+ * outside `files/` is at most `MAX_TEXT_ENTRY_BYTES` compressed, which also bounds the time
+ * spent inflating it.
+ */
+function validateZipRecords(
+  source: string,
+  records: readonly ZipRecord[],
+  archiveBytes: number,
+): void {
+  const compressedBytes = records.reduce((sum, record) => sum + record.compressedSize, 0);
+  if (compressedBytes > archiveBytes) {
+    throw new Error(
+      `${source} declares ${compressedBytes} bytes of compressed data in a file of ` +
+        `${archiveBytes} bytes`,
+    );
+  }
+  for (const { path, size, compressedSize, stored } of records) {
+    if (stored && compressedSize !== size) {
+      throw new Error(
+        `${path} is stored with ${compressedSize} bytes but declares a size of ${size} bytes`,
+      );
+    }
+    const { kind } = classify(path);
+    if (kind !== "file" && kind !== "unknown" && compressedSize > MAX_TEXT_ENTRY_BYTES) {
+      throw new Error(
+        `${path} is ${compressedSize} bytes compressed, over the ${MAX_TEXT_ENTRY_BYTES} byte ` +
+          "limit for entries outside files/",
+      );
+    }
+  }
+}
+
 async function readZipEntries(source: string, archiveBytes: number): Promise<FileEntry[]> {
   if (archiveBytes > MAX_ARCHIVE_BYTES) {
     throw new Error(`${source} is ${archiveBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`);
@@ -521,26 +560,37 @@ async function readZipEntries(source: string, archiveBytes: number): Promise<Fil
 
   // First pass: read the central directory only, so that unsafe names and sizes that are over
   // the limits are rejected before any of the content is inflated.
-  const listing: Listing[] = [];
+  const records: ZipRecord[] = [];
   unzip(source, () =>
     unzipSync(archive, {
-      filter: ({ name, originalSize }) => {
-        if (!isDirectoryEntry(name)) listing.push({ path: name, size: originalSize });
+      filter: ({ name, size, originalSize, compression }) => {
+        if (!isDirectoryEntry(name)) {
+          records.push({
+            path: name,
+            size: originalSize,
+            compressedSize: size,
+            stored: compression === 0,
+          });
+        }
         return false;
       },
     }),
   );
-  validateListing(listing);
+  validateListing(records);
+  validateZipRecords(source, records, archiveBytes);
 
-  // Second pass: inflate the paths of the layout only. fflate sizes its buffer for an entry from
-  // the size the archive declares, and that is bounded by the limits checked above.
+  // Second pass: inflate the paths of the layout only. What the first pass bounded is what
+  // fflate works from: the declared uncompressed size, which sizes its buffer for a deflated
+  // entry; the compressed size, which is how much it copies for a stored entry (equal to the
+  // declared size) and how much it inflates otherwise (at most the file, and at most 2 MB for
+  // an entry of the layout outside files/).
   const inflated = unzip(source, () =>
     unzipSync(archive, {
       filter: ({ name }) => !isDirectoryEntry(name) && classify(name).kind !== "unknown",
     }),
   );
   const entries: FileEntry[] = Object.entries(inflated).map(([path, bytes]) => ({ path, bytes }));
-  for (const { path } of listing) {
+  for (const { path } of records) {
     if (classify(path).kind === "unknown") entries.push({ path, bytes: unreadBytes() });
   }
   return entries;

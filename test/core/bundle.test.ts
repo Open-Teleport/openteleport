@@ -93,6 +93,83 @@ function zipOf(entries: FileEntry[]): Uint8Array {
   return zipSync(Object.fromEntries(entries.map((entry) => [entry.path, entry.bytes])));
 }
 
+/** A zip local file header followed by its data. */
+function localEntry(name: string, method: 0 | 8, data: Uint8Array, size = data.length): Uint8Array {
+  const nameBytes = encoder.encode(name);
+  const out = new Uint8Array(30 + nameBytes.length + data.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, 0x04034b50, true);
+  view.setUint16(4, 20, true); // version needed
+  view.setUint16(6, 0x0800, true); // flags: UTF-8 name
+  view.setUint16(8, method, true);
+  view.setUint16(12, 33, true); // date: 1980-01-01 (fflate does not check the CRC at 14)
+  view.setUint32(18, data.length, true); // compressed size
+  view.setUint32(22, size, true); // uncompressed size
+  view.setUint16(26, nameBytes.length, true);
+  out.set(nameBytes, 30);
+  out.set(data, 30 + nameBytes.length);
+  return out;
+}
+
+type RawRecord = {
+  name: string;
+  method: 0 | 8;
+  compressedSize: number;
+  size: number;
+  offset: number;
+};
+
+/** A zip written by hand: `body` (local entries) followed by the given central directory. */
+function rawZip(body: Uint8Array, records: RawRecord[]): Uint8Array {
+  const names = records.map(({ name }) => encoder.encode(name));
+  const directorySize = names.reduce((sum, name) => sum + 46 + name.length, 0);
+  const out = new Uint8Array(body.length + directorySize + 22);
+  const view = new DataView(out.buffer);
+  out.set(body);
+  let at = body.length;
+  records.forEach((record, i) => {
+    const name = names[i] ?? new Uint8Array(0);
+    view.setUint32(at, 0x02014b50, true);
+    view.setUint16(at + 4, 20, true); // version made by
+    view.setUint16(at + 6, 20, true); // version needed
+    view.setUint16(at + 8, 0x0800, true); // flags: UTF-8 name
+    view.setUint16(at + 10, record.method, true);
+    view.setUint16(at + 14, 33, true); // date: 1980-01-01
+    view.setUint32(at + 20, record.compressedSize, true);
+    view.setUint32(at + 24, record.size, true);
+    view.setUint16(at + 28, name.length, true);
+    view.setUint32(at + 42, record.offset, true); // offset of the local header
+    out.set(name, at + 46);
+    at += 46 + name.length;
+  });
+  view.setUint32(at, 0x06054b50, true); // end of central directory
+  view.setUint16(at + 8, records.length, true);
+  view.setUint16(at + 10, records.length, true);
+  view.setUint32(at + 12, directorySize, true);
+  view.setUint32(at + 16, body.length, true);
+  return out;
+}
+
+/** An honest zip of stored entries, written by hand. */
+function storedZip(entries: FileEntry[]): Uint8Array {
+  const parts: Uint8Array[] = [];
+  const records: RawRecord[] = [];
+  let offset = 0;
+  for (const { path, bytes: data } of entries) {
+    const local = localEntry(path, 0, data);
+    records.push({ name: path, method: 0, compressedSize: data.length, size: data.length, offset });
+    parts.push(local);
+    offset += local.length;
+  }
+  const body = new Uint8Array(offset);
+  let at = 0;
+  for (const part of parts) {
+    body.set(part, at);
+    at += part.length;
+  }
+  return rawZip(body, records);
+}
+
 /**
  * Changes one entry of an archive without touching the rest: `claimedSize` is the uncompressed
  * size its central directory entry declares, and `breakData` damages its deflate stream so that
@@ -664,6 +741,97 @@ describe("size limits", () => {
     await expect(readBundle(file)).rejects.toThrow(
       /huge\.jetpack is 115343361 bytes, over the 115343360 byte limit/,
     );
+  });
+
+  describe("compressed sizes declared by a zip", () => {
+    const MiB = 1024 * 1024;
+    const readRaw = async (name: string, data: Uint8Array) => {
+      const file = join(tmp, name);
+      await writeFile(file, data);
+      return readBundle(file);
+    };
+
+    // 20 central directory records that all point at one local entry: the declared
+    // uncompressed sizes add up to almost nothing, the compressed sizes to 20 MiB, and the
+    // file is a little over 1 MiB. fflate would copy 20 MiB for them.
+    it.each([
+      ["declare a size of 1 byte (the probe)", 1],
+      ["declare the stored size", MiB],
+    ])("rejects stored records that overlap and %s", async (_label, declaredSize) => {
+      const shared = localEntry("files/0", 0, new Uint8Array(MiB));
+      const records = Array.from({ length: 20 }, (_, i) => ({
+        name: `files/${i}`,
+        method: 0 as const,
+        compressedSize: MiB,
+        size: declaredSize,
+        offset: 0,
+      }));
+
+      await expect(readRaw("overlap.jetpack", rawZip(shared, records))).rejects.toThrow(
+        /declares 20971520 bytes of compressed data in a file of \d+ bytes/,
+      );
+    });
+
+    it("rejects overlapping deflate records too", async () => {
+      const shared = localEntry("files/0", 8, new Uint8Array(MiB));
+      const records = Array.from({ length: 20 }, (_, i) => ({
+        name: `files/${i}`,
+        method: 8 as const,
+        compressedSize: MiB,
+        size: 1000,
+        offset: 0,
+      }));
+
+      await expect(readRaw("overlap8.jetpack", rawZip(shared, records))).rejects.toThrow(
+        /declares 20971520 bytes of compressed data/,
+      );
+    });
+
+    it.each([
+      ["more than it stores", 100, 50],
+      ["less than it stores", 100, 150],
+    ])("rejects a stored entry that declares %s", async (_label, stored, declared) => {
+      const body = localEntry("skills/x/SKILL.md", 0, new Uint8Array(stored).fill(0x61), declared);
+      const record = {
+        name: "skills/x/SKILL.md",
+        method: 0 as const,
+        compressedSize: stored,
+        size: declared,
+        offset: 0,
+      };
+
+      await expect(readRaw("stored.jetpack", rawZip(body, [record]))).rejects.toThrow(
+        /skills\/x\/SKILL\.md is stored with \d+ bytes but declares a size of \d+ bytes/,
+      );
+    });
+
+    it("rejects an entry of the layout outside files/ that is over 2 MiB compressed", async () => {
+      const path = "skills/x/big.bin";
+      const body = localEntry(path, 8, new Uint8Array(MAX_TEXT_ENTRY_BYTES + 1), 1000);
+      const record = {
+        name: path,
+        method: 8 as const,
+        compressedSize: MAX_TEXT_ENTRY_BYTES + 1,
+        size: 1000,
+        offset: 0,
+      };
+
+      await expect(readRaw("deflate.jetpack", rawZip(body, [record]))).rejects.toThrow(
+        /skills\/x\/big\.bin is 2097153 bytes compressed, over the 2097152 byte limit/,
+      );
+    });
+
+    it("still reads honest stored entries", async () => {
+      const entries = minimal(text("files/notes.txt", "hello"), text("skills/x/SKILL.md", "x"));
+
+      const written = await readRaw("stored.jetpack", storedZip(entries));
+      const level0 = entries.map(({ path, bytes }) => [path, [bytes, { level: 0 }]]);
+      const byFflate = await readRaw("level0.jetpack", zipSync(Object.fromEntries(level0)));
+
+      expect(written.files.map((file) => file.path)).toEqual(["notes.txt"]);
+      expect(written.skills.map((skill) => skill.name)).toEqual(["x"]);
+      expect(byFflate).toEqual(written);
+    });
   });
 
   describe("in a directory", () => {
