@@ -14,6 +14,15 @@ export const MAX_SKILLS = 32;
 export const MAX_ROUTINES = 64;
 
 /**
+ * Largest sum of the uncompressed sizes of all entries in an archive, and the largest archive
+ * file read from disk: `files/` plus room for the rest.
+ */
+export const MAX_ARCHIVE_BYTES = 110 * 1024 * 1024;
+
+/** Largest single entry outside `files/` (the same bound the secret scanner reads up to). */
+export const MAX_TEXT_ENTRY_BYTES = 2 * 1024 * 1024;
+
+/**
  * Secrets and clutter that never belong in an archive. Each pattern is tested against every
  * segment of a path, ignoring case, so a match anywhere in the path forbids it.
  */
@@ -32,13 +41,28 @@ export function isForbiddenPath(path: string): boolean {
 }
 
 /**
+ * A name Windows reserves for devices (`con`, `prn`, `aux`, `nul`, `com1`-`com9`, `lpt1`-`lpt9`),
+ * with or without an extension, ignoring case: `NUL`, `aux.md` and `com1.tar` cannot be created
+ * as files there.
+ */
+export function isReservedDeviceName(name: string): boolean {
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name);
+}
+
+/**
  * True for a relative path that uses `/` and stays inside the archive: no leading `/`, drive
- * letter or backslash, no empty, `.` or `..` segments and no control characters.
+ * letter or backslash, no empty, `.` or `..` segments, no control characters and no segment that
+ * is a reserved device name.
  */
 export function isSafeArchivePath(path: string): boolean {
   if (path === "" || path.startsWith("/") || path.includes("\\") || /^[a-z]:/i.test(path)) {
     return false;
   }
   if (/[\u0000-\u001f]/.test(path)) return false;
-  return path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+  return path
+    .split("/")
+    .every(
+      (segment) =>
+        segment !== "" && segment !== "." && segment !== ".." && !isReservedDeviceName(segment),
+    );
 }

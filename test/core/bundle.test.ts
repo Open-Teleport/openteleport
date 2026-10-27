@@ -1,9 +1,20 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unzipSync, zipSync } from "fflate";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bundleToEntries,
   entriesToBundle,
@@ -11,11 +22,14 @@ import {
   writeBundle,
 } from "../../src/core/bundle.js";
 import {
+  MAX_ARCHIVE_BYTES,
   MAX_AVATAR_BYTES,
   MAX_FILES_BYTES,
   MAX_ROUTINES,
   MAX_SKILLS,
+  MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
+  isReservedDeviceName,
   isSafeArchivePath,
 } from "../../src/core/paths.js";
 import { type Bundle, type FileEntry, type Routine, parseManifest } from "../../src/core/schema.js";
@@ -77,6 +91,37 @@ function sampleBundle(): Bundle {
 
 function zipOf(entries: FileEntry[]): Uint8Array {
   return zipSync(Object.fromEntries(entries.map((entry) => [entry.path, entry.bytes])));
+}
+
+/**
+ * Changes one entry of an archive without touching the rest: `claimedSize` is the uncompressed
+ * size its central directory entry declares, and `breakData` damages its deflate stream so that
+ * inflating it fails (block type 3 is reserved). Entries are found by name.
+ */
+function tamper(
+  archive: Uint8Array,
+  path: string,
+  change: { claimedSize?: number; breakData?: boolean },
+): Uint8Array {
+  const data = archive.slice();
+  const view = new DataView(data.buffer);
+  const nameAt = (at: number, length: number) =>
+    new TextDecoder().decode(data.subarray(at, at + length));
+  for (let i = 0; i + 46 <= data.length; i += 1) {
+    const signature = view.getUint32(i, true);
+    // Central directory entry: uncompressed size at 24, name length at 28, name at 46.
+    if (signature === 0x02014b50 && nameAt(i + 46, view.getUint16(i + 28, true)) === path) {
+      if (change.claimedSize !== undefined) view.setUint32(i + 24, change.claimedSize, true);
+    }
+    // Local header: name length at 26, extra length at 28, name at 30, then the data.
+    if (signature === 0x04034b50 && nameAt(i + 30, view.getUint16(i + 26, true)) === path) {
+      if (change.breakData) {
+        const dataAt = i + 30 + view.getUint16(i + 26, true) + view.getUint16(i + 28, true);
+        data[dataAt] = 0xff;
+      }
+    }
+  }
+  return data;
 }
 
 let tmp: string;
@@ -397,9 +442,45 @@ describe("isForbiddenPath", () => {
   });
 });
 
+describe("isReservedDeviceName", () => {
+  it.each(["con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt1", "Lpt9"])(
+    "reserves %s",
+    (name) => {
+      expect(isReservedDeviceName(name)).toBe(true);
+    },
+  );
+
+  it.each(["nul.txt", "aux.tar.gz", "con."])("reserves %s whatever the extension", (name) => {
+    expect(isReservedDeviceName(name)).toBe(true);
+  });
+
+  it.each(["console", "conf", "auxiliary.md", "com0", "com10", "lpt0", "lpt10", "my.con", "nul-r"])(
+    "does not reserve %s",
+    (name) => {
+      expect(isReservedDeviceName(name)).toBe(false);
+    },
+  );
+});
+
 describe("isSafeArchivePath", () => {
-  it.each(["AGENTS.md", "files/a/b.txt", "skills/web-brief/SKILL.md"])("accepts %s", (path) => {
-    expect(isSafeArchivePath(path)).toBe(true);
+  it.each(["AGENTS.md", "files/a/b.txt", "skills/web-brief/SKILL.md", "files/console.md"])(
+    "accepts %s",
+    (path) => {
+      expect(isSafeArchivePath(path)).toBe(true);
+    },
+  );
+
+  it.each(["con", "files/NUL.txt", "files/aux.md", "skills/com1/SKILL.md", "memory/lpt9.md"])(
+    "rejects the device name in %s",
+    (path) => {
+      expect(isSafeArchivePath(path)).toBe(false);
+    },
+  );
+
+  it("rejects a device name inside an archive", async () => {
+    const archive = await writeZip("device.jetpack", minimal(text("files/NUL.txt", "x")));
+
+    await expect(readBundle(archive)).rejects.toThrow(/unsafe path: files\/NUL\.txt/);
   });
 
   const NUL = String.fromCharCode(0);
@@ -457,27 +538,194 @@ describe("size limits", () => {
     await expect(readBundle(archive)).rejects.toThrow(/files\/ is \d+ bytes/);
   }, 30_000);
 
-  it("checks the sizes in the central directory before inflating anything", async () => {
-    const forged = (claimedSize: number): Uint8Array => {
-      const data = zipSync({ "files/x.bin": new Uint8Array(1000) });
-      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      for (let i = 0; i + 46 <= data.length; i += 1) {
-        // A central directory entry holds the uncompressed size at offset 24.
-        if (view.getUint32(i, true) === 0x02014b50) view.setUint32(i + 24, claimedSize, true);
-      }
-      // Break the deflate stream: block type 3 is reserved, so inflating it must fail.
-      data[30 + view.getUint16(26, true) + view.getUint16(28, true)] = 0xff;
-      return data;
+  describe("from the central directory, before anything is inflated", () => {
+    /** A valid archive plus one tiny, deliberately undecodable entry at `path`. */
+    const withBrokenEntry = (path: string, claimedSize: number): Uint8Array => {
+      const archive = zipOf(minimal({ path, bytes: new Uint8Array(1000) }));
+      return tamper(archive, path, { claimedSize, breakData: true });
     };
-    const claimsTooMuch = join(tmp, "claims-too-much.jetpack");
-    const claimsLittle = join(tmp, "claims-little.jetpack");
-    await writeFile(claimsTooMuch, forged(MAX_FILES_BYTES + 1));
-    await writeFile(claimsLittle, forged(1000));
+    const readForged = async (name: string, data: Uint8Array) => {
+      const file = join(tmp, name);
+      await writeFile(file, data);
+      return readBundle(file);
+    };
 
-    // The same broken data fails differently once it is inflated...
-    await expect(readBundle(claimsLittle)).rejects.toThrow(/not a valid zip archive/);
-    // ...so the size error shows that nothing was inflated.
-    await expect(readBundle(claimsTooMuch)).rejects.toThrow(/files\/ is 104857601 bytes/);
+    it("for files/", async () => {
+      // The same broken data fails differently once it is inflated...
+      const claimsTruth = withBrokenEntry("files/x.bin", 1000);
+      await expect(readForged("honest.jetpack", claimsTruth)).rejects.toThrow(
+        /not a valid zip archive/,
+      );
+      // ...so the size error shows that nothing was inflated.
+      const claimsTooMuch = withBrokenEntry("files/x.bin", MAX_FILES_BYTES + 1);
+      await expect(readForged("forged.jetpack", claimsTooMuch)).rejects.toThrow(
+        /files\/ is 104857601 bytes/,
+      );
+    });
+
+    it("for an entry outside files/ that belongs to the layout", async () => {
+      const claimsTooMuch = withBrokenEntry("skills/x/big.bin", MAX_TEXT_ENTRY_BYTES + 1);
+
+      await expect(readForged("skill.jetpack", claimsTooMuch)).rejects.toThrow(
+        /skills\/x\/big\.bin is 2097153 bytes, over the 2097152 byte limit/,
+      );
+    });
+
+    it("for a path outside the layout", async () => {
+      const claimsTooMuch = withBrokenEntry("junk.bin", MAX_ARCHIVE_BYTES + 1);
+
+      await expect(readForged("junk.jetpack", claimsTooMuch)).rejects.toThrow(
+        /entries add up to \d+ bytes, over the 115343360 byte limit/,
+      );
+    });
+
+    it("for many paths that only add up to too much", async () => {
+      const half = Math.floor(MAX_ARCHIVE_BYTES / 2) + 1;
+      let data = zipOf(
+        minimal(
+          { path: "one.bin", bytes: new Uint8Array(1000) },
+          { path: "two.bin", bytes: new Uint8Array(1000) },
+        ),
+      );
+      data = tamper(data, "one.bin", { claimedSize: half, breakData: true });
+      data = tamper(data, "two.bin", { claimedSize: half, breakData: true });
+
+      await expect(readForged("many.jetpack", data)).rejects.toThrow(/entries add up to/);
+    });
+  });
+
+  it("rejects a well-compressed entry outside files/ over MAX_TEXT_ENTRY_BYTES", async () => {
+    const archive = await writeZip(
+      "bomb.jetpack",
+      minimal({ path: "skills/x/big.bin", bytes: new Uint8Array(MAX_TEXT_ENTRY_BYTES + 1) }),
+    );
+
+    await expect(readBundle(archive)).rejects.toThrow(/skills\/x\/big\.bin is 2097153 bytes/);
+  });
+
+  it("accepts an entry of exactly MAX_TEXT_ENTRY_BYTES and holds every kind to it", () => {
+    const big = (path: string, size = MAX_TEXT_ENTRY_BYTES + 1): FileEntry[] => [
+      ...minimal().filter((entry) => entry.path !== path),
+      { path, bytes: new Uint8Array(size) },
+    ];
+    // Not valid JSON or UTF-8 text, but the size check comes first.
+    for (const path of [
+      "AGENTS.md",
+      "jetpack.json",
+      "SOUL.md",
+      "MEMORY.md",
+      "memory/day.md",
+      "routines/r.json",
+      "skills/x/SKILL.md",
+    ]) {
+      expect(() => entriesToBundle(big(path))).toThrow(
+        new RegExp(`${path.replace(".", "\\.")} is 2097153 bytes`),
+      );
+    }
+    const atLimit = entriesToBundle([
+      ...minimal().filter((entry) => entry.path !== "AGENTS.md"),
+      { path: "AGENTS.md", bytes: new Uint8Array(MAX_TEXT_ENTRY_BYTES).fill(0x61) },
+    ]);
+    expect(atLimit.instructions).toHaveLength(MAX_TEXT_ENTRY_BYTES);
+  });
+
+  it("does not inflate paths outside the layout, only reports them", async () => {
+    const junk = { path: "junk.bin", bytes: new Uint8Array(1000) };
+    const archive = tamper(zipOf(minimal(junk)), "junk.bin", { breakData: true });
+    const file = join(tmp, "junk.jetpack");
+    await writeFile(file, archive);
+
+    const bundle = await readBundle(file);
+
+    expect(bundle.unknownPaths).toEqual(["junk.bin"]);
+  });
+
+  it("bounds all entries together, paths outside the layout included", () => {
+    const filesAtLimit = { path: "files/big.bin", bytes: new Uint8Array(MAX_FILES_BYTES) };
+    const unknown = (name: string, size: number): FileEntry => ({
+      path: name,
+      bytes: new Uint8Array(size),
+    });
+    const room = MAX_ARCHIVE_BYTES - MAX_FILES_BYTES;
+
+    expect(entriesToBundle(minimal(filesAtLimit, unknown("a.bin", room / 2))).unknownPaths).toEqual(
+      ["a.bin"],
+    );
+    expect(() =>
+      entriesToBundle(minimal(filesAtLimit, unknown("a.bin", room), unknown("b.bin", room))),
+    ).toThrow(/entries add up to \d+ bytes, over the 115343360 byte limit/);
+  });
+
+  it("refuses an archive file larger than MAX_ARCHIVE_BYTES before reading it", async () => {
+    const file = join(tmp, "huge.jetpack");
+    await writeFile(file, "");
+    await truncate(file, MAX_ARCHIVE_BYTES + 1);
+
+    await expect(readBundle(file)).rejects.toThrow(
+      /huge\.jetpack is 115343361 bytes, over the 115343360 byte limit/,
+    );
+  });
+
+  describe("in a directory", () => {
+    const agentFolder = async (): Promise<string> => {
+      const folder = join(tmp, "agent");
+      await mkdir(join(folder, "skills", "x"), { recursive: true });
+      await writeFile(join(folder, "AGENTS.md"), "Be brief.");
+      await writeFile(join(folder, "skills", "x", "SKILL.md"), "A skill.");
+      return folder;
+    };
+
+    it("rejects a big entry that belongs to the layout", async () => {
+      const folder = await agentFolder();
+      const big = join(folder, "skills", "x", "big.bin");
+      await writeFile(big, new Uint8Array(MAX_TEXT_ENTRY_BYTES + 1));
+
+      await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(
+        /skills\/x\/big\.bin is 2097153 bytes/,
+      );
+    });
+
+    it("rejects a folder whose entries add up to too much, judging by size alone", async () => {
+      const folder = await agentFolder();
+      const junk = join(folder, "junk.bin");
+      await writeFile(junk, "");
+      await truncate(junk, MAX_ARCHIVE_BYTES + 1);
+
+      await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(
+        /entries add up to \d+ bytes/,
+      );
+    });
+
+    it("reports a big path outside the layout", async () => {
+      const folder = await agentFolder();
+      await writeFile(join(folder, "notes.pdf"), new Uint8Array(MAX_TEXT_ENTRY_BYTES * 2));
+
+      const bundle = await readBundle(folder, { requireManifest: false });
+
+      expect(bundle.unknownPaths).toEqual(["notes.pdf"]);
+    });
+
+    it("never reads the content of a path outside the layout", async () => {
+      const folder = await agentFolder();
+      await writeFile(join(folder, "notes.txt"), "scratch");
+      const reads: string[] = [];
+      const readFileOnce = fsPromises.readFile;
+      // bundle.ts imports readFile by name; syncBuiltinESMExports makes the spy visible to it.
+      const spy = vi.spyOn(fsPromises, "readFile").mockImplementation(((...args: unknown[]) => {
+        reads.push(basename(String(args[0])));
+        return (readFileOnce as (...a: unknown[]) => unknown)(...args);
+      }) as typeof fsPromises.readFile);
+      syncBuiltinESMExports();
+      try {
+        await readBundle(folder, { requireManifest: false });
+      } finally {
+        spy.mockRestore();
+        syncBuiltinESMExports();
+      }
+
+      expect(reads).toContain("AGENTS.md");
+      expect(reads).not.toContain("notes.txt");
+    });
   });
 
   it("rejects an oversized avatar in an archive", async () => {
@@ -779,10 +1027,38 @@ describe("writing entries", () => {
     ]);
   });
 
-  it("keeps letters outside ASCII in routine file names", () => {
+  it("makes routine file names ASCII", () => {
     const bundle = { ...sampleBundle(), routines: [{ ...ROUTINE, name: "Poranny przegląd" }] };
 
-    expect(pathsOf(bundle)).toContain("routines/poranny-przegląd.json");
+    expect(pathsOf(bundle)).toContain("routines/poranny-przegl-d.json");
+  });
+
+  it("cuts a routine file name to 64 characters without a dangling dash", () => {
+    const routineFiles = (name: string) =>
+      pathsOf({ ...sampleBundle(), routines: [{ ...ROUTINE, name }] }).filter((path) =>
+        path.startsWith("routines/"),
+      );
+
+    expect(routineFiles("a".repeat(100))).toEqual([`routines/${"a".repeat(64)}.json`]);
+    // The 64th character would be the dash between the words.
+    expect(routineFiles(`${"a".repeat(63)} bbb`)).toEqual([`routines/${"a".repeat(63)}.json`]);
+  });
+
+  it("keeps Windows device names out of routine file names", () => {
+    const named = (name: string): Routine => ({ ...ROUTINE, name });
+    const bundle = {
+      ...sampleBundle(),
+      routines: ["CON", "aux", "Com1", "lpt9", "nul!", "console"].map(named),
+    };
+
+    expect(pathsOf(bundle).filter((path) => path.startsWith("routines/"))).toEqual([
+      "routines/con-r.json",
+      "routines/aux-r.json",
+      "routines/com1-r.json",
+      "routines/lpt9-r.json",
+      "routines/nul-r.json",
+      "routines/console.json",
+    ]);
   });
 
   it("does not turn a routine name into a forbidden file name", () => {

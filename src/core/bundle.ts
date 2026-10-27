@@ -3,12 +3,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import { ZodError } from "zod";
 import {
+  MAX_ARCHIVE_BYTES,
   MAX_AVATAR_BYTES,
   MAX_FACT_CHARS,
   MAX_FILES_BYTES,
   MAX_ROUTINES,
   MAX_SKILLS,
+  MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
+  isReservedDeviceName,
   isSafeArchivePath,
 } from "./paths.js";
 import {
@@ -60,35 +63,72 @@ export type EntriesToBundleOptions = {
 /** A path and its size, known before the content is read or inflated. */
 type Listing = { path: string; size: number };
 
+/** Where a path of the layout belongs; `unknown` is anything the layout does not mention. */
+type Classified =
+  | { kind: "manifest" | "instructions" | "persona" | "memory" | "routine" | "avatar" | "unknown" }
+  | { kind: "note"; name: string }
+  | { kind: "skill"; name: string; file: string }
+  | { kind: "file"; file: string };
+
+function classify(path: string): Classified {
+  if (path === MANIFEST_PATH) return { kind: "manifest" };
+  if (path === INSTRUCTIONS_PATH) return { kind: "instructions" };
+  if (path === PERSONA_PATH) return { kind: "persona" };
+  if (path === MEMORY_PATH) return { kind: "memory" };
+  if (path.startsWith(FILES_PREFIX)) return { kind: "file", file: path.slice(FILES_PREFIX.length) };
+  const note = NOTE_PATTERN.exec(path);
+  if (note?.[1] !== undefined) return { kind: "note", name: note[1] };
+  if (ROUTINE_PATTERN.test(path)) return { kind: "routine" };
+  const skill = SKILL_PATH_PATTERN.exec(path);
+  if (skill?.[1] !== undefined && skill[2] !== undefined) {
+    return { kind: "skill", name: skill[1], file: skill[2] };
+  }
+  if (AVATAR_PATTERN.test(path)) return { kind: "avatar" };
+  return { kind: "unknown" };
+}
+
 // -- Validation shared by reading and writing ------------------------------------------------
 
 /**
  * Checks everything that can be decided from paths and sizes alone, so that an archive can be
- * rejected before it is inflated: unsafe and forbidden paths, duplicates, the size limits and
- * the limits on the number of skills and routines.
+ * rejected before any of it is inflated or read: unsafe and forbidden paths, duplicates, the
+ * number of skills and routines, and the sizes.
+ *
+ * Sizes are bounded three ways. An entry outside `files/` that belongs to the layout is at most
+ * `MAX_TEXT_ENTRY_BYTES` (the avatar has its own, smaller limit), `files/` as a whole is at most
+ * `MAX_FILES_BYTES`, and all entries together, paths outside the layout included, are at most
+ * `MAX_ARCHIVE_BYTES`. Paths outside the layout are never inflated or read, so only that total
+ * bounds them.
  */
 function validateListing(listing: readonly Listing[]): void {
   const seen = new Set<string>();
   const skillNames = new Set<string>();
   let routineCount = 0;
   let filesBytes = 0;
+  let totalBytes = 0;
   for (const { path, size } of listing) {
     if (!isSafeArchivePath(path)) throw new Error(`unsafe path: ${path}`);
     if (isForbiddenPath(path)) throw new Error(`forbidden path: ${path}`);
     if (seen.has(path)) throw new Error(`duplicate path: ${path}`);
     seen.add(path);
+    totalBytes += size;
 
-    if (path.startsWith(FILES_PREFIX)) {
+    const found = classify(path);
+    if (found.kind === "file") {
       filesBytes += size;
-    } else if (AVATAR_PATTERN.test(path)) {
+    } else if (found.kind === "avatar") {
       if (size > MAX_AVATAR_BYTES) {
         throw new Error(`${path} is ${size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
       }
-    } else if (ROUTINE_PATTERN.test(path)) {
-      routineCount += 1;
-    } else {
-      const skillName = SKILL_PATH_PATTERN.exec(path)?.[1];
-      if (skillName !== undefined) skillNames.add(skillName);
+    } else if (found.kind !== "unknown") {
+      if (size > MAX_TEXT_ENTRY_BYTES) {
+        throw new Error(
+          `${path} is ${size} bytes, over the ${MAX_TEXT_ENTRY_BYTES} byte limit for entries ` +
+            "outside files/",
+        );
+      }
+      if (found.kind === "routine") routineCount += 1;
+      if (found.kind === "skill") skillNames.add(found.name);
     }
   }
   if (skillNames.size > MAX_SKILLS) {
@@ -99,6 +139,11 @@ function validateListing(listing: readonly Listing[]): void {
   }
   if (filesBytes > MAX_FILES_BYTES) {
     throw new Error(`files/ is ${filesBytes} bytes, over the ${MAX_FILES_BYTES} byte limit`);
+  }
+  if (totalBytes > MAX_ARCHIVE_BYTES) {
+    throw new Error(
+      `entries add up to ${totalBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`,
+    );
   }
 }
 
@@ -178,7 +223,8 @@ const byPath = (a: FileEntry, b: FileEntry): number =>
 
 /**
  * Builds a Bundle from the files of an archive. Pure: no disk access. Files, skills, notes and
- * routines come out ordered by path; paths outside the layout are listed in `unknownPaths`.
+ * routines come out ordered by path; paths outside the layout are listed in `unknownPaths`, and
+ * the bytes of such an entry are never looked at (a reader may pass them empty).
  */
 export function entriesToBundle(
   entries: readonly FileEntry[],
@@ -199,31 +245,41 @@ export function entriesToBundle(
   const unknownPaths: string[] = [];
 
   for (const entry of [...entries].sort(byPath)) {
-    const { path } = entry;
-    const note = NOTE_PATTERN.exec(path);
-    const skillPath = SKILL_PATH_PATTERN.exec(path);
-    if (path === MANIFEST_PATH) {
-      manifestEntry = entry;
-    } else if (path === INSTRUCTIONS_PATH) {
-      instructionsEntry = entry;
-    } else if (path === PERSONA_PATH) {
-      personaEntry = entry;
-    } else if (path === MEMORY_PATH) {
-      memoryEntry = entry;
-    } else if (note?.[1] !== undefined) {
-      noteEntries.push({ name: note[1], entry });
-    } else if (ROUTINE_PATTERN.test(path)) {
-      routineEntries.push(entry);
-    } else if (skillPath?.[1] !== undefined) {
-      const group = skillEntries.get(skillPath[1]) ?? [];
-      group.push(entry);
-      skillEntries.set(skillPath[1], group);
-    } else if (path.startsWith(FILES_PREFIX)) {
-      files.push({ path: path.slice(FILES_PREFIX.length), bytes: entry.bytes });
-    } else if (AVATAR_PATTERN.test(path)) {
-      avatarEntries.push(entry);
-    } else {
-      unknownPaths.push(path);
+    const found = classify(entry.path);
+    switch (found.kind) {
+      case "manifest":
+        manifestEntry = entry;
+        break;
+      case "instructions":
+        instructionsEntry = entry;
+        break;
+      case "persona":
+        personaEntry = entry;
+        break;
+      case "memory":
+        memoryEntry = entry;
+        break;
+      case "note":
+        noteEntries.push({ name: found.name, entry });
+        break;
+      case "routine":
+        routineEntries.push(entry);
+        break;
+      case "skill": {
+        const group = skillEntries.get(found.name) ?? [];
+        group.push({ path: found.file, bytes: entry.bytes });
+        skillEntries.set(found.name, group);
+        break;
+      }
+      case "file":
+        files.push({ path: found.file, bytes: entry.bytes });
+        break;
+      case "avatar":
+        avatarEntries.push(entry);
+        break;
+      case "unknown":
+        unknownPaths.push(entry.path);
+        break;
     }
   }
 
@@ -261,9 +317,7 @@ export function entriesToBundle(
   }
 
   const skills: Skill[] = [];
-  for (const [name, group] of skillEntries) {
-    const prefix = `skills/${name}/`;
-    const skillFiles = group.map(({ path, bytes }) => ({ path: path.slice(prefix.length), bytes }));
+  for (const [name, skillFiles] of skillEntries) {
     const main = skillFiles.find(({ path }) => path === SKILL_FILE);
     if (!main) throw new Error(`skill directory skills/${name} has no ${SKILL_FILE}`);
     skills.push({ name, files: [main, ...skillFiles.filter((file) => file !== main)] });
@@ -291,17 +345,22 @@ export function entriesToBundle(
 
 // -- Bundle -> archive entries ---------------------------------------------------------------
 
+const MAX_SLUG_CHARS = 64;
+
 /**
- * Lowercases a routine name and turns every run of characters that are not letters or digits
- * into one `-`. Letters outside ASCII are kept. Names with nothing usable, and names that would
- * make a forbidden file name, become `routine`.
+ * Lowercases a routine name, turns every run of characters outside `a-z0-9` into one `-`, trims
+ * the dashes and cuts the result to 64 characters. A name with nothing usable, or one that would
+ * make a forbidden file name, becomes `routine`; a Windows device name such as `con` gets `-r`.
  */
 function routineSlug(name: string): string {
   const slug = name
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-|-$/g, "");
-  return slug === "" || isForbiddenPath(`${slug}.json`) ? "routine" : slug;
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-/, "")
+    .slice(0, MAX_SLUG_CHARS)
+    .replace(/-$/, "");
+  if (slug === "" || isForbiddenPath(`${slug}.json`)) return "routine";
+  return isReservedDeviceName(slug) ? `${slug}-r` : slug;
 }
 
 /** `base`, then `base-2`, `base-3`... for the names that collapse to the same slug. */
@@ -428,12 +487,16 @@ async function listDirectory(root: string): Promise<DiskFile[]> {
   return found;
 }
 
+/** Content of a path outside the layout: it is only reported, so it is not read or inflated. */
+const unreadBytes = (): Uint8Array => new Uint8Array(0);
+
 async function readDirectoryEntries(root: string): Promise<FileEntry[]> {
   const found = await listDirectory(root);
   validateListing(found);
   const entries: FileEntry[] = [];
   for (const { path, absolute } of found) {
-    entries.push({ path, bytes: toBytes(await readFile(absolute)) });
+    const known = classify(path).kind !== "unknown";
+    entries.push({ path, bytes: known ? toBytes(await readFile(absolute)) : unreadBytes() });
   }
   return entries;
 }
@@ -450,7 +513,10 @@ function unzip<T>(source: string, run: () => T): T {
 
 const isDirectoryEntry = (name: string): boolean => name.endsWith("/");
 
-async function readZipEntries(source: string): Promise<FileEntry[]> {
+async function readZipEntries(source: string, archiveBytes: number): Promise<FileEntry[]> {
+  if (archiveBytes > MAX_ARCHIVE_BYTES) {
+    throw new Error(`${source} is ${archiveBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`);
+  }
   const archive = await readFile(source);
 
   // First pass: read the central directory only, so that unsafe names and sizes that are over
@@ -466,10 +532,18 @@ async function readZipEntries(source: string): Promise<FileEntry[]> {
   );
   validateListing(listing);
 
+  // Second pass: inflate the paths of the layout only. fflate sizes its buffer for an entry from
+  // the size the archive declares, and that is bounded by the limits checked above.
   const inflated = unzip(source, () =>
-    unzipSync(archive, { filter: ({ name }) => !isDirectoryEntry(name) }),
+    unzipSync(archive, {
+      filter: ({ name }) => !isDirectoryEntry(name) && classify(name).kind !== "unknown",
+    }),
   );
-  return Object.entries(inflated).map(([path, bytes]) => ({ path, bytes }));
+  const entries: FileEntry[] = Object.entries(inflated).map(([path, bytes]) => ({ path, bytes }));
+  for (const { path } of listing) {
+    if (classify(path).kind === "unknown") entries.push({ path, bytes: unreadBytes() });
+  }
+  return entries;
 }
 
 /**
@@ -479,9 +553,10 @@ async function readZipEntries(source: string): Promise<FileEntry[]> {
  * name of `source` (without a trailing `.jetpack`), with an empty `id` for the caller to fill in.
  */
 export async function readBundle(source: string, opts: ReadBundleOptions = {}): Promise<Bundle> {
-  const entries = (await stat(source)).isDirectory()
+  const info = await stat(source);
+  const entries = info.isDirectory()
     ? await readDirectoryEntries(source)
-    : await readZipEntries(source);
+    : await readZipEntries(source, info.size);
   return entriesToBundle(entries, {
     requireManifest: opts.requireManifest,
     fallbackName: basename(resolve(source)).replace(/\.jetpack$/i, ""),
