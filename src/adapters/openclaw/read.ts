@@ -1,5 +1,5 @@
-import type { Dirent } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import type { Dirent, Stats } from "node:fs";
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { MAX_AVATAR_BYTES, MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
@@ -63,6 +63,22 @@ const isNotFound = (error: unknown): boolean => {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR";
 };
+
+/** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
+async function lstatIfAny(path: string): Promise<Stats | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+/** Whether `path` is `root` itself or below it; both absolute. */
+function isWithin(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
 
 /** Views a Node buffer as a plain `Uint8Array` without copying it. */
 const toBytes = (buffer: Buffer): Uint8Array =>
@@ -329,15 +345,17 @@ async function readSkills(
     }
     if (!dirent.isDirectory()) continue;
     const dir = join(root, dirent.name);
-    const main = await readFile(join(dir, SKILL_FILE)).catch((error: unknown) => {
-      if (isNotFound(error) || (error as NodeJS.ErrnoException).code === "EISDIR") return undefined;
-      throw error;
-    });
-    if (main === undefined) {
+    const mainPath = join(dir, SKILL_FILE);
+    const mainInfo = await lstatIfAny(mainPath);
+    if (mainInfo?.isSymbolicLink()) {
+      warnings.push(`skills/${dirent.name}/${SKILL_FILE} is a symbolic link; not exported`);
+      continue;
+    }
+    if (!mainInfo?.isFile()) {
       warnings.push(`skills/${dirent.name} has no ${SKILL_FILE}; not exported`);
       continue;
     }
-    const mainBytes = toBytes(main);
+    const mainBytes = toBytes(await readFile(mainPath));
     const names = [dirent.name, frontmatterName(mainBytes) ?? dirent.name];
     for (const name of names) present.add(name);
     if (allowed !== undefined && !names.some((name) => allowed.has(name))) {
@@ -424,7 +442,9 @@ async function readRoutines(
 
 /**
  * The avatar file when `ref` is a workspace-relative path to a PNG, JPEG or WebP image within the
- * size limit, named `avatar.<ext>` as the bundle layout wants; otherwise a warning.
+ * size limit, named `avatar.<ext>` as the bundle layout wants; otherwise a warning. The file must
+ * not be a symbolic link and must really be inside the workspace, symbolic links on the way
+ * resolved, since `ref` can come from IDENTITY.md, a file the agent itself may edit.
  */
 async function readAvatar(
   workspace: string,
@@ -437,23 +457,20 @@ async function readAvatar(
   const notExported = (why: string) => ({ warning: `avatar '${ref}' ${why}; not exported` });
 
   const file = resolve(workspace, ref);
-  const inside = relative(workspace, file);
-  if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+  if (file === workspace || !isWithin(workspace, file)) {
     return notExported("is outside the workspace");
   }
-  let size: number;
-  try {
-    const info = await stat(file);
-    if (!info.isFile()) return notExported("not found");
-    size = info.size;
-  } catch (error) {
-    if (isNotFound(error)) return notExported("not found");
-    throw error;
+  const info = await lstatIfAny(file);
+  if (info?.isSymbolicLink()) return { warning: "avatar is a symlink; not exported" };
+  if (!info?.isFile()) return notExported("not found");
+  // A symbolic link to a directory on the way could still lead out of the workspace.
+  if (!isWithin(await realpath(workspace), await realpath(file))) {
+    return notExported("is outside the workspace");
   }
   const extension = extname(file).toLowerCase();
   if (!AVATAR_EXTENSIONS.has(extension)) return notExported("is not a PNG, JPEG or WebP image");
-  if (size > MAX_AVATAR_BYTES) {
-    return notExported(`is ${size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
+  if (info.size > MAX_AVATAR_BYTES) {
+    return notExported(`is ${info.size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
   }
   return { avatar: { name: `avatar${extension}`, bytes: toBytes(await readFile(file)) } };
 }
@@ -487,7 +504,8 @@ export async function readOpenClawAgent(
   if (!profile.hasIdentityFile) missing.push("IDENTITY.md not found");
 
   const skills = await readSkills(workspace, entry.skills);
-  const routines = await readRoutines(new OpenClawCli(ctx, paths.stateDir), agentId);
+  const cli = new OpenClawCli(ctx, paths.stateDir, paths.configFile);
+  const routines = await readRoutines(cli, agentId);
   const memory = await readMemory(workspace);
   const avatar = await readAvatar(workspace, identity?.avatar);
   const clipped: string[] = [];
@@ -556,7 +574,7 @@ export async function listOpenClawAgents(ctx: Ctx): Promise<AgentRef[]> {
 
   let rows: AgentRow[] = [];
   try {
-    rows = await new OpenClawCli(ctx, paths.stateDir).agentsList();
+    rows = await new OpenClawCli(ctx, paths.stateDir, paths.configFile).agentsList();
   } catch (error) {
     ctx.logger(
       `openclaw agents list failed (${errorLine(error)}); listing the agents in openclaw.json only`,

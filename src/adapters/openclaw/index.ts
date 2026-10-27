@@ -29,7 +29,7 @@ const isFile = (path: string): Promise<boolean> =>
 async function detect(ctx: Ctx): Promise<Awaited<ReturnType<Adapter["detect"]>>> {
   const { stateDir, configFile } = openclawPaths(ctx);
   const found = await isFile(configFile);
-  const version = await new OpenClawCli(ctx, stateDir).version();
+  const version = await new OpenClawCli(ctx, stateDir, configFile).version();
   return {
     found,
     location: stateDir,

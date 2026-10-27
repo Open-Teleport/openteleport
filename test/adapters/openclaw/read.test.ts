@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,29 @@ const FIXTURE_STATE = join(FIXTURES, "home");
 const NOW = new Date("2026-10-27T09:15:00.000Z");
 
 const CAPABILITIES = ["browser", "shell", "filesystem", "network", "scheduler"];
+
+/** Whether this machine lets the tests create file and directory symbolic links. */
+const canSymlink = await (async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openteleport-symlink-"));
+  try {
+    await writeFile(join(dir, "file"), "");
+    await mkdir(join(dir, "dir"));
+    await symlink(join(dir, "file"), join(dir, "file-link"), "file");
+    await symlink(join(dir, "dir"), join(dir, "dir-link"), "dir");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+})();
+
+/** The env every `openclaw` call gets for the install in `dir`: its state dir and its config. */
+const cliEnv = (dir: string, rest: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  ...rest,
+  OPENCLAW_STATE_DIR: dir,
+  OPENCLAW_CONFIG_PATH: join(dir, "openclaw.json"),
+});
 const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declare them per agent";
 
 /** What `openclaw agents list --json` prints for the fixture install. */
@@ -283,6 +306,16 @@ describe("openclawPaths", () => {
     );
   });
 
+  it("refuses an agent id that is not a single path segment, naming it", () => {
+    const { workspaceFor } = openclawPaths(ctx);
+    for (const id of ["../x", "..\\x", "a/b", "a\\b", "..", ".", "", "C:x", "c:\\x"]) {
+      expect(() => workspaceFor(id, {}), id).toThrow(
+        `invalid OpenClaw agent id ${JSON.stringify(id)}: it must be a single path segment`,
+      );
+    }
+    expect(workspaceFor("a..b", {})).toBe(join(stateDir, "workspace-a..b"));
+  });
+
   it("resolves a relative workspace against ctx.cwd", () => {
     const { workspaceFor } = openclawPaths(ctx);
     expect(workspaceFor("ada", { agents: { entries: { ada: { workspace: "rel/ada" } } } })).toBe(
@@ -321,10 +354,10 @@ describe("readOpenClawConfig", () => {
 
 describe("OpenClawCli", () => {
   function cliWith(reply: (args: string[]) => Reply, env: NodeJS.ProcessEnv = {}): OpenClawCli {
-    return new OpenClawCli(makeCtx({ env }, reply), stateDir);
+    return new OpenClawCli(makeCtx({ env }, reply), stateDir, join(stateDir, "openclaw.json"));
   }
 
-  it("runs commands with OPENCLAW_STATE_DIR, keeping the other env, and --json", async () => {
+  it("runs commands with the install's state dir and config, other env kept, --json", async () => {
     const cli = cliWith(
       (args) => {
         if (args[0] === "automations" && args[1] === "add") return '{"id":"job-9"}';
@@ -332,7 +365,11 @@ describe("OpenClawCli", () => {
         if (args[0] === "agents" && args[1] === "list") return "[]";
         return "";
       },
-      { PATH: "/usr/bin", OPENCLAW_STATE_DIR: "/real/home/.openclaw" },
+      {
+        PATH: "/usr/bin",
+        OPENCLAW_STATE_DIR: "/real/home/.openclaw",
+        OPENCLAW_CONFIG_PATH: "/real/home/.openclaw/openclaw.json",
+      },
     );
 
     await cli.agentsList();
@@ -360,7 +397,7 @@ describe("OpenClawCli", () => {
       "openclaw config set agents.entries.ada.model anthropic/claude-opus-5-5",
     ]);
     for (const call of calls) {
-      expect(call.env).toEqual({ PATH: "/usr/bin", OPENCLAW_STATE_DIR: stateDir });
+      expect(call.env).toEqual(cliEnv(stateDir, { PATH: "/usr/bin" }));
     }
   });
 
@@ -509,9 +546,7 @@ describe("OpenClawCli", () => {
 
   it("reads the version with --version, and gives undefined when that fails", async () => {
     expect(await cliWith(fixtureReply).version()).toBe("2026.10.3");
-    expect(calls).toEqual([
-      { file: "openclaw", args: ["--version"], env: { OPENCLAW_STATE_DIR: stateDir } },
-    ]);
+    expect(calls).toEqual([{ file: "openclaw", args: ["--version"], env: cliEnv(stateDir) }]);
     expect(await cliWith(() => new Error("spawn openclaw ENOENT")).version()).toBeUndefined();
   });
 });
@@ -525,7 +560,7 @@ describe("readOpenClawAgent", () => {
       {
         file: "openclaw",
         args: ["automations", "list", "--all", "--json"],
-        env: { OPENCLAW_STATE_DIR: stateDir },
+        env: cliEnv(stateDir),
       },
     ]);
     expect(logs).toEqual([]);
@@ -551,7 +586,7 @@ describe("readOpenClawAgent", () => {
     const env = { OPENCLAW_STATE_DIR: stateDir, PATH: "/usr/bin" };
     const { bundle } = await readOpenClawAgent(makeCtx({ sourceDir: undefined, env }), "ada");
     expect(bundle).toStrictEqual(await expectedAda(stateDir));
-    expect(calls.map((call) => call.env)).toEqual([env]);
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(stateDir, { PATH: "/usr/bin" })]);
   });
 
   it("finds the state directory under <home>/.openclaw by default", async () => {
@@ -559,27 +594,40 @@ describe("readOpenClawAgent", () => {
     await cp(FIXTURE_STATE, defaultDir, { recursive: true });
     const { bundle } = await readOpenClawAgent(makeCtx({ sourceDir: undefined }), "ada");
     expect(bundle).toStrictEqual(await expectedAda(defaultDir));
-    expect(calls.map((call) => call.env.OPENCLAW_STATE_DIR)).toEqual([defaultDir]);
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(defaultDir)]);
   });
 
   it("prefers sourceDir over OPENCLAW_STATE_DIR, for the files and for the CLI", async () => {
     const env = { OPENCLAW_STATE_DIR: join(scratch, "not-this-one") };
     const { bundle } = await readOpenClawAgent(makeCtx({ env }), "ada");
     expect(bundle.manifest.name).toBe("Ada");
-    expect(calls.map((call) => call.env.OPENCLAW_STATE_DIR)).toEqual([stateDir]);
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(stateDir)]);
   });
 
   it("reads <sourceDir>/openclaw.json even when OPENCLAW_CONFIG_PATH names another", async () => {
     const other = join(scratch, "other.json5");
     await writeFile(other, '{ agents: { entries: { ada: { name: "Wrong", model: "x/y" } } } }');
-    const { bundle } = await readOpenClawAgent(
-      makeCtx({ env: { OPENCLAW_CONFIG_PATH: other } }),
-      "ada",
-    );
+    const env = { OPENCLAW_CONFIG_PATH: other };
+    const { bundle } = await readOpenClawAgent(makeCtx({ env }), "ada");
     expect(bundle).toStrictEqual(await expectedAda(stateDir));
-    expect(await openclawAdapter.list(makeCtx({ env: { OPENCLAW_CONFIG_PATH: other } }))).toEqual(
-      await openclawAdapter.list(ctx),
+    // The CLI must use the same config, not the one the variable names.
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(stateDir)]);
+
+    const listed = await openclawAdapter.list(makeCtx({ env }));
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(stateDir)]);
+    expect(listed).toEqual(await openclawAdapter.list(ctx));
+
+    const target = makeCtx({ sourceDir: undefined, targetDir: stateDir, env }, () => "");
+    await new OpenClawCli(target, stateDir, openclawPaths(target).configFile).agentsAdd("x", "/w");
+    expect(calls.map((call) => call.env)).toEqual([cliEnv(stateDir)]);
+  });
+
+  it("throws for an agent id that would leave the state directory", async () => {
+    await mkdir(join(scratch, "x"));
+    await expect(readOpenClawAgent(ctx, "../x")).rejects.toThrow(
+      'invalid OpenClaw agent id "../x": it must be a single path segment',
     );
+    expect(calls).toEqual([]);
   });
 
   it("throws for an agent without a workspace", async () => {
@@ -800,6 +848,37 @@ describe("readOpenClawAgent", () => {
       expect(warnings).toEqual([CAPABILITIES_WARNING, warning]);
     });
 
+    it.skipIf(!canSymlink)("refuses an avatar that is or sits behind a symbolic link", async () => {
+      const dir = await makeState(
+        {},
+        {
+          "workspace/AGENTS.md": "x\n",
+          "workspace/SOUL.md": "s\n",
+          "workspace/avatars/real.png": new Uint8Array([1]),
+          "secret/id_ed25519": "-----BEGIN OPENSSH PRIVATE KEY-----\n",
+          "secret/key.png": new Uint8Array([2]),
+        },
+      );
+      const ws = join(dir, "workspace");
+      await symlink(join(dir, "secret", "id_ed25519"), join(ws, "avatars", "out.png"), "file");
+      await symlink(join(ws, "avatars", "real.png"), join(ws, "avatars", "in.png"), "file");
+      await symlink(join(dir, "secret"), join(ws, "linked"), "dir");
+
+      for (const [avatar, warning] of [
+        ["avatars/out.png", "avatar is a symlink; not exported"],
+        ["avatars/in.png", "avatar is a symlink; not exported"],
+        ["linked/key.png", "avatar 'linked/key.png' is outside the workspace; not exported"],
+      ] as const) {
+        await writeFile(join(ws, "IDENTITY.md"), `- **Avatar:** ${avatar}\n`);
+        const { bundle, warnings } = await readOpenClawAgent(
+          makeCtx({ sourceDir: dir }, noJobs),
+          "main",
+        );
+        expect(bundle.avatar, avatar).toBeUndefined();
+        expect(warnings, avatar).toEqual([CAPABILITIES_WARNING, warning]);
+      }
+    });
+
     it("names the avatar avatar.<ext> whatever its file name", async () => {
       const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
       const { bundle, warnings } = await readWith(
@@ -869,6 +948,36 @@ describe("readOpenClawAgent", () => {
         CAPABILITIES_WARNING,
         "skill 'other' is not on the agent's skill allowlist; not exported",
         "skill 'weather' is not in the workspace; not exported",
+      ]);
+    });
+
+    it.skipIf(!canSymlink)("refuses a symbolic-link SKILL.md or skill directory", async () => {
+      const dir = await makeState(
+        {},
+        {
+          "workspace/AGENTS.md": "x\n",
+          "workspace/SOUL.md": "s\n",
+          "workspace/IDENTITY.md": "",
+          "workspace/skills/linked-main/notes.md": "n\n",
+          "workspace/skills/plain/SKILL.md": "# Plain\n",
+          "shared/SKILL.md": "# Shared\n",
+          "shared-skill/SKILL.md": "# Shared skill\n",
+        },
+      );
+      const skills = join(dir, "workspace", "skills");
+      const sharedMain = join(dir, "shared", "SKILL.md");
+      await symlink(sharedMain, join(skills, "linked-main", "SKILL.md"), "file");
+      await symlink(join(dir, "shared-skill"), join(skills, "linked-dir"), "dir");
+
+      const { bundle, warnings } = await readOpenClawAgent(
+        makeCtx({ sourceDir: dir }, noJobs),
+        "main",
+      );
+      expect(bundle.skills.map(({ name }) => name)).toEqual(["plain"]);
+      expect(warnings).toEqual([
+        CAPABILITIES_WARNING,
+        "skills/linked-dir is a symbolic link; not exported",
+        "skills/linked-main/SKILL.md is a symbolic link; not exported",
       ]);
     });
 
@@ -1102,9 +1211,7 @@ describe("openclawAdapter", () => {
         location: stateDir,
         version: "2026.10.3",
       });
-      expect(calls).toEqual([
-        { file: "openclaw", args: ["--version"], env: { OPENCLAW_STATE_DIR: stateDir } },
-      ]);
+      expect(calls).toEqual([{ file: "openclaw", args: ["--version"], env: cliEnv(stateDir) }]);
     });
 
     it("still finds the install when the CLI is not on the PATH", async () => {
@@ -1128,6 +1235,7 @@ describe("openclawAdapter", () => {
       const env = { OPENCLAW_STATE_DIR: stateDir, OPENCLAW_CONFIG_PATH: elsewhere };
       const fromEnv = (): Ctx => makeCtx({ sourceDir: undefined, env });
       expect((await openclawAdapter.detect(fromEnv())).found).toBe(false);
+      expect(calls.map((call) => call.env)).toEqual([env]);
       expect((await openclawAdapter.detect(makeCtx({ env }))).found).toBe(true);
       await writeFile(elsewhere, "{}");
       expect((await openclawAdapter.detect(fromEnv())).found).toBe(true);
@@ -1146,8 +1254,8 @@ describe("openclawAdapter", () => {
         { id: "bare", name: "bare", location: join(stateDir, "workspace-bare") },
         { id: "ops", name: "Ops", location: "/srv/openclaw/workspace-ops" },
       ]);
-      expect(calls.map((call) => [call.args.join(" "), call.env.OPENCLAW_STATE_DIR])).toEqual([
-        ["agents list --json", stateDir],
+      expect(calls.map((call) => [call.args.join(" "), call.env])).toEqual([
+        ["agents list --json", cliEnv(stateDir)],
       ]);
       expect(logs).toEqual([]);
     });

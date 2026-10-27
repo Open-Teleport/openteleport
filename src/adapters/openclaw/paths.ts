@@ -36,6 +36,24 @@ export type OpenClawPaths = {
 /** The id OpenClaw gives the agent of an install that configures none. */
 export const DEFAULT_AGENT_ID = "main";
 
+/**
+ * Throws unless `agentId` is a single path segment: not empty, not `.` or `..`, no `/` or `\`
+ * and no drive prefix such as `C:`. Workspace paths are built from it.
+ */
+export function assertAgentId(agentId: string): void {
+  const segment =
+    agentId !== "" &&
+    agentId !== "." &&
+    agentId !== ".." &&
+    !/[\\/]/.test(agentId) &&
+    !/^[A-Za-z]:/.test(agentId);
+  if (!segment) {
+    throw new Error(
+      `invalid OpenClaw agent id ${JSON.stringify(agentId)}: it must be a single path segment`,
+    );
+  }
+}
+
 /** `~` alone or followed by a separator stands for the home directory. */
 function expandHome(path: string, home: string): string {
   return /^~(?=$|[\\/])/.test(path) ? join(home, path.slice(1)) : path;
@@ -61,9 +79,10 @@ export function openclawPaths(ctx: Ctx): OpenClawPaths {
   /**
    * The entry's own `workspace`; else `<agents.defaults.workspace>/<id>`; else
    * `<state dir>/workspace` for the only configured agent (or `main` when none is configured);
-   * else `<state dir>/workspace-<id>`.
+   * else `<state dir>/workspace-<id>`. Throws for an id that is not a single path segment.
    */
   function workspaceFor(agentId: string, cfg: OpenClawConfig): string {
+    assertAgentId(agentId);
     const entries = cfg.agents?.entries ?? {};
     const own = entries[agentId]?.workspace;
     if (typeof own === "string" && own.trim() !== "") return absolute(own);

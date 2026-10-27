@@ -118,16 +118,20 @@ function toJobRow(raw: unknown, index: number): JobRow | { skipped: string } {
 const UNKNOWN_COMMAND = /unknown (?:sub)?command|no such command/i;
 
 /**
- * Runs `openclaw` for one install. Every command runs with `OPENCLAW_STATE_DIR` set to that
- * install's state directory, on top of `ctx.env`, and gets `--json` unless noted otherwise.
+ * Runs `openclaw` for one install. Every command runs with `OPENCLAW_STATE_DIR` and
+ * `OPENCLAW_CONFIG_PATH` set to that install's state directory and config file, on top of
+ * `ctx.env`, so OpenClaw works on exactly the config the adapter reads; and every command gets
+ * `--json` unless noted otherwise.
  */
 export class OpenClawCli {
   private readonly ctx: Ctx;
   private readonly stateDir: string;
+  private readonly configFile: string;
 
-  constructor(ctx: Ctx, stateDir: string) {
+  constructor(ctx: Ctx, stateDir: string, configFile: string) {
     this.ctx = ctx;
     this.stateDir = stateDir;
+    this.configFile = configFile;
   }
 
   private async run(args: readonly string[], json = true): Promise<string> {
@@ -137,7 +141,11 @@ export class OpenClawCli {
   }
 
   private env(): NodeJS.ProcessEnv {
-    return { ...this.ctx.env, OPENCLAW_STATE_DIR: this.stateDir };
+    return {
+      ...this.ctx.env,
+      OPENCLAW_STATE_DIR: this.stateDir,
+      OPENCLAW_CONFIG_PATH: this.configFile,
+    };
   }
 
   /** The agents OpenClaw knows. A row without an id is left out and logged. */
