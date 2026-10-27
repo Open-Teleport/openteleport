@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import {
   MANIFEST_SCHEMA_ID,
   RoutineSchema,
@@ -123,25 +123,40 @@ describe("RoutineSchema", () => {
   });
 
   it("validates timezone as IANA", () => {
-    expect(RoutineSchema.safeParse({ ...ROUTINE, timezone: "Europe/Warsaw" }).success).toBe(true);
-    expect(RoutineSchema.safeParse({ ...ROUTINE, timezone: "UTC" }).success).toBe(true);
-    expect(RoutineSchema.safeParse({ ...ROUTINE, timezone: "Mars/Olympus" }).success).toBe(false);
-    expect(RoutineSchema.safeParse({ ...ROUTINE, timezone: "" }).success).toBe(false);
+    const zone = (timezone: string) => RoutineSchema.safeParse({ ...ROUTINE, timezone }).success;
+    expect(zone("Europe/Warsaw")).toBe(true);
+    expect(zone("UTC")).toBe(true);
+    expect(zone("Etc/UTC")).toBe(true);
+    expect(zone("US/Pacific")).toBe(true);
+    expect(zone("Mars/Olympus")).toBe(false);
+    expect(zone("")).toBe(false);
   });
 
-  it("validates every as duration", () => {
+  it("describes timezone as a plain non-empty string in JSON Schema (the IANA refine is runtime-only)", () => {
+    const schema = z.toJSONSchema(RoutineSchema) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    expect(schema.properties.timezone).toEqual({ type: "string", minLength: 1 });
+  });
+
+  it("validates every as a duration of at least one unit", () => {
     const every = (value: string) => ({ ...ROUTINE, schedule: { kind: "every", every: value } });
     expect(RoutineSchema.safeParse(every("30m")).success).toBe(true);
+    expect(RoutineSchema.safeParse(every("2h")).success).toBe(true);
+    expect(RoutineSchema.safeParse(every("1d")).success).toBe(true);
     expect(RoutineSchema.safeParse(every("12h")).success).toBe(true);
-    expect(RoutineSchema.safeParse(every("2d")).success).toBe(true);
+    expect(RoutineSchema.safeParse(every("0m")).success).toBe(false);
+    expect(RoutineSchema.safeParse(every("00h")).success).toBe(false);
     expect(RoutineSchema.safeParse(every("30 minutes")).success).toBe(false);
     expect(RoutineSchema.safeParse(every("30")).success).toBe(false);
     expect(RoutineSchema.safeParse(every("1w")).success).toBe(false);
   });
 
-  it("validates at as an ISO 8601 datetime", () => {
+  it("validates at as an ISO 8601 datetime with or without a UTC offset", () => {
     const at = (value: string) => ({ ...ROUTINE, schedule: { kind: "at", at: value } });
     expect(RoutineSchema.safeParse(at("2026-10-27T10:00:00Z")).success).toBe(true);
+    expect(RoutineSchema.safeParse(at("2026-11-01T09:00:00+01:00")).success).toBe(true);
+    expect(RoutineSchema.safeParse(at("2026-11-01 09:00")).success).toBe(false);
     expect(RoutineSchema.safeParse(at("tomorrow at nine")).success).toBe(false);
   });
 

@@ -5,11 +5,19 @@ export const MANIFEST_SCHEMA_ID = "https://openteleport.dev/schema/0.1/jetpack.j
 
 const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const VENDOR_KEY_PATTERN = /^x-[a-z0-9-]+$/;
-const DURATION_PATTERN = /^\d+(m|h|d)$/;
+const DURATION_PATTERN = /^[1-9]\d*(m|h|d)$/;
 
-// Intl.supportedValuesOf lists canonical zone names and omits "UTC", which is by far the
-// most common zone in routines, so it is added explicitly.
-const IANA_TIME_ZONES = new Set([...Intl.supportedValuesOf("timeZone"), "UTC"]);
+// Building a formatter is the portable IANA check: V8 throws a RangeError for unknown zones
+// and accepts the aliases routines use in practice ("UTC", "Etc/UTC", "US/Pacific").
+function isTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: zone });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) return false;
+    throw error;
+  }
+}
 
 export const CapabilitySchema = z.enum([
   "browser",
@@ -36,7 +44,7 @@ export type ModelPref = z.infer<typeof ModelPrefSchema>;
 export const ScheduleSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("cron"), expression: z.string().min(1) }),
   z.strictObject({ kind: z.literal("every"), every: z.string().regex(DURATION_PATTERN) }),
-  z.strictObject({ kind: z.literal("at"), at: z.iso.datetime() }),
+  z.strictObject({ kind: z.literal("at"), at: z.iso.datetime({ offset: true }) }),
 ]);
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
@@ -44,9 +52,8 @@ export const RoutineSchema = z.strictObject({
   name: z.string().min(1),
   instruction: z.string().min(1),
   enabled: z.boolean(),
-  timezone: z.string().refine((zone) => IANA_TIME_ZONES.has(zone), {
-    error: "Not an IANA time zone",
-  }),
+  // The IANA check is a runtime refine, so the JSON Schema stays a plain non-empty string.
+  timezone: z.string().min(1).refine(isTimeZone, { error: "Not an IANA time zone" }),
   schedule: ScheduleSchema,
 });
 export type Routine = z.infer<typeof RoutineSchema>;
