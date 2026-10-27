@@ -1,0 +1,3 @@
+# AGENTS.md
+
+Answer briefly.
