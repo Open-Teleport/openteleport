@@ -21,7 +21,8 @@
     "build": "tsup",
     "pretest": "npm run build",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "schema": "node dist/scripts/emit-schema.js"
   },
   "dependencies": {
     "@clack/prompts": "^0.10",

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openteleport.dev/schema/0.1/jetpack.json",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string"
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "minProperties": 1
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "browser",
+          "shell",
+          "filesystem",
+          "network",
+          "computerUse",
+          "scheduler"
+        ]
+      }
+    },
+    "origin": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "exportedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "exportedAt"
+      ],
+      "additionalProperties": false
+    },
+    "signature": {
+      "type": "null"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "models",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x-[a-z0-9-]+$": {}
+  }
+}

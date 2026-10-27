@@ -12,6 +12,11 @@ const builds: Options[] = [
     format: ["esm"],
     dts: true,
   },
+  {
+    // Build-time tool (`npm run schema`); not part of the CLI or the library API.
+    entry: { "scripts/emit-schema": "src/scripts/emit-schema.ts" },
+    format: ["esm"],
+  },
 ];
 
 // tsup builds array configs concurrently, so a per-config `clean` could delete the
