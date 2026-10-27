@@ -13,6 +13,8 @@ import {
 import {
   MAX_AVATAR_BYTES,
   MAX_FILES_BYTES,
+  MAX_ROUTINES,
+  MAX_SKILLS,
   isForbiddenPath,
   isSafeArchivePath,
 } from "../../src/core/paths.js";
@@ -187,6 +189,65 @@ describe("writeBundle into a directory", () => {
 
     expect((await readBundle(target)).instructions).toBe("Be even briefer.\n");
   });
+
+  it("replaces the layout of a previous export and keeps every other file", async () => {
+    const target = join(tmp, "ada");
+    const ada = await readBundle(ADA_DIR);
+    await writeBundle(ada, target, { asDirectory: true });
+    await writeFile(join(target, "notes.txt"), "mine");
+    await mkdir(join(target, "scratch"));
+    await writeFile(join(target, "scratch", "todo.txt"), "also mine");
+    expect((await readdir(target)).sort()).toEqual([
+      "AGENTS.md",
+      "MEMORY.md",
+      "SOUL.md",
+      "avatar.png",
+      "jetpack.json",
+      "memory",
+      "notes.txt",
+      "routines",
+      "scratch",
+      "skills",
+    ]);
+
+    const slimmer: Bundle = {
+      ...ada,
+      persona: undefined,
+      skills: [],
+      routines: [],
+      notes: [],
+      avatar: { name: "avatar.webp", bytes: new Uint8Array([1, 2, 3]) },
+    };
+    await writeBundle(slimmer, target, { asDirectory: true });
+
+    // skills/, routines/, memory/, SOUL.md and avatar.png went away with the old export...
+    expect((await readdir(target)).sort()).toEqual([
+      "AGENTS.md",
+      "MEMORY.md",
+      "avatar.webp",
+      "jetpack.json",
+      "notes.txt",
+      "scratch",
+    ]);
+    // ...and the files that were not part of the layout are untouched.
+    expect(await readFile(join(target, "notes.txt"), "utf8")).toBe("mine");
+    expect(await readFile(join(target, "scratch", "todo.txt"), "utf8")).toBe("also mine");
+
+    const reread = await readBundle(target);
+    expect(reread.skills).toEqual([]);
+    expect(reread.routines).toEqual([]);
+    expect(reread.unknownPaths).toEqual(["notes.txt", "scratch/todo.txt"]);
+  });
+
+  it("leaves a previous export alone when the new Bundle is invalid", async () => {
+    const target = join(tmp, "ada");
+    await writeBundle(sampleBundle(), target, { asDirectory: true });
+
+    const invalid = { ...sampleBundle(), facts: ["two\nlines"] };
+    await expect(writeBundle(invalid, target, { asDirectory: true })).rejects.toThrow(/fact 1/);
+
+    expect((await readBundle(target)).skills.map((skill) => skill.name)).toEqual(["web-brief"]);
+  });
 });
 
 describe("readBundle without a manifest", () => {
@@ -211,6 +272,22 @@ describe("readBundle without a manifest", () => {
     });
     expect(bundle.facts).toHaveLength(2);
     expect(bundle.skills.map((skill) => skill.name)).toEqual(["web-brief"]);
+  });
+
+  it("drops the .jetpack extension from the name of an archive", async () => {
+    const archive = await writeZip("ada.jetpack", [text("AGENTS.md", "Be brief.")]);
+
+    const bundle = await readBundle(archive, { requireManifest: false });
+
+    expect(bundle.manifest.name).toBe("ada");
+  });
+
+  it("only drops a real .jetpack extension from the name", async () => {
+    const archive = await writeZip("my-jetpack", [text("AGENTS.md", "Be brief.")]);
+
+    const bundle = await readBundle(archive, { requireManifest: false });
+
+    expect(bundle.manifest.name).toBe("my-jetpack");
   });
 
   it("requires jetpack.json by default", async () => {
@@ -417,6 +494,73 @@ describe("size limits", () => {
     bundle.files = [{ path: "big.bin", bytes: new Uint8Array(MAX_FILES_BYTES + 1) }];
 
     expect(() => bundleToEntries(bundle)).toThrow(/files\/ is \d+ bytes/);
+  });
+});
+
+describe("format limits", () => {
+  const skillEntries = (count: number): FileEntry[] =>
+    Array.from({ length: count }, (_, i) => text(`skills/skill-${i}/SKILL.md`, "x"));
+  const routineEntries = (count: number): FileEntry[] =>
+    Array.from({ length: count }, (_, i) =>
+      text(`routines/routine-${i}.json`, JSON.stringify({ ...ROUTINE, name: `Routine ${i}` })),
+    );
+  const underFiles = (entry: FileEntry): FileEntry => ({ ...entry, path: `files/${entry.path}` });
+
+  it("accepts MAX_SKILLS skills and rejects one more", () => {
+    expect(entriesToBundle(minimal(...skillEntries(MAX_SKILLS))).skills).toHaveLength(32);
+    expect(() => entriesToBundle(minimal(...skillEntries(MAX_SKILLS + 1)))).toThrow(
+      /too many skills: 33 \(the limit is 32\)/,
+    );
+  });
+
+  it("counts a skill once however many files it has", () => {
+    const more = Array.from({ length: 5 }, (_, i) => text(`skills/big/file-${i}.md`, "x"));
+
+    const bundle = entriesToBundle(minimal(text("skills/big/SKILL.md", "x"), ...more));
+
+    expect(bundle.skills).toHaveLength(1);
+  });
+
+  it("accepts MAX_ROUTINES routines and rejects one more", () => {
+    expect(entriesToBundle(minimal(...routineEntries(MAX_ROUTINES))).routines).toHaveLength(64);
+    expect(() => entriesToBundle(minimal(...routineEntries(MAX_ROUTINES + 1)))).toThrow(
+      /too many routines: 65 \(the limit is 64\)/,
+    );
+  });
+
+  it("applies the same limits when writing", () => {
+    const skills = (count: number): Bundle["skills"] =>
+      Array.from({ length: count }, (_, i) => ({
+        name: `skill-${i}`,
+        files: [{ path: "SKILL.md", bytes: bytes("x") }],
+      }));
+    const routines = (count: number): Routine[] =>
+      Array.from({ length: count }, (_, i) => ({ ...ROUTINE, name: `Routine ${i}` }));
+    const write = (changes: Partial<Bundle>) => bundleToEntries({ ...sampleBundle(), ...changes });
+
+    expect(write({ skills: skills(MAX_SKILLS) })).not.toHaveLength(0);
+    expect(() => write({ skills: skills(MAX_SKILLS + 1) })).toThrow(
+      /too many skills: 33 \(the limit is 32\)/,
+    );
+    expect(write({ routines: routines(MAX_ROUTINES) })).not.toHaveLength(0);
+    expect(() => write({ routines: routines(MAX_ROUTINES + 1) })).toThrow(
+      /too many routines: 65 \(the limit is 64\)/,
+    );
+  });
+
+  it("rejects an archive with too many skills before reading its content", async () => {
+    const archive = await writeZip("crowded.jetpack", minimal(...skillEntries(MAX_SKILLS + 1)));
+
+    await expect(readBundle(archive)).rejects.toThrow(/too many skills: 33/);
+  });
+
+  it("does not count skills or routines kept under files/", () => {
+    const entries = minimal(
+      ...skillEntries(MAX_SKILLS + 1).map(underFiles),
+      ...routineEntries(MAX_ROUTINES + 1).map(underFiles),
+    );
+
+    expect(entriesToBundle(entries).files).toHaveLength(MAX_SKILLS + 1 + MAX_ROUTINES + 1);
   });
 });
 

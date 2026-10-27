@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import { ZodError } from "zod";
@@ -6,6 +6,8 @@ import {
   MAX_AVATAR_BYTES,
   MAX_FACT_CHARS,
   MAX_FILES_BYTES,
+  MAX_ROUTINES,
+  MAX_SKILLS,
   isForbiddenPath,
   isSafeArchivePath,
 } from "./paths.js";
@@ -62,10 +64,13 @@ type Listing = { path: string; size: number };
 
 /**
  * Checks everything that can be decided from paths and sizes alone, so that an archive can be
- * rejected before it is inflated: unsafe and forbidden paths, duplicates and the size limits.
+ * rejected before it is inflated: unsafe and forbidden paths, duplicates, the size limits and
+ * the limits on the number of skills and routines.
  */
 function validateListing(listing: readonly Listing[]): void {
   const seen = new Set<string>();
+  const skillNames = new Set<string>();
+  let routineCount = 0;
   let filesBytes = 0;
   for (const { path, size } of listing) {
     if (!isSafeArchivePath(path)) throw new Error(`unsafe path: ${path}`);
@@ -75,9 +80,22 @@ function validateListing(listing: readonly Listing[]): void {
 
     if (path.startsWith(FILES_PREFIX)) {
       filesBytes += size;
-    } else if (AVATAR_PATTERN.test(path) && size > MAX_AVATAR_BYTES) {
-      throw new Error(`${path} is ${size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
+    } else if (AVATAR_PATTERN.test(path)) {
+      if (size > MAX_AVATAR_BYTES) {
+        throw new Error(`${path} is ${size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
+      }
+    } else if (ROUTINE_PATTERN.test(path)) {
+      routineCount += 1;
+    } else {
+      const skillName = SKILL_PATH_PATTERN.exec(path)?.[1];
+      if (skillName !== undefined) skillNames.add(skillName);
     }
+  }
+  if (skillNames.size > MAX_SKILLS) {
+    throw new Error(`too many skills: ${skillNames.size} (the limit is ${MAX_SKILLS})`);
+  }
+  if (routineCount > MAX_ROUTINES) {
+    throw new Error(`too many routines: ${routineCount} (the limit is ${MAX_ROUTINES})`);
   }
   if (filesBytes > MAX_FILES_BYTES) {
     throw new Error(`files/ is ${filesBytes} bytes, over the ${MAX_FILES_BYTES} byte limit`);
@@ -458,7 +476,7 @@ async function readZipEntries(source: string): Promise<FileEntry[]> {
  * Reads a `.jetpack` zip archive or an agent directory.
  *
  * Without `jetpack.json` and with `requireManifest: false` the manifest is synthesized from the
- * name of `source`, with an empty `id` for the caller to fill in.
+ * name of `source` (without a trailing `.jetpack`), with an empty `id` for the caller to fill in.
  */
 export async function readBundle(source: string, opts: ReadBundleOptions = {}): Promise<Bundle> {
   const entries = (await stat(source)).isDirectory()
@@ -466,12 +484,27 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
     : await readZipEntries(source);
   return entriesToBundle(entries, {
     requireManifest: opts.requireManifest,
-    fallbackName: basename(resolve(source)),
+    fallbackName: basename(resolve(source)).replace(/\.jetpack$/i, ""),
   });
 }
 
-/** Refuses a directory with content unless that content is a previous export. */
-async function assertCanWriteInto(directory: string): Promise<void> {
+/** What an export puts at the top of a directory; the rest of a directory is not ours. */
+const LAYOUT_NAMES: ReadonlySet<string> = new Set([
+  INSTRUCTIONS_PATH,
+  PERSONA_PATH,
+  MEMORY_PATH,
+  "memory",
+  "skills",
+  "routines",
+  "files",
+]);
+
+/**
+ * Makes room for an export. A missing or empty directory needs nothing. A directory with a
+ * `jetpack.json` is a previous export: the parts of the layout are removed so that nothing the
+ * new Bundle dropped lingers, and every other file stays. Any other directory is refused.
+ */
+async function prepareDirectory(directory: string): Promise<void> {
   let names: string[];
   try {
     names = await readdir(directory);
@@ -479,17 +512,23 @@ async function assertCanWriteInto(directory: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  if (names.length > 0 && !names.includes(MANIFEST_PATH)) {
+  if (names.length === 0) return;
+  if (!names.includes(MANIFEST_PATH)) {
     throw new Error(
       `${directory} is not empty and holds no ${MANIFEST_PATH}, so it is not a previous export`,
     );
+  }
+  for (const name of names) {
+    if (LAYOUT_NAMES.has(name) || AVATAR_PATTERN.test(name)) {
+      await rm(join(directory, name), { recursive: true, force: true });
+    }
   }
 }
 
 /**
  * Writes a Bundle as a zip archive at `target`, or with `asDirectory` as a directory tree. A
- * directory that already has content is only written into when it holds a `jetpack.json`.
- * Files from an earlier export that the Bundle no longer has are left in place.
+ * directory that already has content is only written into when it holds a `jetpack.json`; the
+ * layout of that earlier export is replaced and any other file in it is left alone.
  */
 export async function writeBundle(
   bundle: Bundle,
@@ -504,7 +543,7 @@ export async function writeBundle(
     return;
   }
 
-  await assertCanWriteInto(target);
+  await prepareDirectory(target);
   for (const { path, bytes } of entries) {
     const file = join(target, ...path.split("/"));
     await mkdir(dirname(file), { recursive: true });

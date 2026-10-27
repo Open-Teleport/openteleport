@@ -7,6 +7,12 @@ export const MAX_AVATAR_BYTES = 512 * 1024;
 /** Longest single fact in `MEMORY.md`, counted in characters. */
 export const MAX_FACT_CHARS = 500;
 
+/** Most skills (directories under `skills/`) in one archive. */
+export const MAX_SKILLS = 32;
+
+/** Most routines (files under `routines/`) in one archive. */
+export const MAX_ROUTINES = 64;
+
 /**
  * Secrets and clutter that never belong in an archive. Each pattern is tested against every
  * segment of a path, ignoring case, so a match anywhere in the path forbids it.
