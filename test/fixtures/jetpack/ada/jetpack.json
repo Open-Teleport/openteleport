@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "0.1",
+  "id": "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T",
+  "name": "Ada",
+  "title": "Research assistant",
+  "description": "Reads papers and web pages so you do not have to.",
+  "models": [
+    { "runtime": "claude-code", "provider": "anthropic", "model": "claude-opus-5-5" },
+    { "runtime": "codex", "provider": "openai", "model": "gpt-5.5" }
+  ],
+  "capabilities": ["browser", "filesystem", "scheduler"]
+}

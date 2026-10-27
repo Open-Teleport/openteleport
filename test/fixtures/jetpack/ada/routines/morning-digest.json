@@ -1,0 +1,7 @@
+{
+  "name": "Morning digest",
+  "instruction": "Summarise new papers and unread mail into a five-line digest.",
+  "enabled": true,
+  "timezone": "Europe/Warsaw",
+  "schedule": { "kind": "cron", "expression": "30 8 * * 1-5" }
+}
