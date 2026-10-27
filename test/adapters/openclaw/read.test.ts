@@ -1193,17 +1193,6 @@ describe("openclawAdapter", () => {
     expect(warnings).toEqual(ADA_WARNINGS);
   });
 
-  it("leaves writing to a later task", async () => {
-    const { bundle } = await openclawAdapter.read(ctx, "bare");
-    await expect(
-      openclawAdapter.write(ctx, bundle, {
-        enableRoutines: false,
-        includeFiles: false,
-        onConflict: "copy",
-      }),
-    ).rejects.toThrow("OpenClaw write is implemented in a later task");
-  });
-
   describe("detect", () => {
     it("finds the install by its config file and reports the CLI version", async () => {
       expect(await openclawAdapter.detect(ctx)).toEqual({

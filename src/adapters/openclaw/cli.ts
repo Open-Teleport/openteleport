@@ -18,6 +18,8 @@
 // - `openclaw agents list --json` prints `{ id, name?, workspace? }` rows, bare or under `agents`.
 // - `openclaw automations add ... --json` prints the new job's id as `id`, `job.id` or
 //   `automation.id`.
+// - `openclaw gateway status --json` prints an object with `running: true` or
+//   `status: "running"` while the Gateway runs.
 // - Output may start with log lines; the JSON document is the rest, from the first line that
 //   opens an array or an object.
 // - `--json` asks a command for JSON output. `config set` is the exception: there `--json` may
@@ -221,6 +223,21 @@ export class OpenClawCli {
 
   async automationsDisable(id: string): Promise<void> {
     await this.run(["automations", "disable", id]);
+  }
+
+  async automationsRemove(id: string): Promise<void> {
+    await this.run(["automations", "remove", id]);
+  }
+
+  /**
+   * Whether the Gateway runs: `running: true`, or a `status` of `running` in any case. Throws
+   * when the command fails or prints no JSON.
+   */
+  async gatewayStatus(): Promise<{ running: boolean }> {
+    const json = parseJson(await this.run(["gateway", "status"]), "gateway status");
+    const record = isRecord(json) ? json : {};
+    const status = label(record.status)?.toLowerCase();
+    return { running: record.running === true || status === "running" };
   }
 
   /**
