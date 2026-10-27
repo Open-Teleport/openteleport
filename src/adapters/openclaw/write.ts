@@ -33,6 +33,8 @@ const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
 const DEFAULT_EMOJI = "🤖";
 const RESTART_WARNING = "Restart the Gateway to load the new agent: openclaw gateway restart";
+const START_WARNING =
+  "Start the Gateway to create the routines, then move the agent again: openclaw gateway start";
 const REWRITE_WARNING = "openclaw.json rewritten; comments may be lost";
 
 /**
@@ -65,8 +67,32 @@ function label(value: unknown): string | undefined {
 /** One line of text: every run of whitespace, line breaks included, becomes one space. */
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 
-const errorLine = (error: unknown): string =>
-  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
+/**
+ * What a failed command said: its stderr when it has one, else the error message. (The message
+ * of a failed command starts with the command line, which holds the routine's own text.)
+ */
+function errorOutput(error: unknown): string {
+  const { message, stderr } = error as { message?: unknown; stderr?: unknown };
+  if (typeof stderr === "string" && stderr.trim() !== "") return stderr;
+  return typeof message === "string" ? message : String(error);
+}
+
+/** The first non-blank line of what a failed command said. */
+const reason = (error: unknown): string =>
+  errorOutput(error)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? "";
+
+/** Jobs go through the Gateway, so a job command that names it failed for want of it. */
+const blamesGateway = (error: unknown): boolean => /gateway/i.test(errorOutput(error));
+
+/** `error` itself, or one that says how to start the Gateway when the Gateway is to blame. */
+function withGatewayHint(error: unknown, what: string): unknown {
+  if (!blamesGateway(error)) return error;
+  const message = `${what} (${reason(error)}); start the Gateway and retry: openclaw gateway start`;
+  return new Error(message, { cause: error });
+}
 
 /** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
 async function lstatIfAny(path: string): Promise<Stats | undefined> {
@@ -371,8 +397,8 @@ async function rewriteConfig(
 
 /**
  * Sets `agents.entries.<id>.<key>` for each value with `openclaw config set` (an object passed
- * as JSON). Once the CLI turns out to have no such command, the rest is set by rewriting
- * `openclaw.json` once, with a backup and a warning.
+ * as JSON, with `--strict-json`). Once the CLI turns out to have no such command, the rest is
+ * set by rewriting `openclaw.json` once, with a backup and a warning.
  */
 async function setAgentConfig(
   cli: OpenClawCli,
@@ -384,8 +410,12 @@ async function setAgentConfig(
   const pending: [string, unknown][] = [];
   for (const [key, value] of values) {
     if (pending.length === 0) {
-      const text = typeof value === "string" ? value : JSON.stringify(value);
-      if (await cli.configSet(`agents.entries.${id}.${key}`, text)) continue;
+      const path = `agents.entries.${id}.${key}`;
+      const set =
+        typeof value === "string"
+          ? await cli.configSet(path, value)
+          : await cli.configSet(path, JSON.stringify(value), { strictJson: true });
+      if (set) continue;
     }
     pending.push([key, value]);
   }
@@ -442,8 +472,9 @@ function modelConfig(models: ModelPref[], approximated: Item[]): [string, unknow
 // -- Routines ----------------------------------------------------------------------------------
 
 /**
- * Disables a new job. A job that cannot be disabled is removed again, so that no routine lands
- * enabled against the user's wish; one that cannot be removed either is reported loudly.
+ * Disables a job that could not be created disabled. A job that cannot be disabled is removed
+ * again, so that no routine lands enabled against the user's wish; one that cannot be removed
+ * either is reported loudly.
  */
 async function disableJob(
   cli: OpenClawCli,
@@ -454,7 +485,7 @@ async function disableJob(
   try {
     await cli.automationsDisable(jobId);
   } catch (error) {
-    const why = errorLine(error);
+    const why = reason(error);
     try {
       await cli.automationsRemove(jobId);
       items.skipped.push({
@@ -464,7 +495,7 @@ async function disableJob(
     } catch {
       items.warnings.push(
         `automation '${routine.name}' (${jobId}) could not be disabled (${why}) and is ENABLED; ` +
-          `disable it with: openclaw automations disable ${jobId}`,
+          `disable it with: openclaw ${await cli.jobCommand()} disable ${jobId}`,
       );
     }
   }
@@ -472,10 +503,12 @@ async function disableJob(
 
 /**
  * Creates one job per routine, run in an isolated session of the agent, and left enabled only
- * when `enableRoutines` is set and the routine is enabled. With `replace` the agent's existing
+ * when `enableRoutines` is set and the routine is enabled: created disabled where the CLI can
+ * (`cron add --disabled`), disabled right after otherwise. With `replace` the agent's existing
  * jobs are removed first; with `update` a routine the agent already has a job of the same name
  * for is left out, so that moving the same agent again does not double its jobs. A routine the
- * CLI refuses is skipped and the rest still go in.
+ * CLI refuses is skipped and the rest still go in; when the Gateway is to blame, one warning
+ * says how to start it.
  */
 async function writeRoutines(
   cli: OpenClawCli,
@@ -486,7 +519,14 @@ async function writeRoutines(
   items: Items,
 ): Promise<void> {
   if (target.mode === "replace") {
-    for (const job of existing) await cli.automationsRemove(job.id);
+    for (const job of existing) {
+      try {
+        await cli.automationsRemove(job.id);
+      } catch (error) {
+        const what = `automation '${job.name}' of agent '${target.id}' not removed`;
+        throw withGatewayHint(error, what);
+      }
+    }
   }
   const kept = new Set(target.mode === "update" ? existing.map((job) => job.name) : []);
 
@@ -501,24 +541,31 @@ async function writeRoutines(
       });
       continue;
     }
-    let jobId: string;
+    const disable = !(opts.enableRoutines && routine.enabled);
+    let job: { id: string; disabled: boolean };
     try {
-      ({ id: jobId } = await cli.automationsAdd([
-        "--name",
-        routine.name,
-        ...toOpenClawFlags(routine.schedule, routine.timezone),
-        "--message",
-        routine.instruction,
-        "--agent",
-        target.id,
-        "--session",
-        "isolated",
-      ]));
+      job = await cli.automationsAdd(
+        [
+          "--name",
+          routine.name,
+          ...toOpenClawFlags(routine.schedule, routine.timezone),
+          "--message",
+          routine.instruction,
+          "--agent",
+          target.id,
+          "--session",
+          "isolated",
+        ],
+        { disabled: disable },
+      );
     } catch (error) {
-      items.skipped.push({ field, detail: `not created: ${errorLine(error)}` });
+      items.skipped.push({ field, detail: `not created: ${reason(error)}` });
+      if (blamesGateway(error) && !items.warnings.includes(START_WARNING)) {
+        items.warnings.push(START_WARNING);
+      }
       continue;
     }
-    if (!(opts.enableRoutines && routine.enabled)) await disableJob(cli, routine, jobId, items);
+    if (disable && !job.disabled) await disableJob(cli, routine, job.id, items);
   }
 }
 
@@ -562,12 +609,16 @@ export async function writeOpenClawAgent(
   const cli = new OpenClawCli(ctx, paths.stateDir, paths.configFile);
   const target = await claimTarget(paths, cfg, cli, bundle, opts.onConflict, items.warnings);
   // Read before anything changes, so that a CLI that cannot list them stops the write here.
-  const existing =
-    target.mode === "new"
-      ? []
-      : (await cli.automationsList()).filter(
-          (job) => (job.agentId ?? DEFAULT_AGENT_ID) === target.id,
-        );
+  let existing: JobRow[] = [];
+  if (target.mode !== "new") {
+    try {
+      existing = (await cli.automationsList()).filter(
+        (job) => (job.agentId ?? DEFAULT_AGENT_ID) === target.id,
+      );
+    } catch (error) {
+      throw withGatewayHint(error, `the automations of agent '${target.id}' could not be listed`);
+    }
+  }
 
   if (target.mode === "new") await cli.agentsAdd(target.id, target.workspace);
   const identity = await writeWorkspace(target.workspace, bundle, items);
@@ -587,6 +638,7 @@ export async function writeOpenClawAgent(
     name: identity.name,
     emoji: identity.emoji,
     ...(identity.avatar === undefined ? {} : { avatar: identity.avatar }),
+    ...(identity.theme === undefined ? {} : { theme: identity.theme }),
   });
   const config = modelConfig(bundle.manifest.models, items.approximated);
   await setAgentConfig(cli, paths.configFile, target.id, config, items.warnings);

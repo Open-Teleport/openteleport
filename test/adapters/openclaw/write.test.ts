@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import JSON5 from "json5";
 import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OpenClawCli } from "../../../src/adapters/openclaw/cli.js";
 import { openclawAdapter } from "../../../src/adapters/openclaw/index.js";
 import { readOpenClawAgent } from "../../../src/adapters/openclaw/read.js";
 import { writeOpenClawAgent } from "../../../src/adapters/openclaw/write.js";
@@ -15,6 +16,8 @@ import type { Bundle, Routine } from "../../../src/core/schema.js";
 const NOW = new Date("2026-10-27T09:15:00.000Z");
 const ADA_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
 const RESTART_WARNING = "Restart the Gateway to load the new agent: openclaw gateway restart";
+const START_WARNING =
+  "Start the Gateway to create the routines, then move the agent again: openclaw gateway start";
 const REWRITE_WARNING = "openclaw.json rewritten; comments may be lost";
 const BACKUP_NAME = "openclaw.json.bak-2026-10-27T09-15-00-000Z";
 /** What `openclaw.json` holds before every test: JSON5 with a comment, as OpenClaw writes it. */
@@ -49,6 +52,25 @@ const unknownCommand = (): Error =>
     stderr: "error: unknown command 'set'",
   });
 
+/** What OpenClaw 2026.5.28, which has `cron` instead, says to any `automations` command. */
+const unknownAutomations = (args: string[]): Error =>
+  Object.assign(new Error(`Command failed with exit code 1: openclaw ${args.join(" ")}`), {
+    stderr:
+      "[openclaw] Could not start the CLI.\n" +
+      "[openclaw] Reason: Unknown command: openclaw automations. No built-in command or " +
+      'plugin CLI metadata owns "automations".',
+  });
+
+/** An OpenClaw with the `cron` family: every `automations` command is unknown. */
+const cronFamily = (args: string[]): Reply =>
+  args[0] === "automations" ? unknownAutomations(args) : undefined;
+
+/** An error such as execa throws when a job command cannot reach the Gateway. */
+const gatewayDown = (args: string[]): Error =>
+  Object.assign(new Error(`Command failed with exit code 1: openclaw ${args.join(" ")}`), {
+    stderr: "Error: gateway not reachable at ws://127.0.0.1:18789 (ECONNREFUSED)",
+  });
+
 let scratch: string;
 let home: string;
 let stateDir: string;
@@ -75,13 +97,18 @@ function defaultReply(args: string[]): Reply {
     case "config set":
       return "";
     case "automations list":
+    case "cron list":
       return JSON.stringify({ jobs });
     case "automations add":
+    case "cron add":
       jobCounter += 1;
       return `Adding job...\n${JSON.stringify({ job: { id: `job-${jobCounter}` } })}`;
     case "automations disable":
     case "automations remove":
+    case "cron rm":
       return "{}";
+    case "cron disable":
+      return "";
     case "gateway status":
       return JSON.stringify({ running: false });
     default:
@@ -246,9 +273,13 @@ describe("writeOpenClawAgent: a new agent", () => {
         "🔎",
         "--avatar",
         "avatars/avatar.png",
+        "--theme",
+        "Research assistant",
         "--json",
       ],
       ["config", "set", "agents.entries.ada.model", "anthropic/claude-opus-5-5"],
+      // The first job command settles the family; this OpenClaw has `automations`.
+      ["automations", "list", "--all", "--json"],
       [
         "automations",
         "add",
@@ -337,6 +368,7 @@ describe("writeOpenClawAgent: a new agent", () => {
 
     const automations = argsOf().filter((args) => args[0] === "automations");
     expect(automations.map((args) => args.slice(0, 4))).toEqual([
+      ["automations", "list", "--all", "--json"],
       ["automations", "add", "--name", "Morning digest"],
       ["automations", "add", "--name", "Paused"],
       ["automations", "disable", "job-2", "--json"],
@@ -419,6 +451,7 @@ describe("writeOpenClawAgent: a new agent", () => {
       { field: "routine:Morning digest", detail: "not created: invalid cron expression" },
     ]);
     expect(argsOf().filter((args) => args[0] === "automations")).toEqual([
+      ["automations", "list", "--all", "--json"],
       expect.arrayContaining(["add", "Morning digest"]),
       expect.arrayContaining(["add", "Evening digest"]),
       ["automations", "disable", "job-1", "--json"],
@@ -430,7 +463,7 @@ describe("writeOpenClawAgent: a new agent", () => {
 
     const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
 
-    expect(argsOf().filter((args) => args[0] === "automations").slice(1)).toEqual([
+    expect(argsOf().filter((args) => args[0] === "automations").slice(2)).toEqual([
       ["automations", "disable", "job-1", "--json"],
       ["automations", "remove", "job-1", "--json"],
     ]);
@@ -567,6 +600,7 @@ describe("writeOpenClawAgent: runtime", () => {
     "set",
     "agents.entries.ada.runtime",
     JSON.stringify({ type: "acp", acp: { agent } }),
+    "--strict-json",
   ];
 
   it("maps each known runtime to its ACP agent, after the model", async () => {
@@ -871,6 +905,194 @@ describe("writeOpenClawAgent: the Gateway", () => {
     const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
     expect(result.outcome).toBe("done");
     expect(result.items.warnings).toEqual([]);
+  });
+});
+
+describe("OpenClawCli: the job command family", () => {
+  const cli = () => new OpenClawCli(makeCtx(), stateDir, join(stateDir, "openclaw.json"));
+
+  it("is cron when `automations` is an unknown command, probed once", async () => {
+    override = cronFamily;
+    const claw = cli();
+
+    expect(await claw.jobCommand()).toBe("cron");
+    expect(await claw.jobCommand()).toBe("cron");
+    expect(argsOf()).toEqual([["automations", "list", "--all", "--json"]]);
+  });
+
+  it("is automations when the probe works, or fails for another reason", async () => {
+    expect(await cli().jobCommand()).toBe("automations");
+    override = (args) => (args[0] === "automations" ? gatewayDown(args) : undefined);
+    expect(await cli().jobCommand()).toBe("automations");
+  });
+
+  it("lists jobs with the probe itself under automations", async () => {
+    jobs = [{ id: "j1", name: "Digest", agentId: "ada" }];
+    const claw = cli();
+
+    expect(await claw.automationsList()).toMatchObject([{ id: "j1", name: "Digest" }]);
+    expect(await claw.jobCommand()).toBe("automations");
+    expect(argsOf()).toEqual([["automations", "list", "--all", "--json"]]);
+  });
+
+  it("drives the cron commands with the flags each one takes", async () => {
+    override = cronFamily;
+    jobs = [{ id: "j1", name: "Digest", agentId: "ada" }];
+    const claw = cli();
+
+    expect(await claw.automationsList()).toMatchObject([{ id: "j1" }]);
+    expect(await claw.automationsAdd(["--name", "A"], { disabled: true })).toEqual({
+      id: "job-1",
+      disabled: true,
+    });
+    expect(await claw.automationsAdd(["--name", "B"], { disabled: false })).toEqual({
+      id: "job-2",
+      disabled: false,
+    });
+    await claw.automationsDisable("job-2");
+    await claw.automationsRemove("j1");
+
+    expect(argsOf()).toEqual([
+      ["automations", "list", "--all", "--json"],
+      ["cron", "list", "--all", "--json"],
+      ["cron", "add", "--name", "A", "--disabled", "--json"],
+      ["cron", "add", "--name", "B", "--json"],
+      ["cron", "disable", "job-2"],
+      ["cron", "rm", "j1", "--json"],
+    ]);
+  });
+
+  it("cannot create an automations job disabled, and says so", async () => {
+    expect(await cli().automationsAdd(["--name", "A"], { disabled: true })).toEqual({
+      id: "job-1",
+      disabled: false,
+    });
+    expect(argsOf()[1]).toEqual(["automations", "add", "--name", "A", "--json"]);
+  });
+});
+
+describe("writeOpenClawAgent: the cron family (OpenClaw 2026.5)", () => {
+  const cronAdd = (name: string, ...tail: string[]) => [
+    "cron",
+    "add",
+    "--name",
+    name,
+    "--cron",
+    "30 8 * * 1-5",
+    "--tz",
+    "Europe/Warsaw",
+    "--message",
+    MORNING_DIGEST.instruction,
+    "--agent",
+    "ada",
+    "--session",
+    "isolated",
+    ...tail,
+    "--json",
+  ];
+
+  it("creates the jobs disabled with `cron add --disabled`, with no disable call", async () => {
+    override = cronFamily;
+    const paused: Routine = { ...MORNING_DIGEST, name: "Paused", enabled: false };
+
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      ada({ routines: [MORNING_DIGEST, paused] }),
+      OPTS,
+    );
+
+    expect(result.items).toEqual({ approximated: [], skipped: [], warnings: [] });
+    expect(argsOf().slice(4)).toEqual([
+      ["automations", "list", "--all", "--json"],
+      cronAdd("Morning digest", "--disabled"),
+      cronAdd("Paused", "--disabled"),
+      ["gateway", "status", "--json"],
+    ]);
+    expect(commands().filter((command) => command.endsWith(" disable"))).toEqual([]);
+  });
+
+  it("leaves a job enabled only with enableRoutines and an enabled routine", async () => {
+    override = cronFamily;
+    const paused: Routine = { ...MORNING_DIGEST, name: "Paused", enabled: false };
+
+    await writeOpenClawAgent(makeCtx(), ada({ routines: [MORNING_DIGEST, paused] }), {
+      ...OPTS,
+      enableRoutines: true,
+    });
+
+    expect(argsOf().filter((args) => args[0] === "cron")).toEqual([
+      cronAdd("Morning digest"),
+      cronAdd("Paused", "--disabled"),
+    ]);
+  });
+
+  it("replaces through cron list and cron rm", async () => {
+    override = cronFamily;
+    agentRows = [{ id: "ada", workspace: join(scratch, "their-ada") }];
+    jobs = [
+      { id: "old-1", name: "Morning digest", agentId: "ada" },
+      { id: "other", name: "Ops job", agentId: "ops" },
+    ];
+
+    await writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "replace" });
+
+    expect(argsOf().filter((args) => args[0] === "automations" || args[0] === "cron")).toEqual([
+      ["automations", "list", "--all", "--json"],
+      ["cron", "list", "--all", "--json"],
+      ["cron", "rm", "old-1", "--json"],
+      cronAdd("Morning digest", "--disabled"),
+    ]);
+  });
+
+  it("says once how to start the Gateway when it refuses the jobs", async () => {
+    override = (args) => (args[0] === "cron" ? gatewayDown(args) : cronFamily(args));
+    const evening: Routine = { ...MORNING_DIGEST, name: "Evening digest" };
+
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      ada({ routines: [MORNING_DIGEST, evening] }),
+      OPTS,
+    );
+
+    const detail =
+      "not created: Error: gateway not reachable at ws://127.0.0.1:18789 (ECONNREFUSED)";
+    expect(result.items.skipped).toEqual([
+      { field: "routine:Morning digest", detail },
+      { field: "routine:Evening digest", detail },
+    ]);
+    expect(result.items.warnings).toEqual([START_WARNING]);
+  });
+
+  it("does not blame the Gateway for a routine whose own text names it", async () => {
+    const routine: Routine = { ...MORNING_DIGEST, instruction: "Check the gateway logs." };
+    override = (args) =>
+      args[0] === "cron" && args[1] === "add"
+        ? Object.assign(new Error(`Command failed: openclaw ${args.join(" ")}`), {
+            stderr: "error: invalid cron expression",
+          })
+        : cronFamily(args);
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({ routines: [routine] }), OPTS);
+
+    expect(result.items.skipped).toEqual([
+      { field: "routine:Morning digest", detail: "not created: error: invalid cron expression" },
+    ]);
+    expect(result.items.warnings).toEqual([]);
+  });
+
+  it("names the Gateway when the jobs of an existing agent cannot be listed", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { "AGENTS.md": "Theirs.\n" });
+    agentRows = [{ id: "ada", workspace: ws }];
+    override = (args) => (args[0] === "cron" ? gatewayDown(args) : cronFamily(args));
+
+    await expect(
+      writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "replace" }),
+    ).rejects.toThrow(
+      "the automations of agent 'ada' could not be listed (Error: gateway not reachable at " +
+        "ws://127.0.0.1:18789 (ECONNREFUSED)); start the Gateway and retry: openclaw gateway start",
+    );
+    expect(await listFiles(ws)).toEqual(["AGENTS.md"]);
   });
 });
 
