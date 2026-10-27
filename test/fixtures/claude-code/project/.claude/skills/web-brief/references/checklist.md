@@ -1,0 +1,2 @@
+- Read the page end to end.
+- Note the date it was published.
