@@ -1,8 +1,8 @@
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
-import type { Bundle, Manifest } from "../../core/schema.js";
+import type { Bundle, Manifest, Skill } from "../../core/schema.js";
 import { factsToProse, mergeInstructions } from "../../core/text.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
@@ -37,20 +37,25 @@ const isSafeName = (name: string): boolean => isSafeArchivePath(name) && !name.i
 const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-async function exists(path: string): Promise<boolean> {
+/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
+async function lstatOf(path: string) {
   try {
-    await lstat(path);
-    return true;
+    return await lstat(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
 }
 
-/** `<base><ext>` in `dir`, or the first of `<base>-2<ext>`, `<base>-3<ext>`... that is free. */
+/**
+ * `<base><ext>` in `dir`, or the first of `<base>-2<ext>`, `<base>-3<ext>`... that is free. A
+ * link, even a broken one, takes its name.
+ */
 async function freeName(dir: string, base: string, ext: string): Promise<string> {
   let name = base;
-  for (let n = 2; await exists(join(dir, `${name}${ext}`)); n += 1) name = `${base}-${n}`;
+  for (let n = 2; (await lstatOf(join(dir, `${name}${ext}`))) !== undefined; n += 1) {
+    name = `${base}-${n}`;
+  }
   return name;
 }
 
@@ -126,8 +131,40 @@ async function writeAgentFile(
 }
 
 /**
- * Skills go to `<project>/.claude/skills/<name>/`. They are shared by the whole project, so only
- * `update` overwrites one that exists; `copy` and `replace` write `<name>-2` instead.
+ * True when the real directory `dir` holds exactly the files of `skill`, byte for byte. A link
+ * anywhere below it, or any other special file, makes it different: links are never followed.
+ */
+async function holdsSkill(dir: string, skill: Skill): Promise<boolean> {
+  const found = new Map<string, string>();
+  async function walk(current: string, prefix: string): Promise<boolean> {
+    // Dirent types come from lstat, so a link is neither a file nor a directory here.
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      const absolute = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!(await walk(absolute, path))) return false;
+      } else if (entry.isFile()) {
+        found.set(path, absolute);
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!(await walk(dir, "")) || found.size !== skill.files.length) return false;
+  for (const file of skill.files) {
+    const absolute = found.get(file.path);
+    if (absolute === undefined || !(await readFile(absolute)).equals(file.bytes)) return false;
+  }
+  return true;
+}
+
+/**
+ * Skills go to `<project>/.claude/skills/<name>/`, where the whole project shares them. In every
+ * conflict mode a folder that already holds the same files and bytes is reused as it is. Under
+ * `replace` a real folder that differs is removed and written again; otherwise the skill goes to
+ * the first free `<name>-N`, with a warning. A link in the place of the folder is never followed
+ * or removed, so it always counts as different.
  */
 async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: Items) {
   for (const skill of bundle.skills) {
@@ -138,12 +175,21 @@ async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: 
       });
       continue;
     }
-    const name = opts.onConflict === "update" ? skill.name : await freeName(dir, skill.name, "");
-    if (name !== skill.name) {
-      items.approximated.push({
-        field: `skill:${skill.name}`,
-        detail: `a skill of that name already exists; written as ${name}`,
-      });
+    const target = join(dir, skill.name);
+    const existing = await lstatOf(target);
+    let name = skill.name;
+    if (existing !== undefined) {
+      // lstat: a symbolic link or junction is never a directory here.
+      const realDir = existing.isDirectory();
+      if (realDir && (await holdsSkill(target, skill))) continue;
+      if (realDir && opts.onConflict === "replace") {
+        await rm(target, { recursive: true, force: true });
+      } else {
+        name = await freeName(dir, skill.name, "");
+        items.warnings.push(
+          `skill '${skill.name}' already exists with different content; written as '${name}'`,
+        );
+      }
     }
     for (const file of skill.files) {
       const path = join(dir, name, ...file.path.split("/"));

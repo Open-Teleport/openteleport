@@ -1,4 +1,14 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -337,7 +347,73 @@ describe("read", () => {
     const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
 
     expect(bundle.skills[0]?.files.map((file) => file.path)).not.toContain(".env");
-    expect(warnings).toContain("skill web-brief: left out .env");
+    expect(warnings).toContain("skill 'web-brief': left out '.env'");
+  });
+
+  /** A folder outside `.claude/skills` that looks like a skill and holds a file not to export. */
+  async function elsewhere(): Promise<string> {
+    const dir = join(root, "elsewhere");
+    await mkdir(dir);
+    await writeFile(join(dir, "SKILL.md"), "# Linked\n");
+    await writeFile(join(dir, "secret.txt"), "not for export\n");
+    return dir;
+  }
+
+  /** A file symlink, or a skipped test where the system does not allow one. */
+  async function fileLink(target: string, path: string, skip: () => void): Promise<void> {
+    try {
+      await symlink(target, path, "file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") skip();
+      throw error;
+    }
+  }
+
+  it("does not follow a linked skill folder and says so", async () => {
+    await symlink(await elsewhere(), join(project, ".claude", "skills", "linked"), "junction");
+
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.skills.map((skill) => skill.name)).toEqual(["web-brief"]);
+    expect(warnings).toContain("skill 'linked' is a symlink; not exported");
+  });
+
+  it("leaves a linked folder inside a skill out and says so", async () => {
+    const skill = join(project, ".claude", "skills", "web-brief");
+    await symlink(await elsewhere(), join(skill, "linked-dir"), "junction");
+
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.skills[0]?.files.map((file) => file.path)).toEqual([
+      "SKILL.md",
+      "references/checklist.md",
+    ]);
+    expect(warnings).toContain("skill 'web-brief': 'linked-dir' is a symlink; not exported");
+  });
+
+  it("leaves a linked file inside a skill out and says so", async (context) => {
+    const skill = join(project, ".claude", "skills", "web-brief");
+    const outside = await elsewhere();
+    await fileLink(join(outside, "secret.txt"), join(skill, "linked.txt"), () => context.skip());
+
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.skills[0]?.files.map((file) => file.path)).toEqual([
+      "SKILL.md",
+      "references/checklist.md",
+    ]);
+    expect(warnings).toContain("skill 'web-brief': 'linked.txt' is a symlink; not exported");
+  });
+
+  it("does not export a skill whose SKILL.md is a link", async (context) => {
+    const dir = join(project, ".claude", "skills", "borrowed");
+    await mkdir(dir);
+    await fileLink(join(await elsewhere(), "SKILL.md"), join(dir, "SKILL.md"), () => context.skip());
+
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.skills.map((skill) => skill.name)).toEqual(["web-brief"]);
+    expect(warnings).toContain("skill 'borrowed': 'SKILL.md' is a symlink; not exported");
   });
 
   it("reads user agents and memory from CLAUDE_CONFIG_DIR", async () => {

@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
 import type {
@@ -58,14 +58,20 @@ async function entriesOf(dir: string) {
   }
 }
 
-async function isFile(path: string): Promise<boolean> {
+/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
+async function lstatOf(path: string) {
   try {
-    return (await stat(path)).isFile();
+    return await lstat(path);
   } catch (error) {
-    if (isMissing(error)) return false;
+    if (isMissing(error)) return undefined;
     throw error;
   }
 }
+
+const linkWarning = (skill: string, path?: string): string =>
+  path === undefined
+    ? `skill '${skill}' is a symlink; not exported`
+    : `skill '${skill}': '${path}' is a symlink; not exported`;
 
 /** The stems of the `*.md` files in `dir`, sorted. */
 async function markdownStems(dir: string): Promise<string[]> {
@@ -160,15 +166,21 @@ function capabilitiesOf(tools: readonly string[]): Capability[] {
   ).map(({ capability }) => capability);
 }
 
-/** Files below `dir` as `/`-separated paths; forbidden paths and links are left out and named. */
+/**
+ * Files below `dir` as `/`-separated paths. Links (symbolic links and junctions) are never
+ * followed; they, forbidden paths and special files are left out and named.
+ */
 async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
   const files: FileEntry[] = [];
   async function walk(current: string, prefix: string): Promise<void> {
+    // Dirent types come from lstat, so a link is neither a file nor a directory here.
     for (const entry of await readdir(current, { withFileTypes: true })) {
       const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
       const absolute = join(current, entry.name);
-      if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
-        warnings.push(`skill ${skill}: left out ${path}`);
+      if (entry.isSymbolicLink()) {
+        warnings.push(linkWarning(skill, path));
+      } else if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
+        warnings.push(`skill '${skill}': left out '${path}'`);
       } else if (entry.isDirectory()) {
         await walk(absolute, path);
       } else {
@@ -183,14 +195,28 @@ async function skillFiles(dir: string, skill: string, warnings: string[]): Promi
   );
 }
 
-/** Every folder of `skillsDir` that holds a `SKILL.md`, in name order. */
+/**
+ * Every real folder of `skillsDir` that holds a real `SKILL.md`, in name order. A linked skill
+ * folder or `SKILL.md` is never followed, since it can point anywhere on disk; it is named in a
+ * warning instead.
+ */
 async function readSkills(skillsDir: string, warnings: string[]): Promise<Skill[]> {
   const skills: Skill[] = [];
   const names = (await entriesOf(skillsDir)).map((entry) => entry.name).sort(byCodeUnit);
   for (const name of names) {
     const dir = join(skillsDir, name);
-    // `stat` follows links, so a linked skill folder counts.
-    if (!(await isFile(join(dir, SKILL_FILE)))) continue;
+    const folder = await lstatOf(dir);
+    if (folder?.isSymbolicLink()) {
+      warnings.push(linkWarning(name));
+      continue;
+    }
+    if (!folder?.isDirectory()) continue;
+    const skillFile = await lstatOf(join(dir, SKILL_FILE));
+    if (skillFile?.isSymbolicLink()) {
+      warnings.push(linkWarning(name, SKILL_FILE));
+      continue;
+    }
+    if (!skillFile?.isFile()) continue;
     skills.push({ name, files: await skillFiles(dir, name, warnings) });
   }
   return skills;

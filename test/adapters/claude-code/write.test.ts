@@ -1,4 +1,17 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +85,10 @@ const exists = async (path: string): Promise<boolean> =>
   );
 
 const agentFile = (dir: string, stem: string): string => join(dir, ".claude", "agents", `${stem}.md`);
+
+/** Ada's `web-brief/SKILL.md`, as the fixture holds it. */
+const adaSkill = (): Promise<string> =>
+  readFile(join(ADA_DIR, "skills", "web-brief", "SKILL.md"), "utf8");
 
 /** A Bundle with only the fields a test cares about filled in. */
 function bundleOf(overrides: Partial<Bundle> & { manifest?: Partial<Bundle["manifest"]> }): Bundle {
@@ -222,38 +239,98 @@ describe("write", () => {
     expect(await exists(agentFile(project, "ada-2"))).toBe(false);
   });
 
-  it("overwrites an existing skill on update", async () => {
-    const ada = await readBundle(ADA_DIR);
-
-    await claudeCodeAdapter.write(ctx, ada, UPDATE);
-
+  it.each([
+    ["update", UPDATE],
+    ["copy", COPY],
+  ])("writes a skill that exists with other content as <name>-2 on %s, and says so", async (_mode, opts) => {
     const skills = join(project, ".claude", "skills");
-    expect(lf(await readFile(join(skills, "web-brief", "SKILL.md"), "utf8"))).toBe(
-      lf(await readFile(join(ADA_DIR, "skills", "web-brief", "SKILL.md"), "utf8")),
+    const before = await snapshot(join(skills, "web-brief"));
+
+    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), opts);
+
+    expect(await snapshot(join(skills, "web-brief"))).toEqual(before);
+    expect(await snapshot(join(skills, "web-brief-2"))).toEqual({ "SKILL.md": await adaSkill() });
+    expect(items.warnings).toContain(
+      "skill 'web-brief' already exists with different content; written as 'web-brief-2'",
     );
-    // Update overwrites the files it brings and leaves the others alone.
-    expect(await exists(join(skills, "web-brief", "references", "checklist.md"))).toBe(true);
-    expect(await exists(join(skills, "web-brief-2"))).toBe(false);
+    expect(items.approximated.filter(({ field }) => field.startsWith("skill:"))).toEqual([]);
   });
 
   it.each([
+    ["update", UPDATE],
     ["copy", COPY],
     ["replace", REPLACE],
-  ])("writes a skill that already exists as <name>-2 on %s", async (_mode, opts) => {
-    const ada = await readBundle(ADA_DIR);
+  ])("reuses a skill with the same files and bytes on %s, writing nothing", async (_mode, opts) => {
     const skills = join(project, ".claude", "skills");
-    const original = await readFile(join(skills, "web-brief", "SKILL.md"), "utf8");
+    await rm(join(skills, "web-brief"), { recursive: true });
+    await cp(join(ADA_DIR, "skills", "web-brief"), join(skills, "web-brief"), { recursive: true });
+    const skillFile = join(skills, "web-brief", "SKILL.md");
+    const old = new Date("2020-01-01T00:00:00Z");
+    await utimes(skillFile, old, old);
 
-    const { items } = await claudeCodeAdapter.write(ctx, ada, opts);
+    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), opts);
 
-    expect(await readFile(join(skills, "web-brief", "SKILL.md"), "utf8")).toBe(original);
-    expect(lf(await readFile(join(skills, "web-brief-2", "SKILL.md"), "utf8"))).toBe(
-      lf(await readFile(join(ADA_DIR, "skills", "web-brief", "SKILL.md"), "utf8")),
+    expect((await stat(skillFile)).mtimeMs).toBe(old.getTime());
+    expect(await exists(join(skills, "web-brief-2"))).toBe(false);
+    expect(items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
+  });
+
+  it("replaces a skill in place on replace, leaving none of its old files", async () => {
+    const skills = join(project, ".claude", "skills");
+
+    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), REPLACE);
+
+    expect(await snapshot(join(skills, "web-brief"))).toEqual({ "SKILL.md": await adaSkill() });
+    expect(await exists(join(skills, "web-brief-2"))).toBe(false);
+    expect(items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
+  });
+
+  it("does not follow a link inside the skill folder it replaces", async () => {
+    const skills = join(project, ".claude", "skills");
+    const outside = join(root, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "keep.txt"), "KEEP\n");
+    await symlink(outside, join(skills, "web-brief", "linked"), "junction");
+
+    await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), REPLACE);
+
+    expect(await snapshot(outside)).toEqual({ "keep.txt": "KEEP\n" });
+    expect(await snapshot(join(skills, "web-brief"))).toEqual({ "SKILL.md": await adaSkill() });
+  });
+
+  it.each([
+    ["update", UPDATE],
+    ["copy", COPY],
+    ["replace", REPLACE],
+  ])("never writes through a linked skill folder on %s", async (_mode, opts) => {
+    const skills = join(project, ".claude", "skills");
+    const outside = join(root, "outside-skill");
+    await mkdir(outside);
+    await writeFile(join(outside, "SKILL.md"), "ORIGINAL\n");
+    await rm(join(skills, "web-brief"), { recursive: true });
+    await symlink(outside, join(skills, "web-brief"), "junction");
+
+    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), opts);
+
+    expect(await snapshot(outside)).toEqual({ "SKILL.md": "ORIGINAL\n" });
+    expect((await lstat(join(skills, "web-brief"))).isSymbolicLink()).toBe(true);
+    expect(await snapshot(join(skills, "web-brief-2"))).toEqual({ "SKILL.md": await adaSkill() });
+    expect(items.warnings).toContain(
+      "skill 'web-brief' already exists with different content; written as 'web-brief-2'",
     );
-    expect(items.approximated).toContainEqual({
-      field: "skill:web-brief",
-      detail: "a skill of that name already exists; written as web-brief-2",
-    });
+  });
+
+  // The link is never followed, so not even its content is compared.
+  it("treats a linked folder with the very same files as different", async () => {
+    const skills = join(project, ".claude", "skills");
+    const outside = join(root, "outside-skill");
+    await cp(join(ADA_DIR, "skills", "web-brief"), outside, { recursive: true });
+    await rm(join(skills, "web-brief"), { recursive: true });
+    await symlink(outside, join(skills, "web-brief"), "junction");
+
+    await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), UPDATE);
+
+    expect(await exists(join(skills, "web-brief-2", "SKILL.md"))).toBe(true);
   });
 
   it("writes every file of a skill, nested ones included", async () => {
