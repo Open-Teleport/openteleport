@@ -1,0 +1,1 @@
+- Prefers answers in Polish unless the source is in English.
