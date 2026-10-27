@@ -160,8 +160,9 @@ const filesIf = (bundle: Bundle, includeFiles: boolean): Bundle =>
   includeFiles ? bundle : { ...bundle, files: [] };
 
 /**
- * The part of a move after the Bundle has its id: refuse secrets, fit the Bundle to the target,
- * write it and report. Read warnings come before the target's warnings.
+ * The part of a move after the Bundle has its id: leave `files/` behind unless asked for, refuse
+ * secrets in what is left, fit the Bundle to the target, write it and report. Read warnings come
+ * before the target's warnings.
  */
 async function deliver(opts: {
   to: Adapter;
@@ -172,12 +173,10 @@ async function deliver(opts: {
   readWarnings: string[];
 }): Promise<MoveReport> {
   const { to, ctx, write } = opts;
-  assertNoSecrets(opts.bundle);
-  const { bundle, skipped } = diffCapabilities(
-    filesIf(opts.bundle, write.includeFiles),
-    to.capabilities,
-    to.displayName,
-  );
+  // Files that stay behind are not scanned: a credential in one must not block the move.
+  const carried = filesIf(opts.bundle, write.includeFiles);
+  assertNoSecrets(carried);
+  const { bundle, skipped } = diffCapabilities(carried, to.capabilities, to.displayName);
   const result = await to.write(ctx, bundle, write);
   return {
     source: opts.source,
@@ -220,9 +219,9 @@ export async function move(opts: {
 }
 
 /**
- * Reads an agent from `from` as a Bundle with an id, refusing it if it holds secrets. `files`
- * is emptied unless `includeFiles`. With `out` the Bundle is also written there as a `.jetpack`
- * archive.
+ * Reads an agent from `from` as a Bundle with an id. `files` is emptied unless `includeFiles`,
+ * and what is left is refused if it holds secrets. With `out` the Bundle is also written there
+ * as a `.jetpack` archive.
  */
 export async function exportBundle(opts: {
   from: Adapter;
@@ -234,8 +233,8 @@ export async function exportBundle(opts: {
   const { from, agent, ctx } = opts;
   const read = await from.read(ctx, agent);
   const withId = await ensureId(read.bundle, { app: from.name, agentId: agent }, ctx.home);
-  assertNoSecrets(withId);
   const bundle = filesIf(withId, opts.includeFiles);
+  assertNoSecrets(bundle);
   if (opts.out !== undefined) await writeBundle(bundle, opts.out);
   return {
     bundle,

@@ -408,6 +408,92 @@ describe("importBundle", () => {
   });
 });
 
+describe("a secret in a file that is not carried over", () => {
+  /** An agent whose only secret sits in `files/.secrets.txt`. */
+  const agentWithSecretFile = (): Bundle =>
+    fullAgent({
+      files: [
+        { path: "data/table.csv", bytes: bytes("a,b\n1,2\n") },
+        { path: ".secrets.txt", bytes: bytes(`ANTHROPIC_KEY=${SECRET}\n`) },
+      ],
+    });
+  const FINDING = { path: "files/.secrets.txt", line: 1, kind: "anthropic-api-key" };
+
+  it("does not block a move without includeFiles, and blocks one with it", async () => {
+    const without = target();
+    const report = await move({
+      from: source(agentWithSecretFile()),
+      to: without,
+      agent: "ada",
+      ctx,
+      write: { ...WRITE, includeFiles: false },
+    });
+    expect(writtenTo(without).files).toEqual([]);
+    expect(report.skipped).toEqual([]);
+
+    const withFiles = target();
+    const error: unknown = await move({
+      from: source(agentWithSecretFile()),
+      to: withFiles,
+      agent: "ada",
+      ctx,
+      write: { ...WRITE, includeFiles: true },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SecretsFoundError);
+    expect((error as SecretsFoundError).findings).toMatchObject([FINDING]);
+    expect(withFiles.written.length).toBe(0);
+  });
+
+  it("does not block an export without includeFiles, and blocks one with it", async () => {
+    const out = join(home, "ada.jetpack");
+    const { bundle, report } = await exportBundle({
+      from: source(agentWithSecretFile()),
+      agent: "ada",
+      ctx,
+      out,
+      includeFiles: false,
+    });
+    expect(bundle.files).toEqual([]);
+    expect((await readBundle(out)).files).toEqual([]);
+    expect(report.skipped).toEqual([]);
+
+    const blockedOut = join(home, "blocked.jetpack");
+    const error: unknown = await exportBundle({
+      from: source(agentWithSecretFile()),
+      agent: "ada",
+      ctx,
+      out: blockedOut,
+      includeFiles: true,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SecretsFoundError);
+    expect((error as SecretsFoundError).findings).toMatchObject([FINDING]);
+    await expect(stat(blockedOut)).rejects.toThrow();
+  });
+
+  it("does not block an import without includeFiles, and blocks one with it", async () => {
+    const without = target();
+    const report = await importBundle({
+      to: without,
+      bundle: agentWithSecretFile(),
+      ctx,
+      write: { ...WRITE, includeFiles: false },
+    });
+    expect(writtenTo(without).files).toEqual([]);
+    expect(report.skipped).toEqual([]);
+
+    const withFiles = target();
+    const error: unknown = await importBundle({
+      to: withFiles,
+      bundle: agentWithSecretFile(),
+      ctx,
+      write: { ...WRITE, includeFiles: true },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SecretsFoundError);
+    expect((error as SecretsFoundError).findings).toMatchObject([FINDING]);
+    expect(withFiles.written.length).toBe(0);
+  });
+});
+
 describe("SecretsFoundError", () => {
   it("lists one finding per line without previews", () => {
     const error = new SecretsFoundError([
