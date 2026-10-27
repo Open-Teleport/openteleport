@@ -1,0 +1,42 @@
+{
+  "name": "openteleport",
+  "version": "0.1.0",
+  "description": "Move your AI agent between apps in one command.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "openteleport": "dist/cli.js"
+  },
+  "exports": "./dist/index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10",
+    "commander": "^13",
+    "execa": "^9",
+    "fflate": "^0.8",
+    "json5": "^2",
+    "ulid": "^2",
+    "yaml": "^2",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsup": "^8",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
