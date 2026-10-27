@@ -30,6 +30,12 @@ export type WriteResult = {
   targetAgentId?: string;
   /** A file the adapter produced for the user, such as a bundle to import by hand. */
   artifactPath?: string;
+  /**
+   * Only what the adapter itself approximated, skipped or wants to warn about. What the engine
+   * stripped before `write` (fields the capabilities mark `false`, routines with a schedule kind
+   * not in `schedules`, `files` without `includeFiles`) is already in the report and is never
+   * reported again here.
+   */
   items: { approximated: Item[]; skipped: Item[]; warnings: string[] };
 };
 
@@ -66,5 +72,10 @@ export type Adapter = {
   list(ctx: Ctx): Promise<AgentRef[]>;
   /** Never modifies the source. */
   read(ctx: Ctx, agent: string): Promise<{ bundle: Bundle; warnings: string[] }>;
+  /**
+   * Must not mutate `bundle`. The engine hands over shallow copies whose nested arrays and
+   * objects are shared with the Bundle the source adapter returned, so an adapter that needs to
+   * reorder or edit anything copies it first.
+   */
   write(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Promise<WriteResult>;
 };
