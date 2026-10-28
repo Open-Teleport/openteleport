@@ -76,6 +76,13 @@ describe("OPENTELEPORT_EXTRA_ADAPTER", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("exits 2 when its cacheIdentity is there but is not a function", async () => {
+    const odd = await adapterModule(box, "odd.mjs", { name: "odd" }, '{ cacheIdentity: "id" }');
+    const result = await run(box, ["adapters"], { extraAdapter: odd });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/not an adapter: cacheIdentity is not a function/);
+  });
+
   it("exits 2 when the default export is not an adapter", async () => {
     const path = join(box.root, "bad.mjs");
     await writeFile(path, 'export default { name: "bad", displayName: "Bad" };\n');

@@ -137,6 +137,8 @@ export default myApp;
 
 `ctx` carries `sourceDir`, `targetDir`, `home`, `cwd`, `env`, `exec` and `logger`; an adapter reads the home folder and the environment only from there, so tests can point them at a temporary folder. `opts` says whether to keep routines enabled, whether to carry `files/`, and what to do with an agent of the same name (`update`, `replace` or `copy`).
 
+`read` returns the agent's `id` when the app kept the one an earlier move gave it (OpenClaw keeps it in the workspace's `.openteleport.json`, Claude Code beside the project's memory), and an empty `id` otherwise; the engine then takes one from `~/.openteleport/ids.json`, keyed by the agent's id in the app. When that id alone does not tell agents apart (the `folder` adapter's `.` is a different agent in every folder), the optional `cacheIdentity(ctx, agent)` returns what does, such as the folder's real path.
+
 Before you open a pull request:
 
 1. Fixtures recorded from a real install of the app, with personal data removed, live in `test/fixtures/<name>/`.

@@ -381,6 +381,11 @@ export const folderAdapter: Adapter = {
     return { bundle, warnings };
   },
 
+  /** The real path of the agent's folder: `.` and a subfolder's name mean other agents elsewhere. */
+  cacheIdentity(ctx, agent) {
+    return canonical(folderOf(baseDir(ctx), agent));
+  },
+
   async write(ctx, bundle, opts): Promise<WriteResult> {
     const prepared = prepareBundle(bundle, opts);
     const wanted = resolve(ctx.cwd, ctx.targetDir ?? join(ctx.cwd, slug(bundle.manifest.name)));

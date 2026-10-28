@@ -40,6 +40,10 @@ const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declar
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
+/** Left in a workspace by the write side, with the manifest id of the agent it wrote there. */
+const MARKER_FILE = ".openteleport.json";
+/** Same rule as the manifest `id` in `schema.ts`. */
+const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
@@ -478,10 +482,28 @@ async function readAvatar(
 // -- Agents ------------------------------------------------------------------------------------
 
 /**
+ * The manifest id an earlier move left in the workspace's marker, so that the agent keeps it on
+ * its way out; `""` when there is no marker, it is a link (never followed) or it holds no ULID,
+ * which only costs a new id.
+ */
+async function markerId(workspace: string): Promise<string> {
+  const file = join(workspace, MARKER_FILE);
+  try {
+    if (!(await lstatIfAny(file))?.isFile()) return "";
+    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
+    if (!isRecord(marker) || typeof marker.id !== "string") return "";
+    return ULID_PATTERN.test(marker.id) ? marker.id : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Reads one OpenClaw agent as a Bundle; nothing in the install is changed. The workspace gives
  * the persona (`SOUL.md`), instructions (`AGENTS.md`), memory and skills, `openclaw.json` gives
  * the name, models and identity, and `openclaw automations list` gives the routines. The
- * manifest `id` is left empty for the engine to fill in.
+ * manifest `id` is the one in the workspace's `.openteleport.json`, which a move into OpenClaw
+ * leaves there, else empty for the engine to fill in.
  */
 export async function readOpenClawAgent(
   ctx: Ctx,
@@ -517,7 +539,7 @@ export async function readOpenClawAgent(
 
   const manifest: Manifest = {
     schemaVersion: "0.1",
-    id: "",
+    id: await markerId(workspace),
     name,
     ...(title === undefined ? {} : { title }),
     models: modelsFor(entry),

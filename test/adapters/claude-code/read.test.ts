@@ -439,6 +439,40 @@ describe("read", () => {
   });
 });
 
+describe("read: the id", () => {
+  const ADA_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
+  /** Where the write side records which agent each project agent file holds. */
+  const idsFile = (): string => join(memory, "..", "openteleport-ids.json");
+
+  it("gives a project agent the id recorded for its file", async () => {
+    await writeFile(idsFile(), JSON.stringify({ reviewer: ADA_ID }));
+
+    const { bundle } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.manifest.id).toBe(ADA_ID);
+  });
+
+  it("gives no id without a record, or for a record that is not an id", async () => {
+    await writeFile(idsFile(), JSON.stringify({ plain: "not-a-ulid", scout: ADA_ID }));
+
+    expect((await claudeCodeAdapter.read(ctx, "reviewer")).bundle.manifest.id).toBe("");
+    expect((await claudeCodeAdapter.read(ctx, "plain")).bundle.manifest.id).toBe("");
+  });
+
+  it("gives a user agent no id: the record is the project's", async () => {
+    await writeFile(idsFile(), JSON.stringify({ reviewer: ADA_ID, scout: ADA_ID }));
+
+    expect((await claudeCodeAdapter.read(ctx, "user:reviewer")).bundle.manifest.id).toBe("");
+    expect((await claudeCodeAdapter.read(ctx, "scout")).bundle.manifest.id).toBe("");
+  });
+
+  it("gives no id when the record is not JSON", async () => {
+    await writeFile(idsFile(), "{ not json");
+
+    expect((await claudeCodeAdapter.read(ctx, "reviewer")).bundle.manifest.id).toBe("");
+  });
+});
+
 describe("list", () => {
   it("lists project agents, then user agents, the shadowed user copy as user:<stem>", async () => {
     const agents = await claudeCodeAdapter.list(ctx);

@@ -655,6 +655,39 @@ describe("readOpenClawAgent", () => {
     expect(warnings).toEqual(["AGENTS.md not found", CAPABILITIES_WARNING]);
   });
 
+  describe("the id", () => {
+    const ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
+    const markerOf = (agent: string): string =>
+      join(stateDir, `workspace-${agent}`, ".openteleport.json");
+
+    it("takes the id from the marker an earlier move left in the workspace", async () => {
+      await writeFile(markerOf("ada"), JSON.stringify({ id: ID, movedAt: NOW.toISOString() }));
+
+      const { bundle } = await readOpenClawAgent(ctx, "ada");
+
+      expect(bundle.manifest.id).toBe(ID);
+    });
+
+    it.each([
+      ["is not JSON", "{ not json"],
+      ["holds no ULID", JSON.stringify({ id: "not-a-ulid" })],
+      ["is not an object", JSON.stringify([ID])],
+    ])("gives no id for a marker that %s", async (_why, content) => {
+      await writeFile(markerOf("ada"), content);
+
+      expect((await readOpenClawAgent(ctx, "ada")).bundle.manifest.id).toBe("");
+    });
+
+    it("never reads a marker through a link", async () => {
+      if (!canSymlink) return;
+      const outside = join(scratch, "elsewhere.json");
+      await writeFile(outside, JSON.stringify({ id: ID }));
+      await symlink(outside, markerOf("ada"), "file");
+
+      expect((await readOpenClawAgent(ctx, "ada")).bundle.manifest.id).toBe("");
+    });
+  });
+
   describe("models", () => {
     async function modelsFor(entry: Record<string, unknown>): Promise<unknown> {
       const dir = await makeState({ ada: entry }, { "workspace/AGENTS.md": "x\n" });

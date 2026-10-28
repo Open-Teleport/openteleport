@@ -210,6 +210,16 @@ export function diffCapabilities(
 const sourceSide = ({ targetDir: _targetDir, ...ctx }: Ctx): Ctx => ctx;
 const targetSide = ({ sourceDir: _sourceDir, ...ctx }: Ctx): Ctx => ctx;
 
+/**
+ * The Bundle `from` read for `agent`, with an id: its own, else the one the cache keeps for the
+ * agent under `from`'s cache identity (see `Adapter.cacheIdentity`), else under `agent`.
+ */
+async function withId(from: Adapter, agent: string, ctx: Ctx, bundle: Bundle): Promise<Bundle> {
+  const agentId =
+    from.cacheIdentity === undefined ? agent : await from.cacheIdentity(sourceSide(ctx), agent);
+  return ensureId(bundle, { app: from.name, agentId }, ctx.home);
+}
+
 function assertNoSecrets(bundle: Bundle): void {
   const findings = scanSecrets(bundle);
   if (findings.length > 0) throw new SecretsFoundError(findings);
@@ -268,7 +278,7 @@ export async function move(opts: {
 }): Promise<MoveReport> {
   const { from, agent, ctx } = opts;
   const read = await from.read(sourceSide(ctx), agent);
-  const bundle = await ensureId(read.bundle, { app: from.name, agentId: agent }, ctx.home);
+  const bundle = await withId(from, agent, ctx, read.bundle);
   return deliver({
     to: opts.to,
     bundle,
@@ -293,8 +303,7 @@ export async function exportBundle(opts: {
 }): Promise<{ bundle: Bundle; report: MoveReport }> {
   const { from, agent, ctx } = opts;
   const read = await from.read(sourceSide(ctx), agent);
-  const withId = await ensureId(read.bundle, { app: from.name, agentId: agent }, ctx.home);
-  const bundle = filesIf(withId, opts.includeFiles);
+  const bundle = filesIf(await withId(from, agent, ctx, read.bundle), opts.includeFiles);
   assertNoSecrets(bundle);
   if (opts.out !== undefined) await writeBundle(bundle, opts.out);
   return {

@@ -14,6 +14,7 @@ import { splitInstructions } from "../../core/text.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
+import { idsFileOf, readIds } from "./write.js";
 
 const APP = "claude-code";
 const MAX_NAME_CHARS = 80;
@@ -25,6 +26,8 @@ const SKILL_FILE = "SKILL.md";
 const PROSE_NOTE = "MEMORY-prose";
 /** The note that carries the `MEMORY.md` bullets too long to be facts. */
 const LONG_NOTE = "MEMORY-long";
+/** Same rule as the manifest `id` in `schema.ts`. */
+const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 /** Tool name prefixes, compared ignoring case, and the capability each one implies. */
 const CAPABILITY_PREFIXES: readonly { capability: Capability; prefixes: readonly string[] }[] = [
@@ -267,6 +270,21 @@ async function readMemory(
   return { facts, notes };
 }
 
+/**
+ * The id an earlier move recorded for a project agent's file (see `writeAgent`), so that the
+ * agent keeps it on its way out; `""` for a user agent, for none and for one that cannot be
+ * read, which only costs a new id.
+ */
+async function recordedId(paths: ClaudePaths, location: AgentLocation): Promise<string> {
+  if (location.scope !== "project") return "";
+  try {
+    const id = (await readIds(idsFileOf(paths)))[location.stem];
+    return id !== undefined && ULID_PATTERN.test(id) ? id : "";
+  } catch {
+    return "";
+  }
+}
+
 function modelsOf(model: string | undefined, warnings: string[]): ModelPref[] {
   if (model === undefined || model.toLowerCase() === "inherit") {
     warnings.push("model is inherited; not exported");
@@ -279,7 +297,8 @@ function modelsOf(model: string | undefined, warnings: string[]): ModelPref[] {
 /**
  * Reads a subagent as a Bundle. `agent` is a file stem from `listAgents`. The body becomes the
  * persona and instructions, the frontmatter the manifest, every project skill a skill and the
- * project's memory the facts and notes. `CLAUDE.md` is project-wide and is not read.
+ * project's memory the facts and notes. `CLAUDE.md` is project-wide and is not read. The id is
+ * the one an earlier move recorded for the agent's file, else empty for the engine to fill in.
  */
 export async function readAgent(
   ctx: Ctx,
@@ -311,7 +330,7 @@ export async function readAgent(
   const title = description === undefined ? undefined : truncate(description, MAX_TITLE_CHARS);
   const manifest: Manifest = {
     schemaVersion: "0.1",
-    id: "",
+    id: await recordedId(paths, location),
     name: truncate(file.name ?? location.stem, MAX_NAME_CHARS),
     ...(title === undefined ? {} : { title }),
     // A description the title had to cut is kept whole, so nothing of it is lost.

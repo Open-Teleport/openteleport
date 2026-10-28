@@ -176,12 +176,38 @@ type Target = {
 };
 
 /**
+ * The `<base>-N` agent (N from 2, in number order, gaps skipped) that OpenClaw knows and whose
+ * workspace carries the marker of the agent with manifest id `id`, as an earlier move may have
+ * left it; `undefined` when there is none.
+ */
+async function ownCopy(
+  paths: OpenClawPaths,
+  cfg: OpenClawConfig,
+  rows: AgentRow[],
+  known: ReadonlySet<string>,
+  base: string,
+  id: string,
+): Promise<{ id: string; workspace: string } | undefined> {
+  if (id === "") return undefined;
+  const copies = [...known]
+    .map((candidate) => ({ candidate, n: Number(/-([1-9]\d*)$/.exec(candidate)?.[1]) }))
+    .filter(({ candidate, n }) => n >= 2 && candidate === withSuffix(base, n))
+    .sort((a, b) => a.n - b.n);
+  for (const { candidate } of copies) {
+    const workspace = existingWorkspace(paths, cfg, rows, candidate);
+    if (await carriesMarker(workspace, id)) return { id: candidate, workspace };
+  }
+  return undefined;
+}
+
+/**
  * Where the agent goes. An id is taken when OpenClaw knows an agent by it (the CLI or the
  * config) or when the workspace a new agent of that id would get already exists. A known agent
  * is written over with `replace`, and with `update` only when its workspace carries this
  * agent's marker: OpenClaw keeps no manifest id of its own, so the marker is the only proof that
- * the agent there is this one. Otherwise the agent becomes a copy under the first free `<id>-2`,
- * `<id>-3`..., with a warning unless a copy is what was asked for.
+ * the agent there is this one. When it does not, `update` looks for the `<id>-N` copy an earlier
+ * move gave this agent and updates that one. Otherwise the agent becomes a copy under the first
+ * free `<id>-2`, `<id>-3`..., with a warning unless a copy is what was asked for.
  */
 async function claimTarget(
   paths: OpenClawPaths,
@@ -209,6 +235,10 @@ async function claimTarget(
     }
   } else if (await isFree(base)) {
     return { id: base, workspace: freshWorkspace(base), mode: "new" };
+  }
+  if (onConflict === "update") {
+    const own = await ownCopy(paths, cfg, rows, known, base, bundle.manifest.id);
+    if (own !== undefined) return { ...own, mode: "update" };
   }
 
   let n = 2;

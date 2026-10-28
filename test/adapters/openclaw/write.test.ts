@@ -21,11 +21,12 @@ import {
   ShimLineBreakError,
   resolveOpenClawCommand,
 } from "../../../src/adapters/openclaw/cli.js";
+import { folderAdapter } from "../../../src/adapters/folder/index.js";
 import { openclawAdapter } from "../../../src/adapters/openclaw/index.js";
 import { readOpenClawAgent } from "../../../src/adapters/openclaw/read.js";
 import { writeOpenClawAgent } from "../../../src/adapters/openclaw/write.js";
 import type { Ctx, WriteOpts } from "../../../src/adapters/types.js";
-import { SecretsFoundError } from "../../../src/core/engine.js";
+import { SecretsFoundError, move } from "../../../src/core/engine.js";
 import type { Bundle, Routine } from "../../../src/core/schema.js";
 
 // `rename` as Node has it, unless a test makes it fail as a full disk would.
@@ -900,6 +901,60 @@ describe("writeOpenClawAgent: conflicts", () => {
     expect(result.targetAgentId).toBe(`${"r".repeat(30)}-2`);
   });
 
+  it("updates the -N copy whose workspace carries this agent's marker", async () => {
+    await existingAda();
+    const own = join(scratch, "ada-3-ws");
+    const another = join(scratch, "ada-2-ws");
+    await writeTree(another, { ".openteleport.json": MARKER("01J9ZT3Z9K8QGQ2M6Q4Y3V6B2X") });
+    await writeTree(own, { ".openteleport.json": MARKER(), "TOOLS.md": "Mine.\n" });
+    agentRows = [
+      { id: "ada", name: "Ada", workspace: join(scratch, "their-ada") },
+      { id: "ada-3", workspace: own },
+      { id: "ada-2", workspace: another },
+    ];
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({ routines: [] }), OPTS);
+
+    expect(result.targetAgentId).toBe("ada-3");
+    expect(result.artifactPath).toBe(own);
+    expect(result.items.warnings).toEqual([]);
+    expect(commands()).not.toContain("agents add");
+    expect(await text(join(own, "AGENTS.md"))).toBe(ada().instructions);
+    expect(await text(join(own, "TOOLS.md"))).toBe("Mine.\n");
+    expect(await exists(join(another, "AGENTS.md"))).toBe(false);
+  });
+
+  it("finds this agent's -N copy in the config, past a gap and a leftover base workspace", async () => {
+    await writeTree(join(stateDir, "workspace-ada"), { "AGENTS.md": "Left over.\n" });
+    const own = join(scratch, "configured-ada-4");
+    await writeTree(own, { ".openteleport.json": MARKER() });
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      JSON.stringify({ agents: { entries: { "ada-4": { workspace: own } } } }),
+    );
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({ routines: [] }), OPTS);
+
+    expect(result.targetAgentId).toBe("ada-4");
+    expect(result.artifactPath).toBe(own);
+    expect(result.items.warnings).toEqual([]);
+    expect(await text(join(stateDir, "workspace-ada", "AGENTS.md"))).toBe("Left over.\n");
+  });
+
+  it("still writes a new copy with copy, even beside this agent's own -N copy", async () => {
+    await existingAda();
+    const own = join(scratch, "ada-2-ws");
+    await writeTree(own, { ".openteleport.json": MARKER() });
+    agentRows = [{ id: "ada" }, { id: "ada-2", workspace: own }];
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({ routines: [] }), {
+      ...OPTS,
+      onConflict: "copy",
+    });
+
+    expect(result.targetAgentId).toBe("ada-3");
+  });
+
   it("updates in place when the workspace carries this agent's marker", async () => {
     const ws = await existingAda({ ".openteleport.json": MARKER(), "TOOLS.md": "Mine.\n" });
     jobs = [
@@ -1540,39 +1595,67 @@ describe("writeOpenClawAgent: failures and capabilities", () => {
 });
 
 describe("writeOpenClawAgent: round trip", () => {
+  // An OpenClaw that keeps what it is told: `agents add` records the agent and its workspace
+  // in the config, jobs are listed back as added and disabled, and `config set` is missing,
+  // so model and runtime reach the config through the rewrite.
+  const remembering = (args: string[]): Reply => {
+    const command = args.slice(0, 2).join(" ");
+    if (command === "config set") return unknownCommand();
+    if (command === "agents add") {
+      const config = { agents: { entries: { [args[2] ?? ""]: { workspace: args[4] } } } };
+      writeFileSync(join(stateDir, "openclaw.json"), JSON.stringify(config));
+      return JSON.stringify({ id: args[2] });
+    }
+    if (command === "automations add") {
+      const flag = (name: string) => args[args.indexOf(name) + 1];
+      jobCounter += 1;
+      const id = `job-${jobCounter}`;
+      jobs.push({
+        id,
+        name: flag("--name"),
+        agentId: flag("--agent"),
+        disabled: false,
+        schedule: { kind: "cron", expr: flag("--cron"), tz: flag("--tz") },
+        payload: { kind: "agentTurn", message: flag("--message") },
+      });
+      return JSON.stringify({ id });
+    }
+    if (command === "automations disable") {
+      const job = jobs.find((row) => (row as { id: string }).id === args[2]);
+      Object.assign(job as object, { disabled: true });
+      return "{}";
+    }
+    return undefined;
+  };
+
+  it("moves an agent to a folder and back, updating the OpenClaw agent in place", async () => {
+    override = remembering;
+    await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+    const folder = join(scratch, "exported", "ada");
+
+    await move({
+      from: openclawAdapter,
+      to: folderAdapter,
+      agent: "ada",
+      ctx: makeCtx({ sourceDir: stateDir, targetDir: folder }),
+      write: OPTS,
+    });
+    const back = await move({
+      from: folderAdapter,
+      to: openclawAdapter,
+      agent: ".",
+      ctx: makeCtx({ sourceDir: folder, targetDir: stateDir }),
+      write: OPTS,
+    });
+
+    expect(JSON.parse(await text(join(folder, "jetpack.json"))).id).toBe(ADA_ID);
+    expect(back.target?.agent).toBe("ada");
+    expect(back.warnings.join("\n")).not.toContain("already exists");
+    expect(commands().filter((command) => command === "agents add")).toHaveLength(1);
+  });
+
   it("writes what readOpenClawAgent reads back", async () => {
-    // An OpenClaw that keeps what it is told: `agents add` records the agent and its workspace
-    // in the config, jobs are listed back as added and disabled, and `config set` is missing,
-    // so model and runtime reach the config through the rewrite.
-    override = (args) => {
-      const command = args.slice(0, 2).join(" ");
-      if (command === "config set") return unknownCommand();
-      if (command === "agents add") {
-        const config = { agents: { entries: { [args[2] ?? ""]: { workspace: args[4] } } } };
-        writeFileSync(join(stateDir, "openclaw.json"), JSON.stringify(config));
-        return JSON.stringify({ id: args[2] });
-      }
-      if (command === "automations add") {
-        const flag = (name: string) => args[args.indexOf(name) + 1];
-        jobCounter += 1;
-        const id = `job-${jobCounter}`;
-        jobs.push({
-          id,
-          name: flag("--name"),
-          agentId: flag("--agent"),
-          disabled: false,
-          schedule: { kind: "cron", expr: flag("--cron"), tz: flag("--tz") },
-          payload: { kind: "agentTurn", message: flag("--message") },
-        });
-        return JSON.stringify({ id });
-      }
-      if (command === "automations disable") {
-        const job = jobs.find((row) => (row as { id: string }).id === args[2]);
-        Object.assign(job as object, { disabled: true });
-        return "{}";
-      }
-      return undefined;
-    };
+    override = remembering;
     const models = [{ runtime: "claude", provider: "anthropic", model: "claude-opus-5-5" }];
     const written = ada({}, { models });
 
@@ -1589,7 +1672,8 @@ describe("writeOpenClawAgent: round trip", () => {
       ...written,
       manifest: {
         schemaVersion: "0.1",
-        id: "",
+        // The marker the write left in the workspace gives the id back.
+        id: ADA_ID,
         name: "Ada",
         title: "Research assistant",
         models,

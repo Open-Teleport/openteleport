@@ -257,12 +257,16 @@ export function sideOf(ctx: Ctx, side: "source" | "target"): Ctx {
 
 /** `adapter` with every call made in `ctx`, whatever context its caller passes. */
 export function boundTo(adapter: Adapter, ctx: Ctx): Adapter {
+  const { cacheIdentity } = adapter;
   return {
     ...adapter,
     detect: () => adapter.detect(ctx),
     list: () => adapter.list(ctx),
     read: (_ctx, agent) => adapter.read(ctx, agent),
     write: (_ctx, bundle, opts) => adapter.write(ctx, bundle, opts),
+    ...(cacheIdentity === undefined
+      ? {}
+      : { cacheIdentity: (_ctx: Ctx, agent: string) => cacheIdentity.call(adapter, ctx, agent) }),
   };
 }
 
@@ -325,6 +329,10 @@ function adapterProblem(value: unknown): string | undefined {
   }
   for (const name of ADAPTER_FUNCTIONS) {
     if (typeof adapter[name] !== "function") return `${name}() is missing`;
+  }
+  // Optional, but called by the engine when it is there.
+  if (adapter.cacheIdentity !== undefined && typeof adapter.cacheIdentity !== "function") {
+    return "cacheIdentity is not a function";
   }
   return undefined;
 }

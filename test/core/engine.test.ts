@@ -634,6 +634,52 @@ describe("the context each side gets", () => {
   });
 });
 
+describe("the id cache key", () => {
+  /** The source adapter, telling agents apart by `folder` as a folder adapter would. */
+  const at = (folder: string, seen: Ctx[] = []): Adapter => ({
+    ...source(fullAgent()),
+    cacheIdentity: (identityCtx, agent) => {
+      seen.push(identityCtx);
+      return `${folder}/${agent}`;
+    },
+  });
+  const exportFrom = (from: Adapter, exportCtx: Ctx = ctx) =>
+    exportBundle({ from, agent: "ada", ctx: exportCtx, includeFiles: false });
+
+  it("keys a manifest-less agent by the source's cache identity when it has one", async () => {
+    const one = await exportFrom(at("/agents/one"));
+    const two = await exportFrom(at("/agents/two"));
+    const again = await exportFrom(at("/agents/one"));
+
+    expect(one.bundle.manifest.id).toMatch(ULID);
+    expect(two.bundle.manifest.id).not.toBe(one.bundle.manifest.id);
+    expect(again.bundle.manifest.id).toBe(one.bundle.manifest.id);
+    const cache = JSON.parse(await readFile(join(home, ".openteleport", "ids.json"), "utf8"));
+    expect(Object.keys(cache).sort()).toEqual(["src//agents/one/ada", "src//agents/two/ada"]);
+  });
+
+  it("keys by the agent id when the source has no cache identity", async () => {
+    await exportFrom(source());
+
+    const cache = JSON.parse(await readFile(join(home, ".openteleport", "ids.json"), "utf8"));
+    expect(Object.keys(cache)).toEqual(["src/ada"]);
+  });
+
+  it("asks for the identity with the source's side of the context only", async () => {
+    const seen: Ctx[] = [];
+    const sides = { ...ctx, sourceDir: join(home, "from"), targetDir: join(home, "to") };
+
+    await exportFrom(at("/agents/one", seen), sides);
+    await move({ from: at("/agents/one", seen), to: target(), agent: "ada", ctx: sides, write: WRITE });
+
+    expect(seen).toHaveLength(2);
+    for (const side of seen) {
+      expect(side.sourceDir).toBe(join(home, "from"));
+      expect(side).not.toHaveProperty("targetDir");
+    }
+  });
+});
+
 describe("SecretsFoundError", () => {
   it("lists one finding per line without previews", () => {
     const error = new SecretsFoundError([

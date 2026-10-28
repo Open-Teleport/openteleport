@@ -19,9 +19,11 @@ import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseAgentFile } from "../../../src/adapters/claude-code/frontmatter.js";
 import { claudeCodeAdapter } from "../../../src/adapters/claude-code/index.js";
+import { folderAdapter } from "../../../src/adapters/folder/index.js";
 import { sanitize } from "../../../src/adapters/claude-code/paths.js";
 import type { Ctx, WriteOpts } from "../../../src/adapters/types.js";
 import { readBundle } from "../../../src/core/bundle.js";
+import { move } from "../../../src/core/engine.js";
 import type { Bundle } from "../../../src/core/schema.js";
 import { mergeInstructions } from "../../../src/core/text.js";
 
@@ -341,6 +343,44 @@ describe("write", () => {
       expect(result.targetAgentId).toBe("ada");
       expect(await bodyOf("ada")).toBe("Other.\n");
       expect(await ids()).toEqual({ ada: OTHER_ID });
+    });
+
+    it("reads back the id it recorded", async () => {
+      await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), UPDATE);
+
+      const { bundle } = await claudeCodeAdapter.read({ ...ctx, sourceDir: project }, "ada");
+
+      expect(bundle.manifest.id).toBe(ADA_ID);
+    });
+
+    it("moves an agent folder to Claude Code and back, updating the folder in place", async () => {
+      const folder = join(root, "agents", "ada");
+      await cp(ADA_DIR, folder, { recursive: true });
+      const sides = (sourceDir: string, targetDir: string): Ctx => ({
+        ...ctx,
+        sourceDir,
+        targetDir,
+      });
+
+      await move({
+        from: folderAdapter,
+        to: claudeCodeAdapter,
+        agent: ".",
+        ctx: sides(folder, project),
+        write: UPDATE,
+      });
+      const back = await move({
+        from: claudeCodeAdapter,
+        to: folderAdapter,
+        agent: "ada",
+        ctx: sides(project, folder),
+        write: UPDATE,
+      });
+
+      expect(back.target?.agent).toBe(folder);
+      expect(back.warnings.join("\n")).not.toContain("different agent");
+      expect(await exists(`${folder}-2`)).toBe(false);
+      expect(JSON.parse(await readFile(join(folder, "jetpack.json"), "utf8")).id).toBe(ADA_ID);
     });
 
     it("keeps the ids beside the memory directory, never inside it", async () => {

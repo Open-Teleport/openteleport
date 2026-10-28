@@ -73,6 +73,14 @@ export type Adapter = {
   /** Never modifies the source. */
   read(ctx: Ctx, agent: string): Promise<{ bundle: Bundle; warnings: string[] }>;
   /**
+   * What tells this agent apart from every other one the adapter can read, when `agent` alone
+   * does not: the engine keys the id it gives an agent without one (in
+   * `~/.openteleport/ids.json`) by this instead of by `agent`. The folder adapter returns the
+   * real path of the agent's folder, since `.` names a different agent in every folder.
+   * Optional; called with the source's side of the context, after `read`.
+   */
+  cacheIdentity?(ctx: Ctx, agent: string): string | Promise<string>;
+  /**
    * Must not mutate `bundle`. The engine hands over shallow copies whose nested arrays and
    * objects are shared with the Bundle the source adapter returned, so an adapter that needs to
    * reorder or edit anything copies it first.

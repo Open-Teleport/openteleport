@@ -6,7 +6,7 @@ import type { Bundle, Manifest, Skill } from "../../core/schema.js";
 import { factsToProse, mergeInstructions } from "../../core/text.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
-import { claudePaths } from "./paths.js";
+import { type ClaudePaths, claudePaths } from "./paths.js";
 
 const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
@@ -387,14 +387,19 @@ function unsupported(bundle: Bundle, opts: WriteOpts): Item[] {
 }
 
 /** Agent slug → manifest id, as `IDS_FILE` holds it. */
-type AgentIds = Record<string, string>;
+export type AgentIds = Record<string, string>;
+
+/** Where the ids of a project's agents are recorded: beside its memory directory. */
+export function idsFileOf(paths: ClaudePaths): string {
+  return join(dirname(paths.memoryDir(paths.projectDir)), IDS_FILE);
+}
 
 /**
  * The ids recorded for a project. A missing file records none, and so does one that is not a
  * JSON object: it is replaced on the next write, which costs only an update that becomes a copy.
  * Any other read error is thrown before anything is written.
  */
-async function readIds(path: string): Promise<AgentIds> {
+export async function readIds(path: string): Promise<AgentIds> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -451,7 +456,7 @@ export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Pro
   const items: Items = { approximated: [], skipped: [], warnings: [] };
 
   const memoryDir = paths.memoryDir(paths.projectDir);
-  const idsFile = join(dirname(memoryDir), IDS_FILE);
+  const idsFile = idsFileOf(paths);
 
   const ids = await readIds(idsFile);
   const agent = await writeAgentFile(paths.projectAgents, bundle, opts, ids, items);

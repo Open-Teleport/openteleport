@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   stat,
   symlink,
@@ -18,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import folderAdapter, { folderAdapter as namedExport } from "../../src/adapters/folder/index.js";
 import type { Ctx, WriteOpts } from "../../src/adapters/types.js";
 import { readBundle } from "../../src/core/bundle.js";
+import { exportBundle } from "../../src/core/engine.js";
 import type { Bundle, Routine } from "../../src/core/schema.js";
 
 // Replacing removes folders, so every removal in this suite goes through a check that it stays
@@ -904,6 +906,39 @@ describe("folder adapter: write", () => {
       });
       expect(result.targetAgentId).toBe(`${target}-2`);
     });
+  });
+});
+
+describe("folder adapter: cache identity", () => {
+  const exportFrom = (sourceDir: string, agent: string) =>
+    exportBundle({ from: folderAdapter, agent, ctx: { ...ctx, sourceDir }, includeFiles: false });
+
+  it("gives each manifest-less folder an id of its own, and the same one every time", async () => {
+    const one = join(root, "one", "ada");
+    const two = join(root, "two", "ada");
+    await put(join(one, "AGENTS.md"), "One.\n");
+    await put(join(two, "AGENTS.md"), "Two.\n");
+
+    const first = await exportFrom(one, ".");
+    const second = await exportFrom(two, ".");
+    const again = await exportFrom(one, ".");
+    const byName = await exportFrom(join(root, "one"), "ada");
+
+    expect(first.bundle.manifest.id).not.toBe(second.bundle.manifest.id);
+    expect(again.bundle.manifest.id).toBe(first.bundle.manifest.id);
+    // The same folder reached from its parent is the same agent.
+    expect(byName.bundle.manifest.id).toBe(first.bundle.manifest.id);
+  });
+
+  it("is the real path of the agent folder", async () => {
+    const dir = join(root, "agents");
+    await put(join(dir, "scout", "AGENTS.md"));
+    const real = await realpath(join(dir, "scout"));
+
+    expect(await folderAdapter.cacheIdentity?.({ ...ctx, sourceDir: dir }, "scout")).toBe(real);
+    expect(
+      await folderAdapter.cacheIdentity?.({ ...ctx, sourceDir: join(dir, "scout") }, "."),
+    ).toBe(real);
   });
 });
 
