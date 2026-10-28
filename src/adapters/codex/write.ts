@@ -1,6 +1,6 @@
 // Writes a Bundle into Codex as a custom agent: one `agents/<slug>.toml`. The user's `config.toml`
 // and `AGENTS.md` are never written, since that would replace their global setup with one move.
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stringify } from "smol-toml";
 import { ulid } from "ulid";
@@ -11,23 +11,24 @@ import { lstatIfAny } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
-import { DEFAULT_AGENT, IDS_FILE, agentsDir, codexHome, userSkillsDir } from "./paths.js";
-import type { CodexAgentFile } from "./read.js";
+import {
+  AGENT_EXTENSION,
+  DEFAULT_AGENT,
+  IDS_FILE,
+  agentsDir,
+  codexHome,
+  isRecord,
+  truncate,
+  userSkillsDir,
+} from "./paths.js";
+import { type CodexAgentFile, parseAgentToml } from "./read.js";
 
 const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
-const AGENT_EXTENSION = ".toml";
 /** What Codex accepts as a nickname: ASCII letters, digits, spaces, `-` and `_` (C11). */
 const NICKNAME = /^[A-Za-z0-9 _-]+$/;
 
 type Items = WriteResult["items"];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
 /**
  * The file stem for an agent: lowercase, every run of characters outside `a-z0-9` one `-`, no `-`
@@ -141,7 +142,7 @@ async function agentFileSlug(
       ? "it is a symbolic link"
       : !existing.isFile()
         ? "it is not a regular file"
-        : ids[base] === undefined
+        : !Object.hasOwn(ids, base)
           ? "OpenTeleport did not write it"
           : undefined;
     if (why !== undefined) {
@@ -161,7 +162,7 @@ async function agentFileSlug(
   }
   // An empty id is no id: nothing proves the agent there is this one.
   const { id } = bundle.manifest;
-  if (id !== "" && ids[base] === id) return base;
+  if (id !== "" && Object.hasOwn(ids, base) && ids[base] === id) return base;
   // An earlier move may already have given this agent a `-N` file of its own: update that one.
   const own = id === "" ? undefined : await recordedCopy(dir, base, id, ids);
   if (own !== undefined) return own;
@@ -236,8 +237,34 @@ function nicknamesOf(value: unknown, items: Items): string[] | undefined {
   return undefined;
 }
 
-/** The text of the agent file for `bundle`; what the report needs to say about it goes to `items`. */
-function renderBundle(bundle: Bundle, items: Items): string {
+/**
+ * The settings of the agent file at `path` that the Bundle has no place for (`features`,
+ * `sandbox_mode`, `model_verbosity`...), so that rewriting the file keeps them. Nothing is kept
+ * when there is no regular file to overwrite. The parser drops comments, so overwriting a file
+ * is reported; a file that is not TOML is overwritten whole, and that is reported too.
+ */
+async function keptSettings(
+  path: string,
+  label: string,
+  items: Items,
+): Promise<Record<string, unknown>> {
+  if (!(await lstatIfAny(path))?.isFile()) return {};
+  const text = await readFile(path, "utf8");
+  try {
+    const { rest } = parseAgentToml(text, label);
+    items.warnings.push(`${label} rewritten; comments may be lost`);
+    return rest;
+  } catch (error) {
+    items.warnings.push(`${(error as Error).message}; rewritten without its old settings`);
+    return {};
+  }
+}
+
+/**
+ * The text of the agent file for `bundle`; what the report needs to say about it goes to `items`.
+ * `kept` is what the file held before (see `keptSettings`); the Bundle's own fields win over it.
+ */
+function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown>): string {
   const { manifest } = bundle;
   const model = manifest.models.find(isForCodex)?.model;
   if (model === undefined && manifest.models.length > 0) {
@@ -264,7 +291,12 @@ function renderBundle(bundle: Bundle, items: Items): string {
   };
   const hasSkillsConfig =
     Array.isArray(skillsConfig) && skillsConfig.length > 0 && skillsConfig.every(isRecord);
-  return renderAgentToml(agent, hasSkillsConfig ? { skills: { config: skillsConfig } } : {});
+  const rest = { ...kept };
+  if (hasSkillsConfig) {
+    // The Bundle's skills config replaces the file's own; its other `skills` settings stay.
+    rest.skills = { ...(isRecord(kept.skills) ? kept.skills : {}), config: skillsConfig };
+  }
+  return renderAgentToml(agent, rest);
 }
 
 /**
@@ -287,8 +319,9 @@ async function writeAtomically(path: string, content: string): Promise<void> {
  * Writes a Bundle as a custom agent of the Codex home (`ctx.targetDir`, `CODEX_HOME` or
  * `~/.codex`): `agents/<slug>.toml`, its skills in `~/.agents/skills` (shared with every tool
  * that reads it, so a skill that is already there is reused and none is ever removed), and its
- * id in `openteleport-ids.json` in the Codex home. `config.toml`, `AGENTS.md` and the memory are
- * not touched, and `bundle` is not changed.
+ * id in `openteleport-ids.json` in the Codex home. An agent file it overwrites keeps the settings
+ * the Bundle has no place for. `config.toml`, `AGENTS.md` and the memory are not touched, and
+ * `bundle` is not changed.
  */
 export async function writeCodexAgent(
   ctx: Ctx,
@@ -303,13 +336,14 @@ export async function writeCodexAgent(
   // Everything that can refuse comes before the first write.
   const ids = await readIds(idsFile);
   const slug = await agentFileSlug(dir, bundle, opts, ids, items);
-  const text = renderBundle(bundle, items);
+  const path = join(dir, `${slug}${AGENT_EXTENSION}`);
+  const kept = await keptSettings(path, `agents/${slug}${AGENT_EXTENSION}`, items);
+  const text = renderBundle(bundle, items, kept);
 
   await writeSkills(userSkillsDir(ctx), bundle.skills, items);
   if (bundle.skills.length > 0) {
     items.warnings.push("Codex skills are shared by every tool reading ~/.agents/skills");
   }
-  const path = join(dir, `${slug}${AGENT_EXTENSION}`);
   await writeAtomically(path, text);
   await recordId(idsFile, slug, bundle.manifest.id, items);
   items.warnings.push(

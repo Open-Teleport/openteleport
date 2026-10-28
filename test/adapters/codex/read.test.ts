@@ -441,6 +441,17 @@ describe("read an agent file", () => {
     expect((await readCodexAgent(ctx, "reviewer")).bundle.manifest.id).toBe(ADA_ID);
   });
 
+  it("gives an agent called constructor the id recorded for it, and none when nothing is", async () => {
+    await writeFile(
+      join(codex, "agents", "constructor.toml"),
+      'name = "Constructor"\ndescription = "d"\ndeveloper_instructions = "x"\n',
+    );
+    expect((await readCodexAgent(ctx, "constructor")).bundle.manifest.id).toBe("");
+
+    await writeFile(join(codex, "openteleport-ids.json"), JSON.stringify({ constructor: ADA_ID }));
+    expect((await readCodexAgent(ctx, "constructor")).bundle.manifest.id).toBe(ADA_ID);
+  });
+
   it("ignores a recorded id that is not a ULID, and a map that cannot be read", async () => {
     await writeFile(join(codex, "openteleport-ids.json"), JSON.stringify({ reviewer: "nope" }));
     expect((await readCodexAgent(ctx, "reviewer")).bundle.manifest.id).toBe("");

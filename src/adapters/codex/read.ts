@@ -11,12 +11,15 @@ import { lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
 import type { Adapter, AgentRef, Ctx } from "../types.js";
 import {
+  AGENT_EXTENSION,
   DEFAULT_AGENT,
   DETECT_FILES,
   IDS_FILE,
   agentsDir,
   codexHome,
+  isRecord,
   legacySkillsDir,
+  truncate,
   userSkillsDir,
 } from "./paths.js";
 
@@ -26,7 +29,6 @@ const GLOBAL_LABEL = "Codex (global)";
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const SKILL_FILE = "SKILL.md";
-const AGENT_EXTENSION = ".toml";
 /** The note that carries `memories/MEMORY.md`. */
 const MEMORY_NOTE = "codex-memory";
 const NOT_FOUND_HINT = "Install Codex or pass --source-dir <CODEX_HOME>";
@@ -45,15 +47,9 @@ export type CodexAgentFile = {
 
 type Table = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is Table =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(isString);
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
 // Plain code-unit order, so that the result does not depend on the locale.
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -367,7 +363,9 @@ function vendorOf(values: Table): { "x-codex"?: Table } {
  */
 async function recordedId(home: string, stem: string): Promise<string> {
   try {
-    const id = (await readIds(join(home, IDS_FILE)))[stem];
+    const ids = await readIds(join(home, IDS_FILE));
+    // Own keys only: an agent called `constructor` has no id because of what every object inherits.
+    const id = Object.hasOwn(ids, stem) ? ids[stem] : undefined;
     return id !== undefined && ULID_PATTERN.test(id) ? id : "";
   } catch {
     return "";

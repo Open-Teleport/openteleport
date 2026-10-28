@@ -746,6 +746,183 @@ describe("an agent file that is already there", () => {
   });
 });
 
+describe("rewriting its own agent file", () => {
+  /** Ada written once, then edited by hand: a comment, a model, two settings and a table. */
+  async function editedByHand(extra = ""): Promise<void> {
+    await writeCodexAgent(ctx, ada(), UPDATE);
+    const own = await readFile(agentPath("ada"), "utf8");
+    await writeFile(
+      agentPath("ada"),
+      `# Tuned by hand.\n${own.replace('model = "gpt-5.5"', 'model = "old-model"')}sandbox_mode = "workspace-write"\nmodel_verbosity = "low"\n${extra}\n[features]\nmemories = true\n`,
+    );
+  }
+
+  const changed = (): Bundle => ({ ...ada(), instructions: "Changed." });
+
+  it("keeps the settings the Bundle has no place for, and updates the rest", async () => {
+    await editedByHand();
+
+    await writeCodexAgent(ctx, changed(), UPDATE);
+
+    const written = await readAgentFile("ada");
+    expect(written).toMatchObject({
+      sandbox_mode: "workspace-write",
+      model_verbosity: "low",
+      features: { memories: true },
+      name: "Ada",
+      model: "gpt-5.5",
+      model_reasoning_effort: "medium",
+    });
+    expect(String(written.developer_instructions)).toContain("Changed.");
+    expect(await readFile(agentPath("ada"), "utf8")).not.toContain("Tuned by hand");
+  });
+
+  it("says that it rewrote the file and that comments may be lost", async () => {
+    await editedByHand();
+
+    const { items } = await writeCodexAgent(ctx, changed(), UPDATE);
+
+    expect(items.warnings).toContain("agents/ada.toml rewritten; comments may be lost");
+  });
+
+  it("keeps them on replace too", async () => {
+    await editedByHand();
+
+    const { items } = await writeCodexAgent(ctx, changed(), REPLACE);
+
+    expect(await readAgentFile("ada")).toMatchObject({
+      sandbox_mode: "workspace-write",
+      features: { memories: true },
+    });
+    expect(items.warnings).toContain("agents/ada.toml rewritten; comments may be lost");
+  });
+
+  it("keeps them in a copy of its own that it updates", async () => {
+    await mkdir(join(codex, "agents"));
+    await writeFile(agentPath("ada"), 'name = "Ada"\ndescription = "d"\ndeveloper_instructions = "Mine."\n');
+    await writeCodexAgent(ctx, ada(), UPDATE);
+    const own = await readFile(agentPath("ada-2"), "utf8");
+    await writeFile(agentPath("ada-2"), `${own}sandbox_mode = "read-only"\n`);
+
+    const { items } = await writeCodexAgent(ctx, changed(), UPDATE);
+
+    expect(await readAgentFile("ada-2")).toMatchObject({ sandbox_mode: "read-only" });
+    expect(items.warnings).toContain("agents/ada-2.toml rewritten; comments may be lost");
+  });
+
+  it("lets the Bundle's skills config replace the file's, and keeps its other skills settings", async () => {
+    await editedByHand(
+      'skills = { include_instructions = false, config = [{ path = "/old", enabled = true }] }\n',
+    );
+    const bundle = {
+      ...changed(),
+      manifest: {
+        ...ada().manifest,
+        "x-codex": { skillsConfig: [{ path: "/new", enabled: false }] },
+      },
+    };
+
+    await writeCodexAgent(ctx, bundle, UPDATE);
+
+    expect((await readAgentFile("ada")).skills).toEqual({
+      include_instructions: false,
+      config: [{ path: "/new", enabled: false }],
+    });
+  });
+
+  it("keeps the file's skills config when the Bundle has none", async () => {
+    await editedByHand('skills = { config = [{ path = "/old", enabled = true }] }\n');
+
+    await writeCodexAgent(ctx, changed(), UPDATE);
+
+    expect((await readAgentFile("ada")).skills).toEqual({ config: [{ path: "/old", enabled: true }] });
+  });
+
+  it("does not keep model settings the Bundle does not carry", async () => {
+    await editedByHand();
+    const bundle = { ...changed(), manifest: { ...ada().manifest, models: [], "x-codex": {} } };
+
+    await writeCodexAgent(ctx, bundle, UPDATE);
+
+    const written = await readAgentFile("ada");
+    expect(written.model).toBeUndefined();
+    expect(written.model_reasoning_effort).toBeUndefined();
+    expect(written.sandbox_mode).toBe("workspace-write");
+  });
+
+  it("writes a file that is not TOML over whole, and says so", async () => {
+    await writeCodexAgent(ctx, ada(), UPDATE);
+    await writeFile(agentPath("ada"), 'name = "Ada\nsandbox_mode =\n');
+
+    const { items } = await writeCodexAgent(ctx, changed(), UPDATE);
+
+    expect(Object.keys(await readAgentFile("ada"))).toEqual([
+      "name",
+      "description",
+      "developer_instructions",
+      "model",
+      "model_reasoning_effort",
+    ]);
+    expect(items.warnings).toContainEqual(
+      expect.stringMatching(/^agents\/ada\.toml: .*; rewritten without its old settings$/),
+    );
+    expect(items.warnings).not.toContain("agents/ada.toml rewritten; comments may be lost");
+  });
+
+  it("says nothing of the kind for a file it writes for the first time", async () => {
+    const { items } = await writeCodexAgent(ctx, ada(), UPDATE);
+
+    expect(items.warnings.filter((warning) => warning.includes("rewritten"))).toEqual([]);
+  });
+
+  it("takes nothing from a file that is not its own when it writes a copy beside it", async () => {
+    await mkdir(join(codex, "agents"));
+    const foreign = 'name = "Ada"\ndescription = "d"\ndeveloper_instructions = "Mine."\nsandbox_mode = "read-only"\n';
+    await writeFile(agentPath("ada"), foreign);
+
+    const { items } = await writeCodexAgent(ctx, ada(), UPDATE);
+
+    expect((await readAgentFile("ada-2")).sandbox_mode).toBeUndefined();
+    expect(await readFile(agentPath("ada"), "utf8")).toBe(foreign);
+    expect(items.warnings.filter((warning) => warning.includes("rewritten"))).toEqual([]);
+  });
+});
+
+describe("an agent called Constructor", () => {
+  const foreign = 'name = "Constructor"\ndescription = "d"\ndeveloper_instructions = "Mine."\n';
+  const named = (): Bundle => ({ ...ada(), manifest: { ...ada().manifest, name: "Constructor" } });
+
+  it("is not taken for one OpenTeleport wrote just because every object has a constructor", async () => {
+    await mkdir(join(codex, "agents"));
+    await writeFile(agentPath("constructor"), foreign);
+
+    await expect(writeCodexAgent(ctx, named(), REPLACE)).rejects.toThrow(
+      `Refusing to replace ${agentPath("constructor")}: OpenTeleport did not write it.`,
+    );
+
+    expect(await readFile(agentPath("constructor"), "utf8")).toBe(foreign);
+  });
+
+  it("gets a copy on update, and the file that is there stays", async () => {
+    await mkdir(join(codex, "agents"));
+    await writeFile(agentPath("constructor"), foreign);
+
+    const result = await writeCodexAgent(ctx, named(), UPDATE);
+
+    expect(result.targetAgentId).toBe("constructor-2");
+    expect(await readFile(agentPath("constructor"), "utf8")).toBe(foreign);
+  });
+
+  it("is updated in place when it is its own", async () => {
+    await writeCodexAgent(ctx, named(), UPDATE);
+
+    const second = await writeCodexAgent(ctx, named(), UPDATE);
+
+    expect(second.targetAgentId).toBe("constructor");
+    expect(JSON.parse(await readFile(idsPath(), "utf8"))).toEqual({ constructor: ADA_ID });
+  });
+});
+
 describe("the skills", () => {
   const skillFile = (name: string): string => join(skillsDir(), name, "SKILL.md");
 
