@@ -1,11 +1,26 @@
 import { writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import JSON5 from "json5";
 import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OpenClawCli } from "../../../src/adapters/openclaw/cli.js";
+import {
+  OpenClawCli,
+  ShimLineBreakError,
+  resolveOpenClawCommand,
+} from "../../../src/adapters/openclaw/cli.js";
 import { openclawAdapter } from "../../../src/adapters/openclaw/index.js";
 import { readOpenClawAgent } from "../../../src/adapters/openclaw/read.js";
 import { writeOpenClawAgent } from "../../../src/adapters/openclaw/write.js";
@@ -13,11 +28,33 @@ import type { Ctx, WriteOpts } from "../../../src/adapters/types.js";
 import { SecretsFoundError } from "../../../src/core/engine.js";
 import type { Bundle, Routine } from "../../../src/core/schema.js";
 
+// `rename` as Node has it, unless a test makes it fail as a full disk would.
+const renameControl = vi.hoisted(() => ({ fail: false }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (renameControl.fail) {
+        throw Object.assign(new Error("ENOSPC: no space left on device, rename"), {
+          code: "ENOSPC",
+        });
+      }
+      return actual.rename(...args);
+    },
+  };
+});
+
 const NOW = new Date("2026-10-27T09:15:00.000Z");
 const ADA_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
 const RESTART_WARNING = "Restart the Gateway to load the new agent: openclaw gateway restart";
-const START_WARNING =
-  "Start the Gateway to create the routines, then move the agent again: openclaw gateway start";
+const GATEWAY_WARNING =
+  "Routines need the Gateway, which did not answer; start it, then move the agent again: " +
+  "openclaw gateway start";
+const CAPABILITIES_ITEM = {
+  field: "capabilities",
+  detail: "OpenClaw does not take capability declarations; defaults apply",
+};
 const REWRITE_WARNING = "openclaw.json rewritten; comments may be lost";
 const BACKUP_NAME = "openclaw.json.bak-2026-10-27T09-15-00-000Z";
 /** What `openclaw.json` holds before every test: JSON5 with a comment, as OpenClaw writes it. */
@@ -123,7 +160,9 @@ function stubExec(): typeof execa {
     options: { env?: Record<string, string | undefined> } = {},
   ) => {
     calls.push({ file, args: [...args], env: { ...options.env } });
-    const out = override([...args]) ?? defaultReply([...args]);
+    // Node running OpenClaw's script gets the script first; the replies go by OpenClaw's own.
+    const own = file === process.execPath ? args.slice(1) : [...args];
+    const out = override(own) ?? defaultReply(own);
     if (out === undefined) throw new Error(`unexpected command: ${file} ${args.join(" ")}`);
     if (out instanceof Error) throw out;
     return { stdout: out, stderr: "", exitCode: 0 };
@@ -169,8 +208,16 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  renameControl.fail = false;
+  Object.defineProperty(process, "platform", PLATFORM);
   await rm(scratch, { recursive: true, force: true });
 });
+
+/** `process.platform` as Node set it; a test may pretend to run on another one. */
+const PLATFORM = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+const pretendPlatform = (platform: NodeJS.Platform): void => {
+  Object.defineProperty(process, "platform", { ...PLATFORM, value: platform });
+};
 
 const MORNING_DIGEST: Routine = {
   name: "Morning digest",
@@ -188,7 +235,8 @@ function ada(overrides: Partial<Bundle> = {}, manifest: Partial<Bundle["manifest
       name: "Ada",
       title: "Research assistant",
       models: [{ provider: "anthropic", model: "claude-opus-5-5" }],
-      capabilities: ["browser", "filesystem", "scheduler"],
+      // None declared: a declaration only adds an approximated item (tested on its own).
+      capabilities: [],
       "x-openclaw": { identity: { name: "Ada", emoji: "🔎" } },
       ...manifest,
     },
@@ -250,13 +298,14 @@ const MARKER = (id = ADA_ID) => `${JSON.stringify({ id, movedAt: NOW.toISOString
 describe("writeOpenClawAgent: a new agent", () => {
   it("creates the agent through the CLI and writes its workspace", async () => {
     const ws = join(stateDir, "workspace-ada");
-    const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+    const bundle = ada({}, { capabilities: ["browser", "filesystem", "scheduler"] });
+    const result = await writeOpenClawAgent(makeCtx(), bundle, OPTS);
 
     expect(result).toEqual({
       outcome: "done",
       targetAgentId: "ada",
       artifactPath: ws,
-      items: { approximated: [], skipped: [], warnings: [] },
+      items: { approximated: [CAPABILITIES_ITEM], skipped: [], warnings: [] },
     });
 
     expect(argsOf()).toEqual([
@@ -289,13 +338,14 @@ describe("writeOpenClawAgent: a new agent", () => {
         "30 8 * * 1-5",
         "--tz",
         "Europe/Warsaw",
-        "--message",
-        "Summarise new papers and unread mail into a five-line digest.",
         "--agent",
         "ada",
         "--session",
         "isolated",
         "--json",
+        // Last, so that a command line cut inside the message still carries every flag.
+        "--message",
+        "Summarise new papers and unread mail into a five-line digest.",
       ],
       ["automations", "disable", "job-1", "--json"],
       ["gateway", "status", "--json"],
@@ -406,13 +456,13 @@ describe("writeOpenClawAgent: a new agent", () => {
         "Sweep",
         "--every",
         "30m",
-        "--message",
-        MORNING_DIGEST.instruction,
         "--agent",
         "ada",
         "--session",
         "isolated",
         "--json",
+        "--message",
+        MORNING_DIGEST.instruction,
       ],
       [
         "automations",
@@ -423,13 +473,13 @@ describe("writeOpenClawAgent: a new agent", () => {
         "2026-11-01T09:00:00.000Z",
         "--tz",
         "UTC",
-        "--message",
-        MORNING_DIGEST.instruction,
         "--agent",
         "ada",
         "--session",
         "isolated",
         "--json",
+        "--message",
+        MORNING_DIGEST.instruction,
       ],
     ]);
   });
@@ -713,6 +763,67 @@ describe("writeOpenClawAgent: config fallback", () => {
   });
 });
 
+describe("writeOpenClawAgent: the config rewrite is atomic", () => {
+  const configFile = () => join(stateDir, "openclaw.json");
+  const noConfigSet = (args: string[]): Reply =>
+    args[0] === "config" ? unknownCommand() : undefined;
+
+  it("leaves the original intact and no temporary file when the rename fails", async () => {
+    override = noConfigSet;
+    renameControl.fail = true;
+
+    const error = await writeOpenClawAgent(makeCtx(), ada(), OPTS).catch((e: unknown) => e);
+
+    expect((error as Error).message).toBe(
+      `agent 'ada' was created in ${join(stateDir, "workspace-ada")}; ` +
+        "ENOSPC: no space left on device, rename",
+    );
+    expect(await text(configFile())).toBe(CONFIG_SOURCE);
+    expect((await readdir(stateDir)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    expect(await text(join(stateDir, BACKUP_NAME))).toBe(CONFIG_SOURCE);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the mode of openclaw.json", async () => {
+    await chmod(configFile(), 0o640);
+    override = noConfigSet;
+
+    await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    expect((await stat(configFile())).mode & 0o777).toBe(0o640);
+    expect(JSON5.parse(await text(configFile()))).toMatchObject({
+      agents: { entries: { ada: { model: "anthropic/claude-opus-5-5" } } },
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("creates a missing config owner-only", async () => {
+    await rm(configFile());
+    override = noConfigSet;
+
+    const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    expect((await stat(configFile())).mode & 0o777).toBe(0o600);
+    // Nothing was there to lose, so neither a backup nor the warning.
+    expect(result.items.warnings).toEqual([]);
+    expect((await readdir(stateDir)).filter((name) => name.includes(".bak-"))).toEqual([]);
+  });
+
+  it.skipIf(!canSymlink)("keeps a symbolic-link openclaw.json a link", async () => {
+    const real = join(scratch, "dotfiles", "openclaw.json5");
+    await writeTree(scratch, { "dotfiles/openclaw.json5": CONFIG_SOURCE });
+    await rm(configFile());
+    await symlink(real, configFile(), "file");
+    override = noConfigSet;
+
+    await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    expect((await lstat(configFile())).isSymbolicLink()).toBe(true);
+    expect(JSON5.parse(await text(real))).toMatchObject({
+      agents: { entries: { ada: { model: "anthropic/claude-opus-5-5" } } },
+    });
+    expect(await text(join(stateDir, BACKUP_NAME))).toBe(CONFIG_SOURCE);
+  });
+});
+
 describe("writeOpenClawAgent: conflicts", () => {
   /** An agent `ada` OpenClaw already has, with a workspace of its own. */
   async function existingAda(files: Record<string, string> = {}): Promise<string> {
@@ -981,14 +1092,14 @@ describe("writeOpenClawAgent: the cron family (OpenClaw 2026.5)", () => {
     "30 8 * * 1-5",
     "--tz",
     "Europe/Warsaw",
-    "--message",
-    MORNING_DIGEST.instruction,
     "--agent",
     "ada",
     "--session",
     "isolated",
     ...tail,
     "--json",
+    "--message",
+    MORNING_DIGEST.instruction,
   ];
 
   it("creates the jobs disabled with `cron add --disabled`, with no disable call", async () => {
@@ -1060,7 +1171,7 @@ describe("writeOpenClawAgent: the cron family (OpenClaw 2026.5)", () => {
       { field: "routine:Morning digest", detail },
       { field: "routine:Evening digest", detail },
     ]);
-    expect(result.items.warnings).toEqual([START_WARNING]);
+    expect(result.items.warnings).toEqual([GATEWAY_WARNING]);
   });
 
   it("does not blame the Gateway for a routine whose own text names it", async () => {
@@ -1080,19 +1191,89 @@ describe("writeOpenClawAgent: the cron family (OpenClaw 2026.5)", () => {
     expect(result.items.warnings).toEqual([]);
   });
 
-  it("names the Gateway when the jobs of an existing agent cannot be listed", async () => {
+  it("replaces the rest without the Gateway, with one warning, when it cannot list", async () => {
     const ws = join(scratch, "their-ada");
     await writeTree(ws, { "AGENTS.md": "Theirs.\n" });
     agentRows = [{ id: "ada", workspace: ws }];
     override = (args) => (args[0] === "cron" ? gatewayDown(args) : cronFamily(args));
 
+    const result = await writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "replace" });
+
+    expect(result.targetAgentId).toBe("ada");
+    expect(result.items.warnings).toEqual([GATEWAY_WARNING]);
+    expect(result.items.skipped).toEqual([
+      {
+        field: "routine:Morning digest",
+        detail: "not created: Error: gateway not reachable at ws://127.0.0.1:18789 (ECONNREFUSED)",
+      },
+    ]);
+    // Nothing to remove without a listing; the workspace and the identity are still written.
+    expect(commands()).not.toContain("cron rm");
+    expect(commands()).toContain("agents set-identity");
+    expect(await text(join(ws, "AGENTS.md"))).toBe(ada().instructions);
+  });
+
+  it("stops removing old jobs, with the warning, when the Gateway goes away", async () => {
+    const ws = join(scratch, "their-ada");
+    agentRows = [{ id: "ada", workspace: ws }];
+    jobs = [
+      { id: "old-1", name: "Morning digest", agentId: "ada" },
+      { id: "old-2", name: "Inbox sweep", agentId: "ada" },
+    ];
+    override = (args) =>
+      args[0] === "cron" && (args[1] === "rm" || args[1] === "add")
+        ? gatewayDown(args)
+        : cronFamily(args);
+
+    const result = await writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "replace" });
+
+    expect(argsOf().filter((args) => args[1] === "rm")).toEqual([
+      ["cron", "rm", "old-1", "--json"],
+    ]);
+    expect(result.items.warnings).toEqual([GATEWAY_WARNING]);
+    expect(await text(join(ws, ".openteleport.json"))).toBe(MARKER());
+  });
+
+  it("updates without leaving out routines when the Gateway cannot list the jobs", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    agentRows = [{ id: "ada", workspace: ws }];
+    jobs = [{ id: "old-1", name: "Morning digest", agentId: "ada" }];
+    override = (args) =>
+      args[0] === "cron" && args[1] === "list" ? gatewayDown(args) : cronFamily(args);
+
+    const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    // The job of the same name could not be seen, so the routine is added, not left out.
+    expect(result.items.skipped).toEqual([]);
+    expect(result.items.warnings).toEqual([GATEWAY_WARNING]);
+    expect(argsOf().filter((args) => args[1] === "add" && args[0] === "cron")).toEqual([
+      cronAdd("Morning digest", "--disabled"),
+    ]);
+  });
+
+  it("still throws a listing failure that is not the Gateway's, before writing", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { "AGENTS.md": "Theirs.\n" });
+    agentRows = [{ id: "ada", workspace: ws }];
+    override = (args) =>
+      args[0] === "cron" && args[1] === "list" ? new Error("database is locked") : cronFamily(args);
+
     await expect(
       writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "replace" }),
-    ).rejects.toThrow(
-      "the automations of agent 'ada' could not be listed (Error: gateway not reachable at " +
-        "ws://127.0.0.1:18789 (ECONNREFUSED)); start the Gateway and retry: openclaw gateway start",
-    );
+    ).rejects.toThrow("database is locked");
     expect(await listFiles(ws)).toEqual(["AGENTS.md"]);
+  });
+
+  it("lists no jobs for an update without routines", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    agentRows = [{ id: "ada", workspace: ws }];
+    override = cronFamily;
+
+    await writeOpenClawAgent(makeCtx(), ada({ routines: [] }), OPTS);
+
+    expect(commands().filter((command) => command.endsWith(" list"))).toEqual(["agents list"]);
   });
 });
 
@@ -1190,6 +1371,171 @@ describe("writeOpenClawAgent: safety", () => {
     expect(await text(join(outside, "soul.md"))).toBe("Not yours.\n");
     expect(await listFiles(outside)).toEqual(["skills/keep.md", "soul.md"]);
     expect(await text(join(ws, "AGENTS.md"))).toBe(ada().instructions);
+  });
+});
+
+/** An npm `cmd-shim` for `openclaw`, as `npm install -g openclaw` writes it on Windows. */
+const NPM_SHIM = String.raw`@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+
+IF EXIST "%dp0%\node.exe" (
+  SET "_prog=%dp0%\node.exe"
+) ELSE (
+  SET "_prog=node"
+  SET PATHEXT=%PATHEXT:;.JS;=;%
+)
+
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_modules\openclaw\openclaw.mjs" %*
+`;
+
+describe("OpenClawCli: starting openclaw on Windows", () => {
+  /** A PATH directory holding `files`, with the package script the npm shim names. */
+  async function binDir(files: Record<string, string>): Promise<{ dir: string; target: string }> {
+    const dir = join(scratch, "npm-bin");
+    await writeTree(dir, { "node_modules/openclaw/openclaw.mjs": "// OpenClaw\n", ...files });
+    return { dir, target: join(dir, "node_modules", "openclaw", "openclaw.mjs") };
+  }
+
+  it("runs the script of an npm shim with this node, not through cmd.exe", async () => {
+    const { dir, target } = await binDir({ "openclaw.cmd": NPM_SHIM });
+    // Windows spells it `Path`; the lookup ignores case.
+    const env = { Path: `${join(scratch, "nothing-here")};${dir}`, PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+
+    expect(await resolveOpenClawCommand(env, "win32")).toEqual({
+      file: process.execPath,
+      prefix: [target],
+      viaShell: false,
+    });
+
+    const cli = new OpenClawCli(makeCtx({ env }), stateDir, join(stateDir, "openclaw.json"), {
+      platform: "win32",
+    });
+    await cli.agentsList();
+    expect(calls).toEqual([
+      {
+        file: process.execPath,
+        args: [target, "agents", "list", "--json"],
+        env: expect.objectContaining({ OPENCLAW_STATE_DIR: stateDir }),
+      },
+    ]);
+    expect(await cli.command()).toBe(await cli.command());
+  });
+
+  it("runs an openclaw.exe as it is, ahead of a shim beside it", async () => {
+    const { dir } = await binDir({ "openclaw.exe": "", "openclaw.cmd": NPM_SHIM });
+    expect(await resolveOpenClawCommand({ PATH: dir }, "win32")).toEqual({
+      file: join(dir, "openclaw.exe"),
+      prefix: [],
+      viaShell: false,
+    });
+  });
+
+  it("falls back to the shim, through cmd.exe, when it names no script", async () => {
+    const shim = "@ECHO off\r\nnode C:\\elsewhere\\x.js %*\r\n";
+    const { dir } = await binDir({ "openclaw.cmd": shim });
+    const shell = { file: "openclaw", prefix: [], viaShell: true };
+    expect(await resolveOpenClawCommand({ PATH: dir }, "win32")).toEqual(shell);
+    expect(await resolveOpenClawCommand({ PATH: join(scratch, "nothing-here") }, "win32")).toEqual(
+      shell,
+    );
+    expect(await resolveOpenClawCommand({}, "linux")).toEqual({ ...shell, viaShell: false });
+  });
+
+  it("refuses a line break that would pass through cmd.exe, running nothing", async () => {
+    const cli = new OpenClawCli(makeCtx({ env: {} }), stateDir, join(stateDir, "openclaw.json"), {
+      platform: "win32",
+    });
+    await cli.jobCommand();
+    calls = [];
+
+    await expect(cli.automationsAdd(["--message", "Line one.\nLine two."])).rejects.toBeInstanceOf(
+      ShimLineBreakError,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("skips a multi-line routine instead of letting cmd.exe cut it", async () => {
+    pretendPlatform("win32");
+    const multiLine: Routine = { ...MORNING_DIGEST, instruction: "Read the mail.\nThen reply." };
+    const single: Routine = { ...MORNING_DIGEST, name: "Evening digest" };
+
+    const result = await writeOpenClawAgent(
+      makeCtx({ env: { PATH: join(scratch, "nothing-here") } }),
+      ada({ routines: [multiLine, single] }),
+      OPTS,
+    );
+
+    expect(result.items.skipped).toEqual([
+      {
+        field: "routine:Morning digest",
+        detail: "multi-line instructions cannot be passed through the Windows shim",
+      },
+    ]);
+    expect(argsOf().filter((args) => args[0] === "automations" && args[1] === "add")).toEqual([
+      expect.arrayContaining(["--name", "Evening digest"]),
+    ]);
+  });
+
+  it("passes a multi-line routine whole when node runs the shim's script", async () => {
+    pretendPlatform("win32");
+    const { dir, target } = await binDir({ "openclaw.cmd": NPM_SHIM });
+    const multiLine: Routine = { ...MORNING_DIGEST, instruction: "Read the mail.\nThen reply." };
+
+    const result = await writeOpenClawAgent(
+      makeCtx({ env: { PATH: dir } }),
+      ada({ routines: [multiLine] }),
+      OPTS,
+    );
+
+    expect(result.items.skipped).toEqual([]);
+    expect(calls.every((call) => call.file === process.execPath && call.args[0] === target)).toBe(
+      true,
+    );
+    const add = argsOf().find((args) => args[1] === "automations" && args[2] === "add");
+    expect(add?.slice(-2)).toEqual(["--message", "Read the mail.\nThen reply."]);
+  });
+});
+
+describe("writeOpenClawAgent: failures and capabilities", () => {
+  const identityFails = (args: string[]): Reply =>
+    args[1] === "set-identity" ? new Error("identity store locked") : undefined;
+
+  it("says where a new agent was created when a later step fails", async () => {
+    override = identityFails;
+
+    await expect(writeOpenClawAgent(makeCtx(), ada(), OPTS)).rejects.toThrow(
+      `agent 'ada' was created in ${join(stateDir, "workspace-ada")}; identity store locked`,
+    );
+  });
+
+  it("rethrows a failure over an existing agent as it is", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    agentRows = [{ id: "ada", workspace: ws }];
+    override = identityFails;
+
+    await expect(writeOpenClawAgent(makeCtx(), ada(), OPTS)).rejects.toThrow(
+      /^identity store locked$/,
+    );
+  });
+
+  it("reports declared capabilities as approximated, and nothing without any", async () => {
+    const declared = await writeOpenClawAgent(
+      makeCtx(),
+      ada({}, { capabilities: ["shell"] }),
+      OPTS,
+    );
+    expect(declared.items.approximated).toEqual([CAPABILITIES_ITEM]);
+
+    await rm(join(stateDir, "workspace-ada"), { recursive: true, force: true });
+    const none = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+    expect(none.items.approximated).toEqual([]);
   });
 });
 

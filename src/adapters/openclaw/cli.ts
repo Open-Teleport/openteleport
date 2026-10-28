@@ -46,6 +46,14 @@
 // - `--json` asks a command for JSON output. `config set`, `cron disable` and `cron enable` are
 //   the exceptions and run without it.
 // - A command this OpenClaw does not have fails with "unknown command" on stderr.
+//
+// On Windows npm installs `openclaw` as an `openclaw.cmd` shim, and running a `.cmd` file goes
+// through `cmd.exe`, which ends a command line at its first line break: a multi-line routine
+// instruction would lose every argument after its first line. So the shim is read and the
+// script it starts is run with this node directly. When that is not possible, an argument with a
+// line break is refused rather than cut.
+import { readFile, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Ctx } from "../types.js";
 
 /** A job as `openclaw automations list` reports it, normalised; `schedule` is passed on raw. */
@@ -148,6 +156,93 @@ function errorOutput(error: unknown): string {
   return `${String(stderr ?? "")}\n${String(message ?? "")}`;
 }
 
+// -- Starting `openclaw` -----------------------------------------------------------------------
+
+/** How `openclaw` is started. */
+export type OpenClawCommand = {
+  /** The program to run. */
+  file: string;
+  /** Arguments that go before OpenClaw's own: the script, when node runs it directly. */
+  prefix: string[];
+  /** The arguments pass through `cmd.exe`, which ends a command line at its first line break. */
+  viaShell: boolean;
+};
+
+/** Refused instead of run: a line break would cut the command line short in `cmd.exe`. */
+export class ShimLineBreakError extends Error {
+  constructor() {
+    super("multi-line instructions cannot be passed through the Windows shim");
+    this.name = "ShimLineBreakError";
+  }
+}
+
+/** An environment variable by name in any case, as Windows looks them up. */
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
+}
+
+const isFile = (path: string): Promise<boolean> =>
+  stat(path).then(
+    (info) => info.isFile(),
+    () => false,
+  );
+
+// The line of an npm `cmd-shim` that starts the package: `"%dp0%\node_modules\...\x.mjs"`, or
+// `"%~dp0\..."` in older shims, the directory of the shim followed by the script's path.
+const SHIM_TARGET = /"%~?dp0%?\\([^"%]+?\.(?:c?js|mjs))"/i;
+
+/** The script an npm `.cmd` shim runs with node, when the shim names one that exists. */
+async function shimTarget(shim: string): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await readFile(shim, "utf8");
+  } catch {
+    return undefined;
+  }
+  const relative = SHIM_TARGET.exec(text)?.[1];
+  if (relative === undefined) return undefined;
+  const target = join(dirname(shim), ...relative.split("\\"));
+  return (await isFile(target)) ? target : undefined;
+}
+
+/**
+ * How to start `openclaw` with the `PATH` of `env`. Outside Windows, by name. On Windows the
+ * first `openclaw<ext>` on `PATH` (extensions from `PATHEXT`) decides: an `.exe` or `.com` runs
+ * as it is; an npm `.cmd` or `.bat` shim is replaced by this node running the script the shim
+ * names. Anything else, or nothing found, runs by name, through `cmd.exe` if it is a shim.
+ */
+export async function resolveOpenClawCommand(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): Promise<OpenClawCommand> {
+  const byName: OpenClawCommand = { file: "openclaw", prefix: [], viaShell: false };
+  if (platform !== "win32") return byName;
+  const throughShell: OpenClawCommand = { ...byName, viaShell: true };
+  const dirs = (envValue(env, "PATH") ?? "")
+    .split(";")
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, "$1"))
+    .filter((dir) => dir !== "");
+  const extensions = (envValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim().toLowerCase())
+    .filter((extension) => extension.startsWith("."));
+  for (const dir of dirs) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `openclaw${extension}`);
+      if (!(await isFile(candidate))) continue;
+      if (extension === ".exe" || extension === ".com") {
+        return { file: candidate, prefix: [], viaShell: false };
+      }
+      if (extension !== ".cmd" && extension !== ".bat") return throughShell;
+      const target = await shimTarget(candidate);
+      if (target === undefined) return throughShell;
+      return { file: process.execPath, prefix: [target], viaShell: false };
+    }
+  }
+  return throughShell;
+}
+
 /**
  * Runs `openclaw` for one install. Every command runs with `OPENCLAW_STATE_DIR` and
  * `OPENCLAW_CONFIG_PATH` set to that install's state directory and config file, on top of
@@ -158,19 +253,44 @@ export class OpenClawCli {
   private readonly ctx: Ctx;
   private readonly stateDir: string;
   private readonly configFile: string;
+  private readonly platform: NodeJS.Platform;
   /** Settled by the first job command; see `jobCommand`. */
   private jobFamily: JobCommand | undefined;
+  /** Found by the first command; see `command`. */
+  private resolved: Promise<OpenClawCommand> | undefined;
 
-  constructor(ctx: Ctx, stateDir: string, configFile: string) {
+  constructor(
+    ctx: Ctx,
+    stateDir: string,
+    configFile: string,
+    options: { platform?: NodeJS.Platform } = {},
+  ) {
     this.ctx = ctx;
     this.stateDir = stateDir;
     this.configFile = configFile;
+    this.platform = options.platform ?? process.platform;
+  }
+
+  /** How `openclaw` is started (see `resolveOpenClawCommand`); found once and kept. */
+  command(): Promise<OpenClawCommand> {
+    this.resolved ??= resolveOpenClawCommand(this.ctx.env, this.platform);
+    return this.resolved;
+  }
+
+  /**
+   * Runs OpenClaw with `args`. Through the Windows shim, an argument with a line break is
+   * refused with a `ShimLineBreakError`, since `cmd.exe` would drop everything after it.
+   */
+  private async exec(args: readonly string[]): Promise<string> {
+    const command = await this.command();
+    if (command.viaShell && args.some((arg) => /[\r\n]/.test(arg))) throw new ShimLineBreakError();
+    const argv = [...command.prefix, ...args];
+    const { stdout } = await this.ctx.exec(command.file, argv, { env: this.env() });
+    return stdout;
   }
 
   private async run(args: readonly string[], json = true): Promise<string> {
-    const argv = json ? [...args, "--json"] : [...args];
-    const { stdout } = await this.ctx.exec("openclaw", argv, { env: this.env() });
-    return stdout;
+    return this.exec(json ? [...args, "--json"] : args);
   }
 
   private env(): NodeJS.ProcessEnv {
@@ -277,6 +397,9 @@ export class OpenClawCli {
    * Adds a job; `args` are the flags after `add`. With `disabled`, a `cron` job is created
    * disabled (`--disabled`); an `automations` job cannot be, so the result's `disabled` says
    * whether the job already is or the caller still has to disable it. Returns the new job's id.
+   *
+   * `--message` and its value go last, after `--disabled` and `--json`: should the command line
+   * ever be cut inside the message, every other flag has still been passed.
    */
   async automationsAdd(
     args: string[],
@@ -285,8 +408,11 @@ export class OpenClawCli {
     const family = await this.jobCommand();
     const disabled = family === "cron" && opts.disabled === true;
     const command = `${family} add`;
-    const argv = [family, "add", ...args, ...(disabled ? ["--disabled"] : [])];
-    const json = parseJson(await this.run(argv), command);
+    const at = args.indexOf("--message");
+    const message = at === -1 ? [] : args.slice(at, at + 2);
+    const flags = at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+    const argv = [family, "add", ...flags, ...(disabled ? ["--disabled"] : []), "--json"];
+    const json = parseJson(await this.run([...argv, ...message], false), command);
     const record = isRecord(json) ? json : {};
     const nested = [record, record.job, record.automation].find(
       (candidate) => isRecord(candidate) && idOf(candidate.id) !== undefined,
@@ -344,8 +470,7 @@ export class OpenClawCli {
    */
   async version(): Promise<string | undefined> {
     try {
-      const { stdout } = await this.ctx.exec("openclaw", ["--version"], { env: this.env() });
-      const text = firstLine(stdout);
+      const text = firstLine(await this.run(["--version"], false));
       return /\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?/.exec(text)?.[0] ?? label(text);
     } catch {
       return undefined;

@@ -3,9 +3,21 @@
 // files that OpenClaw reads as they are.
 import type { Stats } from "node:fs";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import JSON5 from "json5";
+import { ulid } from "ulid";
 import { SecretsFoundError } from "../../core/engine.js";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
@@ -14,7 +26,7 @@ import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
 import { factsToProse } from "../../core/text.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
-import { type AgentRow, type JobRow, OpenClawCli } from "./cli.js";
+import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
 import {
   DEFAULT_AGENT_ID,
   type OpenClawConfig,
@@ -33,8 +45,10 @@ const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
 const DEFAULT_EMOJI = "🤖";
 const RESTART_WARNING = "Restart the Gateway to load the new agent: openclaw gateway restart";
-const START_WARNING =
-  "Start the Gateway to create the routines, then move the agent again: openclaw gateway start";
+const GATEWAY_WARNING =
+  "Routines need the Gateway, which did not answer; start it, then move the agent again: " +
+  "openclaw gateway start";
+const CAPABILITIES_DETAIL = "OpenClaw does not take capability declarations; defaults apply";
 const REWRITE_WARNING = "openclaw.json rewritten; comments may be lost";
 
 /**
@@ -87,11 +101,9 @@ const reason = (error: unknown): string =>
 /** Jobs go through the Gateway, so a job command that names it failed for want of it. */
 const blamesGateway = (error: unknown): boolean => /gateway/i.test(errorOutput(error));
 
-/** `error` itself, or one that says how to start the Gateway when the Gateway is to blame. */
-function withGatewayHint(error: unknown, what: string): unknown {
-  if (!blamesGateway(error)) return error;
-  const message = `${what} (${reason(error)}); start the Gateway and retry: openclaw gateway start`;
-  return new Error(message, { cause: error });
+/** Says once per write that the routines need the Gateway started. */
+function warnGatewayDown(items: Items): void {
+  if (!items.warnings.includes(GATEWAY_WARNING)) items.warnings.push(GATEWAY_WARNING);
 }
 
 /** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
@@ -354,6 +366,38 @@ async function backUp(file: string): Promise<void> {
 }
 
 /**
+ * Replaces `file` in one step, as `replaceCache` in `core/ids.ts` does: the content goes to a
+ * sibling temporary file, which is then renamed over it, so a crash or a full disk leaves the
+ * old file or the new one, never a truncated one, and a running Gateway never reads half of it.
+ * The file keeps its mode (`openclaw.json` holds credentials; a new one is owner-only), and a
+ * symbolic link stays one: the file it points to is replaced.
+ */
+async function replaceFile(file: string, content: string): Promise<void> {
+  let real = file;
+  try {
+    real = await realpath(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  let mode = 0o600;
+  try {
+    mode = (await stat(real)).mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const temporary = `${real}.${ulid()}.tmp`;
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", mode });
+    // The mode given to `writeFile` is narrowed by the umask; this sets it exactly.
+    await chmod(temporary, mode);
+    await rename(temporary, real);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
+/**
  * Sets `values` on `agents.entries.<id>` by rewriting `openclaw.json` (JSON5) as JSON, after a
  * backup of the file as it was. Everything else in the file is kept, but not its comments or
  * layout. Returns whether an existing file was rewritten.
@@ -391,7 +435,7 @@ async function rewriteConfig(
   Object.assign(entry, values);
 
   if (source !== undefined) await backUp(file);
-  await writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
+  await replaceFile(file, `${JSON.stringify(config, null, 2)}\n`);
   return source !== undefined;
 }
 
@@ -507,8 +551,8 @@ async function disableJob(
  * (`cron add --disabled`), disabled right after otherwise. With `replace` the agent's existing
  * jobs are removed first; with `update` a routine the agent already has a job of the same name
  * for is left out, so that moving the same agent again does not double its jobs. A routine the
- * CLI refuses is skipped and the rest still go in; when the Gateway is to blame, one warning
- * says how to start it.
+ * CLI refuses is skipped and the rest still go in. When the Gateway is to blame, one warning
+ * says how to start it, and the removal of old jobs stops there.
  */
 async function writeRoutines(
   cli: OpenClawCli,
@@ -523,8 +567,9 @@ async function writeRoutines(
       try {
         await cli.automationsRemove(job.id);
       } catch (error) {
-        const what = `automation '${job.name}' of agent '${target.id}' not removed`;
-        throw withGatewayHint(error, what);
+        if (!blamesGateway(error)) throw error;
+        warnGatewayDown(items);
+        break;
       }
     }
   }
@@ -544,25 +589,28 @@ async function writeRoutines(
     const disable = !(opts.enableRoutines && routine.enabled);
     let job: { id: string; disabled: boolean };
     try {
+      // Every flag before the message (the CLI keeps `--message` last as well).
       job = await cli.automationsAdd(
         [
           "--name",
           routine.name,
           ...toOpenClawFlags(routine.schedule, routine.timezone),
-          "--message",
-          routine.instruction,
           "--agent",
           target.id,
           "--session",
           "isolated",
+          "--message",
+          routine.instruction,
         ],
         { disabled: disable },
       );
     } catch (error) {
-      items.skipped.push({ field, detail: `not created: ${reason(error)}` });
-      if (blamesGateway(error) && !items.warnings.includes(START_WARNING)) {
-        items.warnings.push(START_WARNING);
+      if (error instanceof ShimLineBreakError) {
+        items.skipped.push({ field, detail: error.message });
+        continue;
       }
+      items.skipped.push({ field, detail: `not created: ${reason(error)}` });
+      if (blamesGateway(error)) warnGatewayDown(items);
       continue;
     }
     if (disable && !job.disabled) await disableJob(cli, routine, job.id, items);
@@ -587,8 +635,8 @@ async function gatewayRunning(cli: OpenClawCli): Promise<boolean> {
  * `agents set-identity`; model and runtime with `config set`, or by rewriting `openclaw.json`
  * when the CLI has no such command; each routine becomes a job, disabled unless
  * `enableRoutines`; and a running Gateway gets a restart warning. A Bundle that holds a secret
- * is refused before anything runs or is written. `bundle` is not changed. `artifactPath` is the
- * agent's workspace.
+ * is refused before anything runs or is written, and an error after `agents add` says where the
+ * new agent was created. `bundle` is not changed. `artifactPath` is the agent's workspace.
  */
 export async function writeOpenClawAgent(
   ctx: Ctx,
@@ -600,6 +648,9 @@ export async function writeOpenClawAgent(
   if (findings.length > 0) throw new SecretsFoundError(findings);
 
   const items: Items = { approximated: [], skipped: [], warnings: [] };
+  if (bundle.manifest.capabilities.length > 0) {
+    items.approximated.push({ field: "capabilities", detail: CAPABILITIES_DETAIL });
+  }
   if (label(bundle.manifest.description) !== undefined) {
     items.skipped.push({ field: "description", detail: "OpenClaw has no field for it" });
   }
@@ -608,19 +659,56 @@ export async function writeOpenClawAgent(
   const cfg = await readOpenClawConfig(paths.configFile);
   const cli = new OpenClawCli(ctx, paths.stateDir, paths.configFile);
   const target = await claimTarget(paths, cfg, cli, bundle, opts.onConflict, items.warnings);
-  // Read before anything changes, so that a CLI that cannot list them stops the write here.
-  let existing: JobRow[] = [];
-  if (target.mode !== "new") {
-    try {
-      existing = (await cli.automationsList()).filter(
-        (job) => (job.agentId ?? DEFAULT_AGENT_ID) === target.id,
-      );
-    } catch (error) {
-      throw withGatewayHint(error, `the automations of agent '${target.id}' could not be listed`);
-    }
-  }
+  const existing = await existingJobs(cli, target, bundle.routines, items);
 
   if (target.mode === "new") await cli.agentsAdd(target.id, target.workspace);
+  try {
+    return await finishWrite(cli, paths, target, bundle, opts, existing, items);
+  } catch (error) {
+    if (target.mode !== "new") throw error;
+    // The agent exists now; say where, so that it can be removed or the move retried (the
+    // marker, once written, makes a retry update it in place).
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`agent '${target.id}' was created in ${target.workspace}; ${message}`, {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * The jobs the existing agent already has, read before anything changes, so that a CLI that
+ * cannot list them stops the write here. Only `replace` (which removes them) and `update` with
+ * routines (which leaves out their names) need them. A listing the Gateway refuses gives the
+ * Gateway warning and no jobs: nothing is removed or left out, and the write goes on.
+ */
+async function existingJobs(
+  cli: OpenClawCli,
+  target: Target,
+  routines: Routine[],
+  items: Items,
+): Promise<JobRow[]> {
+  const needed = target.mode === "replace" || (target.mode === "update" && routines.length > 0);
+  if (!needed) return [];
+  try {
+    const jobs = await cli.automationsList();
+    return jobs.filter((job) => (job.agentId ?? DEFAULT_AGENT_ID) === target.id);
+  } catch (error) {
+    if (!blamesGateway(error)) throw error;
+    warnGatewayDown(items);
+    return [];
+  }
+}
+
+/** Everything after the agent exists: workspace, marker, identity, config, routines, Gateway. */
+async function finishWrite(
+  cli: OpenClawCli,
+  paths: OpenClawPaths,
+  target: Target,
+  bundle: Bundle,
+  opts: WriteOpts,
+  existing: JobRow[],
+  items: Items,
+): Promise<WriteResult> {
   const identity = await writeWorkspace(target.workspace, bundle, items);
   const marker = { id: bundle.manifest.id, movedAt: new Date().toISOString() };
   const unmarked = await writeInside(
