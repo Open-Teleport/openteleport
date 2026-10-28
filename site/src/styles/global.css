@@ -182,7 +182,7 @@ h2.display {
   font-family: var(--font-code);
   font-size: 11.5px;
   letter-spacing: 0.06em;
-  color: var(--fg-3);
+  color: var(--fg-2);
   margin: 0;
 }
 .block {
