@@ -413,8 +413,8 @@ export type OpenBotSchedule =
 
 /** The largest amount OpenBot takes in an interval. */
 const OPENBOT_MAX_INTERVAL_AMOUNT = 100_000;
-/** The shortest interval OpenBot runs a routine at. */
-const OPENBOT_MIN_INTERVAL_MINUTES = 3;
+/** The shortest interval OpenBot runs a routine at, in minutes. */
+export const OPENBOT_MIN_INTERVAL_MINUTES = 3;
 /** The longest cron expression of a `custom` schedule. */
 const OPENBOT_MAX_CRON_CHARS = 255;
 
@@ -600,6 +600,9 @@ function namedCronShape(
  * becomes an `interval` in the largest unit that divides it. `null` means OpenBot cannot hold
  * the schedule: a one-off time (only a transfer file has those), an interval under 3 minutes or
  * over what OpenBot takes, and a cron expression that is not valid or is over 255 characters.
+ *
+ * The `advanced` result is the flat form of the design (`days: number[]`, `time: string`), which
+ * OpenBot does not read: put the result through `toOpenBotWireSchedule` before it is written.
  */
 export function toOpenBotSchedule(
   schedule: Schedule,
@@ -630,4 +633,21 @@ export function toOpenBotSchedule(
       return named ?? { kind: "custom", expression };
     }
   }
+}
+
+/**
+ * The schedule as OpenBot reads it from a file it is given. Every shape is its own form but
+ * `advanced`: OpenBot keeps the days and the time of that one as choices of their own
+ * (`{ kind: "days-of-month", days }` and `{ kind: "at-time", time }`), where the plain form of
+ * `OpenBotSchedule` has a list and a string. Whatever a writer puts in a file for OpenBot to read
+ * goes through here.
+ */
+export function toOpenBotWireSchedule(schedule: OpenBotSchedule): unknown {
+  if (schedule.kind !== "advanced") return schedule;
+  return {
+    kind: "advanced",
+    months: schedule.months,
+    days: { kind: "days-of-month", days: schedule.days },
+    time: { kind: "at-time", time: schedule.time },
+  };
 }

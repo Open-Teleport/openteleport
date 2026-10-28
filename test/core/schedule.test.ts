@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OPENBOT_MIN_INTERVAL_MINUTES,
   type OpenBotSchedule,
   describeSchedule,
   everyToCron,
@@ -9,6 +10,7 @@ import {
   msToEvery,
   parseCron,
   toOpenBotSchedule,
+  toOpenBotWireSchedule,
   toOpenClawFlags,
   zonedToInstant,
 } from "../../src/core/schedule.js";
@@ -1004,6 +1006,54 @@ describe("OpenBot schedule round-trips", () => {
       kind: "interval",
       amount: 2,
       unit: "days",
+    });
+  });
+});
+
+describe("toOpenBotWireSchedule", () => {
+  it("writes advanced in the nested form OpenBot reads", () => {
+    expect(
+      toOpenBotWireSchedule({ kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" }),
+    ).toStrictEqual({
+      kind: "advanced",
+      months: [1, 6],
+      days: { kind: "days-of-month", days: [1, 15] },
+      time: { kind: "at-time", time: "09:00" },
+    });
+  });
+
+  it.each<OpenBotSchedule>([
+    { kind: "hourly", minute: 15 },
+    { kind: "daily", time: "09:00" },
+    { kind: "weekdays", time: "08:30" },
+    { kind: "weekly", weekday: 1, time: "09:00" },
+    { kind: "monthly", day: 28, time: "10:00" },
+    { kind: "interval", amount: 90, unit: "minutes" },
+    { kind: "interval", amount: 2, unit: "days", anchorAt: "2026-10-28T10:00:00.000Z" },
+    { kind: "custom", expression: "*/5 * * * *" },
+    { kind: "once", date: "2026-11-01", time: "09:30" },
+  ])("leaves %j as it is", (openBot) => {
+    expect(toOpenBotWireSchedule(openBot)).toStrictEqual(openBot);
+  });
+
+  it("is read back as the same schedule", () => {
+    const plain: OpenBotSchedule = { kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" };
+
+    expect(fromOpenBotSchedule(toOpenBotWireSchedule(plain), "UTC")).toStrictEqual(
+      fromOpenBotSchedule(plain, "UTC"),
+    );
+  });
+});
+
+describe("OPENBOT_MIN_INTERVAL_MINUTES", () => {
+  it("is the shortest interval toOpenBotSchedule takes", () => {
+    const minutes = (count: number) => toOpenBotSchedule({ kind: "every", every: `${count}m` });
+
+    expect(minutes(OPENBOT_MIN_INTERVAL_MINUTES - 1)).toBeNull();
+    expect(minutes(OPENBOT_MIN_INTERVAL_MINUTES)).toStrictEqual({
+      kind: "interval",
+      amount: OPENBOT_MIN_INTERVAL_MINUTES,
+      unit: "minutes",
     });
   });
 });
