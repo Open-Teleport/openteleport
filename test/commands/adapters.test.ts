@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("adapters", () => {
-  it("prints one row per adapter: the four built in, then the extra one", async () => {
+  it("prints one row per adapter: the six built in, then the extra one", async () => {
     const result = await run(box, ["adapters"]);
     expect(result.exitCode).toBe(0);
     const names = result.stdout
@@ -29,7 +29,15 @@ describe("adapters", () => {
       .slice(1)
       .filter((line) => line.trim() !== "")
       .map((line) => line.split(/\s+/)[0]);
-    expect(names).toEqual(["folder", "openclaw", "claude-code", "codex", "letta", "memory"]);
+    expect(names).toEqual([
+      "folder",
+      "openclaw",
+      "claude-code",
+      "codex",
+      "letta",
+      "openbot",
+      "memory",
+    ]);
     const [header] = result.stdout.split(/\r?\n/);
     expect(header).toMatch(/^name\s+app\s+found\s+version\s+location\s+hint$/);
   });
@@ -44,6 +52,7 @@ describe("adapters", () => {
       "claude-code",
       "codex",
       "letta",
+      "openbot",
       "memory",
     ]);
     for (const row of rows) {
@@ -52,7 +61,7 @@ describe("adapters", () => {
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[5]).toEqual({
+    expect(rows[6]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -60,7 +69,7 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw, Claude Code, Codex or Letta Code lives in the sandbox home.
+    // Nothing of OpenClaw, Claude Code, Codex, Letta Code or OpenBot lives in the sandbox home.
     expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[3]).toMatchObject({ found: false, hint: expect.any(String) });
@@ -69,6 +78,12 @@ describe("adapters", () => {
       displayName: "Letta Code",
       found: false,
       hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
+    });
+    expect(rows[5]).toMatchObject({
+      name: "openbot",
+      displayName: "OpenBot",
+      found: false,
+      hint: expect.stringContaining("pass --source-dir <export.zip>"),
     });
   });
 
@@ -81,6 +96,7 @@ describe("adapters", () => {
       "claude-code",
       "codex",
       "letta",
+      "openbot",
     ]);
   });
 });

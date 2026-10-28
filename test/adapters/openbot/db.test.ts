@@ -138,7 +138,7 @@ describe("withDatabaseCopy", () => {
     const original = await buildOpenBotDatabase(userData);
     let opened: string | undefined;
     await withDatabaseCopy(userData, (db) => {
-      opened = db.location();
+      opened = db.location() ?? undefined;
     });
     expect(opened).toBeDefined();
     expect(opened).not.toBe(original);
@@ -150,7 +150,7 @@ describe("withDatabaseCopy", () => {
     let opened: string | undefined;
     await expect(
       withDatabaseCopy(userData, (db) => {
-        opened = db.location();
+        opened = db.location() ?? undefined;
         throw new Error("reading failed");
       }),
     ).rejects.toThrow("reading failed");
