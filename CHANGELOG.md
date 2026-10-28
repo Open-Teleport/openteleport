@@ -30,7 +30,9 @@ First release.
   save a `.jetpack`), `inspect`, `validate` and `adapters`. All take `--json` and `--quiet`;
   `--source-dir` and `--target-dir` point an adapter at another folder than the app's own.
 - A secret scanner. An export, a move or an import stops when the agent holds an API key, token,
-  private key or similar credential, and names the file and line. Bundles never carry secrets.
+  private key or similar credential, and names the file and line. Known credential patterns (API
+  keys, tokens, private keys) are refused at export; the format has no field for credentials. The
+  scanner is pattern-based and can miss unknown secret shapes.
 - Routines arrive disabled. `--enable-routines` keeps the ones that were enabled.
 - Conflict handling when the target already has an agent of that name: `update` in place (the
   default, only for the same agent), `--copy` for a numbered copy, `--replace` to overwrite it

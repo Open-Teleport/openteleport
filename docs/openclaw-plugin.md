@@ -18,15 +18,14 @@ The plugin would be a thin layer over [OpenTeleport](https://github.com/opentele
 
 ```text
 openclaw agents export <id> [--out <file.jetpack>]
-openclaw agents import <file.jetpack> [--agent <id>] [--enable-routines]
+openclaw agents import <file.jetpack> [--enable-routines]
 ```
 
 - `export` saves agent `<id>` as a `.jetpack` file (default `./<name>.jetpack`). The agent is
   only read, never changed.
-- `import` creates the agent in this instance. `--agent <id>` sets the id it gets here (default:
-  derived from its name). An existing agent of that id is updated in place only when it is the
-  same agent; otherwise the import lands as a copy (`<id>-2`) and says so. Nothing is
-  overwritten silently.
+- `import` creates the agent in this instance, with an id derived from its name. An existing
+  agent of that id is updated in place only when it is the same agent; otherwise the import
+  lands as a copy (`<id>-2`) and says so. Nothing is overwritten silently.
 - `--enable-routines` keeps imported routines enabled. Without it they arrive disabled.
 - Both print a report of what was moved, approximated and skipped.
 
@@ -106,5 +105,7 @@ tools ignore.
 - Where the commands live. The plugin manifest documents `cliCommands` as root commands. If a
   plugin cannot add subcommands to the core `agents` command, the fallback is
   `openclaw jetpack export|import`, with the same flags.
+- A `--agent <id>` override on import needs a small addition to openteleport's `WriteOpts` (a
+  target id). Until then the agent id derives from the bundle name.
 - The adapter shells out to the `openclaw` CLI. If the plugin SDK offers in-process equivalents,
   they can replace those calls behind the adapter's interface.
