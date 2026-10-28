@@ -6,6 +6,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bundleToEntries } from "../../src/core/bundle.js";
 import {
+  MAX_ARCHIVE_BYTES,
   MAX_AVATAR_BYTES,
   MAX_FILES_BYTES,
   MAX_TEXT_ENTRY_BYTES,
@@ -762,13 +763,18 @@ describe("readOpenBotZip: archives it refuses", () => {
     await expect(readOpenBotZip(file)).rejects.toThrow(/unsafe path: agents\/ada\/files\/\.\.\//);
   });
 
+  // Under files/ and shared/ a forbidden path is left out (see the next describe); anywhere else
+  // it is not content OpenTeleport may carry, nor skip without the archive being changed.
   it.each([
-    "agents/ada/files/.env",
-    "agents/ada/files/.git/config",
-    "agents/ada/files/node_modules/x/index.js",
-    "agents/ada/files/private-key.pem",
-    "agents/ada/files/backup.zip",
-    "shared/.env",
+    "agents/ada/skills/x/.env",
+    "agents/ada/skills/x/.git/config",
+    "agents/ada/skills/x/node_modules/p/index.js",
+    "agents/ada/skills/x/private-key.pem",
+    "agents/ada/skills/x/backup.zip",
+    "agents/ada/.env",
+    "agents/ada/avatar.zip",
+    ".env",
+    "notes/.git/config",
   ])("refuses the forbidden path %s", async (path) => {
     const file = await forged({ [path]: "x" });
 
@@ -959,6 +965,133 @@ describe("readOpenBotZip: archives it refuses", () => {
       /is not a valid zip archive/,
     );
   });
+
+  // The one file of files/ that is always inflated, so it is held to the limit of a text entry.
+  it.each([false, true])(
+    "refuses files/INSTRUCTIONS.md over MAX_TEXT_ENTRY_BYTES (includeFiles %s)",
+    async (includeFiles) => {
+      const archive = tamper(
+        zipSync({
+          [OPENBOT_IMPORT_MANIFEST]: strToU8(minimal()),
+          "agents/ada/files/INSTRUCTIONS.md": new Uint8Array(100),
+        }),
+        "agents/ada/files/INSTRUCTIONS.md",
+        { claimedSize: MAX_TEXT_ENTRY_BYTES + 1 },
+      );
+
+      await expect(readOpenBotZip(await archiveFile(archive), { includeFiles })).rejects.toThrow(
+        /agents\/ada\/files\/INSTRUCTIONS\.md is 2097153 bytes, over the 2097152 byte limit/,
+      );
+    },
+  );
+
+  it("reads files/INSTRUCTIONS.md of exactly MAX_TEXT_ENTRY_BYTES", async () => {
+    const text = "y".repeat(MAX_TEXT_ENTRY_BYTES);
+    const file = await forged({ "agents/ada/files/INSTRUCTIONS.md": text });
+
+    const { agents } = await readOpenBotZip(file);
+
+    expect(agents[0]?.bundle.instructions).toHaveLength(MAX_TEXT_ENTRY_BYTES);
+  });
+});
+
+describe("readOpenBotZip: entries it leaves out", () => {
+  const withWorkspace = (m: Json): void => {
+    agentAt(m, 0).files = "agents/ada/files";
+  };
+
+  /** An archive of `files`, with the deflate stream of each of `broken` damaged. */
+  async function withBroken(
+    files: Record<string, string>,
+    broken: readonly string[],
+    manifest = minimal(withWorkspace),
+  ): Promise<string> {
+    const entries: Record<string, Uint8Array> = { [OPENBOT_IMPORT_MANIFEST]: strToU8(manifest) };
+    for (const [path, content] of Object.entries(files)) entries[path] = strToU8(content);
+    let archive: Uint8Array = zipSync(entries);
+    for (const path of broken) archive = tamper(archive, path, { breakData: true });
+    return archiveFile(archive);
+  }
+
+  const FORBIDDEN = {
+    "agents/ada/files/.env": "SECRET=".repeat(50),
+    "agents/ada/files/.git/config": "[core]\n".repeat(50),
+    "shared/old.zip": "PK".repeat(100),
+  };
+
+  it.each([false, true])(
+    "leaves out forbidden entries of files/ and shared/ with one warning, never inflating them (includeFiles %s)",
+    async (includeFiles) => {
+      const file = await withBroken(
+        { ...FORBIDDEN, "agents/ada/files/notes.md": "- one\n" },
+        Object.keys(FORBIDDEN),
+      );
+
+      const { agents, warnings } = await readOpenBotZip(file, { includeFiles });
+
+      expect(warnings).toEqual([
+        "3 entries were left out because their paths are forbidden: " +
+          "agents/ada/files/.env, agents/ada/files/.git/config, shared/old.zip.",
+      ]);
+      const files = agents[0]?.bundle.files as FileEntry[];
+      expect(files.map(({ path }) => path)).toEqual(includeFiles ? ["notes.md"] : []);
+    },
+  );
+
+  it("says so once for one entry, and names the first five of many", async () => {
+    const one = await withBroken({ "shared/.env": "K=V" }, ["shared/.env"]);
+    expect((await readOpenBotZip(one)).warnings).toEqual([
+      "1 entry was left out because its path is forbidden: shared/.env.",
+    ]);
+
+    const many: Record<string, string> = {};
+    for (let i = 7; i >= 1; i -= 1) many[`agents/ada/files/node_modules/p${i}/index.js`] = "x";
+    const file = await withBroken(many, Object.keys(many));
+    expect((await readOpenBotZip(file, { includeFiles: true })).warnings).toEqual([
+      "7 entries were left out because their paths are forbidden: " +
+        "agents/ada/files/node_modules/p1/index.js, agents/ada/files/node_modules/p2/index.js, " +
+        "agents/ada/files/node_modules/p3/index.js, agents/ada/files/node_modules/p4/index.js, " +
+        "agents/ada/files/node_modules/p5/index.js and 2 more.",
+    ]);
+  });
+
+  it("puts the warning before the ones about the agents and the archive", async () => {
+    const file = await patched(TRANSFER_DIR, OPENBOT_TRANSFER_MANIFEST, () => undefined, {
+      "agents/ada/files/.env": "K=V",
+      "shared/old.zip": "PK",
+    });
+
+    const { warnings } = await readOpenBotZip(file, { includeFiles: true });
+
+    expect(warnings).toEqual([
+      "2 entries were left out because their paths are forbidden: " +
+        "agents/ada/files/.env, shared/old.zip.",
+      "The OpenBot settings in the transfer file (MCP servers, providers and the like) are not moved.",
+      "The shared files of the OpenBot instance (shared/) are not moved.",
+    ]);
+  });
+
+  it("still counts what it leaves out toward the limits", async () => {
+    const archive = tamper(
+      zipSync({
+        [OPENBOT_IMPORT_MANIFEST]: strToU8(minimal()),
+        "shared/old.zip": new Uint8Array(100),
+      }),
+      "shared/old.zip",
+      { claimedSize: MAX_ARCHIVE_BYTES + 1 },
+    );
+
+    await expect(readOpenBotZip(await archiveFile(archive))).rejects.toThrow(
+      /entries add up to \d+ bytes, over the 115343360 byte limit/,
+    );
+  });
+
+  it("still refuses an unsafe path, forbidden or not", async () => {
+    const file = await forged({ "agents/ada/files/../.env": "K=V" });
+
+    await expect(readOpenBotZip(file)).rejects.toThrow(/unsafe path/);
+  });
+
 });
 
 // -- Writing ---------------------------------------------------------------------------------
@@ -1011,6 +1144,62 @@ describe("writeOpenBotImportZip", () => {
 
   it("refuses to write an archive with no agent", () => {
     expect(() => writeOpenBotImportZip([], WRITE_OPTS)).toThrow(/no agent/);
+  });
+
+  // An archive the reader would refuse is not built: a later move could not read it back.
+  describe("limits of the archive", () => {
+    const filesOf = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({ path: `f${i}.txt`, bytes: strToU8("x") }));
+
+    it("holds 5000 entries, the manifest among them, and no more", async () => {
+      const atLimit = write([bundleOf({ files: filesOf(4999) })]);
+      expect(Object.keys(atLimit.files)).toHaveLength(5000);
+      const back = await readOpenBotZip(await archiveFile(atLimit.bytes), { includeFiles: true });
+      expect(back.agents[0]?.bundle.files).toHaveLength(4999);
+
+      expect(() => write([bundleOf({ files: filesOf(5000) })])).toThrow(
+        "the archive would hold 5001 entries, over the 5000 OpenBot takes; " +
+          "leave out the files of the workspace",
+      );
+    });
+
+    it("counts the entries of the skills and of every agent", () => {
+      const skills = Array.from({ length: 32 }, (_, i) =>
+        skillOf(`s${i}`, Array.from({ length: 150 }, (_, n) => ({ path: `f${n}`, bytes: strToU8("x") }))),
+      );
+      const several = Array.from({ length: 2 }, (_, i) =>
+        bundleOf({ skills, files: filesOf(100) }, `Agent ${i}`),
+      );
+
+      expect(() => write(several)).toThrow(/over the 5000 OpenBot takes/);
+    });
+
+    it("does not count the files that are not written", () => {
+      const written = write([bundleOf({ files: filesOf(6000) })], {
+        ...WRITE_OPTS,
+        includeFiles: false,
+      });
+
+      expect(Object.keys(written.files)).toEqual([OPENBOT_IMPORT_MANIFEST]);
+    });
+
+    it("holds at most MAX_FILES_BYTES of files", () => {
+      const big = { path: "big.bin", bytes: new Uint8Array(MAX_FILES_BYTES + 1) };
+
+      expect(() => write([bundleOf({ files: [big] })])).toThrow(
+        "the files of the workspace would be 104857601 bytes, over the 104857600 byte limit",
+      );
+    });
+
+    it("holds at most MAX_ARCHIVE_BYTES in all", () => {
+      const files = [{ path: "big.bin", bytes: new Uint8Array(MAX_FILES_BYTES) }];
+      const bulk = (name: string) =>
+        skillOf(name, [{ path: "data.bin", bytes: new Uint8Array(6 * 1024 * 1024) }]);
+
+      expect(() => write([bundleOf({ files, skills: [bulk("one"), bulk("two")] })])).toThrow(
+        /the archive would be \d+ bytes, over the 115343360 byte limit/,
+      );
+    });
   });
 
   describe("names and keys", () => {
@@ -1145,6 +1334,69 @@ describe("writeOpenBotImportZip", () => {
 
       expect(Object.keys(written.files)).toContain("agents/ada/files/INSTRUCTIONS.md");
     });
+
+    // The reader inflates files/INSTRUCTIONS.md whatever it is asked for, so it holds it to the
+    // limit of a text entry; the writer keeps within it, or its own archive would be refused.
+    const OVER_CAP_DETAIL =
+      "over the 2000 characters OpenBot takes in a description and over the 2097152 bytes " +
+      "OpenTeleport reads back from files/INSTRUCTIONS.md: the description holds the first " +
+      "lines and the rest is left out";
+
+    it("writes the whole text of exactly MAX_TEXT_ENTRY_BYTES, and the reader takes it back", async () => {
+      const text = `first line\n${"z".repeat(MAX_TEXT_ENTRY_BYTES - 11)}`;
+      expect(new TextEncoder().encode(text)).toHaveLength(MAX_TEXT_ENTRY_BYTES);
+      const written = write([bundleOf({ instructions: text })]);
+
+      expect(written.files["agents/ada/files/INSTRUCTIONS.md"]).toHaveLength(MAX_TEXT_ENTRY_BYTES);
+      const back = await readOpenBotZip(await archiveFile(written.bytes));
+      expect(back.agents[0]?.bundle.instructions).toBe(text);
+    });
+
+    it("keeps only the first lines of a text over MAX_TEXT_ENTRY_BYTES, and says so", async () => {
+      const text = `first line\n${"z".repeat(MAX_TEXT_ENTRY_BYTES - 10)}`;
+      const written = write([bundleOf({ instructions: text })]);
+
+      expect(Object.keys(written.files)).toEqual([OPENBOT_IMPORT_MANIFEST]);
+      expect(written.agents[0]).toMatchObject({ description: "first line", files: null });
+      expect(written.items).toEqual({
+        approximated: [{ field: "instructions", detail: OVER_CAP_DETAIL }],
+        skipped: [],
+        warnings: [],
+      });
+      const back = await readOpenBotZip(await archiveFile(written.bytes));
+      expect(back.agents[0]?.bundle.instructions).toBe("first line");
+    });
+
+    it("counts the bytes of the text, not its characters", () => {
+      const text = "é".repeat(1_100_000); // 1.1 million characters, 2.2 million bytes
+      const written = write([bundleOf({ instructions: text })]);
+
+      expect(Object.keys(written.files)).toEqual([OPENBOT_IMPORT_MANIFEST]);
+      expect(written.items.approximated.map(({ detail }) => detail)).toEqual([OVER_CAP_DETAIL]);
+    });
+
+    it("counts the persona with the instructions", () => {
+      const half = "h".repeat(MAX_TEXT_ENTRY_BYTES / 2 + 1);
+      const written = write([bundleOf({ persona: half, instructions: half })]);
+
+      expect(Object.keys(written.files)).toEqual([OPENBOT_IMPORT_MANIFEST]);
+      expect(written.items.approximated.map(({ field }) => field)).toEqual([
+        "persona",
+        "instructions",
+      ]);
+    });
+
+    it("does not write a file named INSTRUCTIONS.md beside instructions that did not fit", () => {
+      const text = "z".repeat(MAX_TEXT_ENTRY_BYTES + 1);
+      const written = write([
+        bundleOf({ instructions: text, files: [{ path: "INSTRUCTIONS.md", bytes: strToU8("mine") }] }),
+      ]);
+
+      expect(Object.keys(written.files)).toEqual([OPENBOT_IMPORT_MANIFEST]);
+      expect(written.items.skipped).toEqual([
+        { field: "file:INSTRUCTIONS.md", detail: "this name is kept for the full instructions" },
+      ]);
+    });
   });
 
   describe("memories", () => {
@@ -1267,6 +1519,14 @@ describe("writeOpenBotImportZip", () => {
         { field: "routine:One shot", detail: "the OpenBot import format has no one-time schedule" },
         { field: "routine:Fast", detail: "OpenBot runs a routine at most every 3 minutes" },
         { field: "routine:Odd", detail: "OpenBot cannot hold this schedule" },
+      ]);
+    });
+
+    it("skips a routine whose interval is not a duration without failing", () => {
+      const written = write([bundleOf({ routines: [routineOf("Often", { kind: "every", every: "often" })] })]);
+
+      expect(written.items.skipped).toEqual([
+        { field: "routine:Often", detail: "OpenBot cannot hold this schedule" },
       ]);
     });
 

@@ -28,9 +28,12 @@ import {
   isSafeArchivePath,
 } from "../core/paths.js";
 import {
+  OPENBOT_MIN_INTERVAL_MINUTES,
   type OpenBotSchedule,
+  everyToMs,
   fromOpenBotSchedule,
   toOpenBotSchedule,
+  toOpenBotWireSchedule,
 } from "../core/schedule.js";
 import {
   type Bundle,
@@ -73,6 +76,10 @@ const AVATAR_EXTENSION = /\.(png|jpe?g|webp)$/i;
 const AGENT_ENTRY = /^agents\/([^/]+)\/(.+)$/;
 const FILES_PREFIX = "files/";
 const INSTRUCTIONS_FILE = "INSTRUCTIONS.md";
+/** Where an agent's `files/` folder keeps the full instructions, relative to the agent. */
+const FULL_INSTRUCTIONS = `${FILES_PREFIX}${INSTRUCTIONS_FILE}`;
+/** OpenBot takes this many files in an archive (the Grok Bot export skill). */
+const MAX_ARCHIVE_ENTRIES = 5000;
 const SKILL_FILE = "SKILL.md";
 const MAX_SKILL_NAME_CHARS = 80;
 const MAX_SKILL_DESCRIPTION_CHARS = 1024;
@@ -145,19 +152,33 @@ function agentEntry(path: string): { key: string; rest: string } | undefined {
 }
 
 /**
- * Everything that can be decided from paths and sizes alone, so that an archive is refused before
- * any of it is inflated: unsafe and forbidden paths, duplicates, a folder under `agents/` that no
- * agent key names, and the sizes. An entry of an agent outside `files/` is at most
- * `MAX_TEXT_ENTRY_BYTES`, `files/` of all agents together at most `MAX_FILES_BYTES`, and all
- * entries together, `shared/` and the rest included, at most `MAX_ARCHIVE_BYTES`.
+ * A forbidden path (a secret, `.git`, `node_modules`, a nested archive) in the workspace of an
+ * agent or in `shared/`: content OpenTeleport does not carry, which the archive may hold all the
+ * same, so it is left out and never inflated. Anywhere else such a path is an error.
  */
-function validateListing(listing: readonly { path: string; size: number }[]): void {
+function isLeftOut(path: string): boolean {
+  if (!isForbiddenPath(path)) return false;
+  return path.startsWith("shared/") || agentEntry(path)?.rest.startsWith(FILES_PREFIX) === true;
+}
+
+/**
+ * Everything that can be decided from paths and sizes alone, so that an archive is refused before
+ * any of it is inflated: unsafe paths, forbidden paths (but see `isLeftOut`, whose paths are
+ * added to `leftOut`), duplicates, a folder under `agents/` that no agent key names, and the
+ * sizes. A text entry (a manifest, an entry of an agent outside `files/`, and the full
+ * instructions in `files/`) is at most `MAX_TEXT_ENTRY_BYTES`, `files/` of all agents together
+ * at most `MAX_FILES_BYTES`, and all entries together, `shared/` and the rest included, at most
+ * `MAX_ARCHIVE_BYTES`. What is left out counts toward the sizes: it is in the archive.
+ */
+function validateListing(
+  listing: readonly { path: string; size: number }[],
+  leftOut: string[],
+): void {
   const seen = new Set<string>();
   let filesBytes = 0;
   let totalBytes = 0;
   for (const { path, size } of listing) {
     if (!isSafeArchivePath(path)) throw new Error(`unsafe path: ${path}`);
-    if (isForbiddenPath(path)) throw new Error(`forbidden path: ${path}`);
     if (seen.has(path)) throw new Error(`duplicate path: ${path}`);
     seen.add(path);
     totalBytes += size;
@@ -168,13 +189,21 @@ function validateListing(listing: readonly { path: string; size: number }[]): vo
       if (entry === undefined || !KEY_PATTERN.test(entry.key)) {
         throw new Error(`invalid agent key in path: ${path}`);
       }
-      if (entry.rest.startsWith(FILES_PREFIX)) filesBytes += size;
-      else isText = true;
+      if (entry.rest.startsWith(FILES_PREFIX)) {
+        filesBytes += size;
+        isText = entry.rest === FULL_INSTRUCTIONS;
+      } else {
+        isText = true;
+      }
+    }
+    if (isForbiddenPath(path)) {
+      if (!isLeftOut(path)) throw new Error(`forbidden path: ${path}`);
+      leftOut.push(path);
+      continue;
     }
     if (isText && size > MAX_TEXT_ENTRY_BYTES) {
       throw new Error(
-        `${path} is ${size} bytes, over the ${MAX_TEXT_ENTRY_BYTES} byte limit for entries ` +
-          "outside files/",
+        `${path} is ${size} bytes, over the ${MAX_TEXT_ENTRY_BYTES} byte limit for text entries`,
       );
     }
   }
@@ -191,20 +220,21 @@ function validateListing(listing: readonly { path: string; size: number }[]): vo
 /**
  * The zip reader's view of the layout. The manifests and everything of an agent but its workspace
  * are text. The workspace (`files/`) is only inflated when it is asked for, except the one file
- * that can hold the full instructions. Whatever lies outside `agents/` (`shared/` of a transfer)
- * is listed and checked, never inflated.
+ * that can hold the full instructions (a text entry too, so it has the limit of one). Whatever
+ * lies outside `agents/` (`shared/` of a transfer) is listed and checked, never inflated, and
+ * neither is a path that is left out. `leftOut` is filled by `validate`, with those paths.
  */
-function zipPolicy(includeFiles: boolean): ZipPolicy {
+function zipPolicy(includeFiles: boolean, leftOut: string[]): ZipPolicy {
   return {
     kindOf: (path) => {
       if (isManifestPath(path)) return "text";
       const entry = agentEntry(path);
-      if (entry === undefined) return "unknown";
+      if (entry === undefined || isLeftOut(path)) return "unknown";
       if (!entry.rest.startsWith(FILES_PREFIX)) return "text";
       if (includeFiles) return "file";
-      return entry.rest === `${FILES_PREFIX}${INSTRUCTIONS_FILE}` ? "text" : "unknown";
+      return entry.rest === FULL_INSTRUCTIONS ? "text" : "unknown";
     },
-    validate: validateListing,
+    validate: (listing) => validateListing(listing, leftOut),
   };
 }
 
@@ -226,6 +256,16 @@ type Reading = {
   /** The id the archive carries when it was written for a single agent, else empty. */
   archiveId: string;
 };
+
+/** One warning for the paths that were left out, in code unit order, the first five named. */
+function leftOutWarning(paths: readonly string[]): string[] {
+  if (paths.length === 0) return [];
+  const named = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, 5);
+  const more = paths.length > named.length ? ` and ${paths.length - named.length} more` : "";
+  const subject = paths.length === 1 ? "1 entry was" : `${paths.length} entries were`;
+  const reason = paths.length === 1 ? "its path is" : "their paths are";
+  return [`${subject} left out because ${reason} forbidden: ${named.join(", ")}${more}.`];
+}
 
 function parseJson(manifestName: string, bytes: Uint8Array): unknown {
   const text = decodeText(manifestName, bytes);
@@ -252,8 +292,9 @@ function readOrigin(manifest: Json): Manifest["origin"] {
  * Reads an OpenBot archive: an agent import or an instance transfer, told apart by the manifest
  * at its root. `includeFiles` reads the files of each agent's workspace as well. Throws when the
  * archive is not a valid zip, breaks a limit or a path rule, or has a manifest OpenBot would
- * refuse; what is only left out (a routine that cannot be carried, an avatar of the wrong kind)
- * is named in `warnings`, with what the archive holds that is not moved (channels, settings).
+ * refuse; what is only left out (a routine that cannot be carried, an avatar of the wrong kind,
+ * a forbidden path in a workspace or in `shared/`, which is never inflated) is named in
+ * `warnings`, with what the archive holds that is not moved (channels, settings).
  */
 export async function readOpenBotZip(
   file: string,
@@ -261,8 +302,14 @@ export async function readOpenBotZip(
 ): Promise<{ format: OpenBotZipFormat; agents: OpenBotZipAgent[]; warnings: string[] }> {
   const includeFiles = opts.includeFiles === true;
   const { size } = await stat(file);
-  const listed = await readZipEntries(file, size, zipPolicy(includeFiles));
-  const entries = new Map(listed.map(({ path, bytes }) => [path, bytes] as const));
+  const leftOut: string[] = [];
+  const listed = await readZipEntries(file, size, zipPolicy(includeFiles, leftOut));
+  const dropped = new Set(leftOut);
+  const entries = new Map(
+    listed
+      .filter(({ path }) => !dropped.has(path))
+      .map(({ path, bytes }) => [path, bytes] as const),
+  );
 
   const hasImport = entries.has(OPENBOT_IMPORT_MANIFEST);
   const hasTransfer = entries.has(OPENBOT_TRANSFER_MANIFEST);
@@ -303,7 +350,7 @@ export async function readOpenBotZip(
     manifestName,
     entries,
     includeFiles,
-    warnings: [],
+    warnings: leftOutWarning(leftOut),
     origin: readOrigin(manifest),
     archiveId: list.length === 1 && isRecord(archive) ? ulidOrEmpty(archive.id) : "",
   };
@@ -399,7 +446,7 @@ function readAgent(raw: unknown, index: number, reading: Reading): OpenBotZipAge
   const routineValues = [...list(raw.routines, "routine"), ...list(raw.oneTimeRoutines, "routine")];
   const memoryValues = list(raw.memories, "memory");
 
-  const instructionsPath = `${prefix}${FILES_PREFIX}${INSTRUCTIONS_FILE}`;
+  const instructionsPath = `${prefix}${FULL_INSTRUCTIONS}`;
   const fullInstructions = reading.entries.get(instructionsPath);
   const instructions =
     fullInstructions === undefined ? description : decodeText(instructionsPath, fullInstructions);
@@ -759,10 +806,27 @@ function scheduleProblem(routine: Routine): string {
   if (routine.schedule.kind === "at") {
     return "the OpenBot import format has no one-time schedule";
   }
-  if (routine.schedule.kind === "every" && ["1m", "2m"].includes(routine.schedule.every)) {
-    return "OpenBot runs a routine at most every 3 minutes";
+  if (routine.schedule.kind === "every" && isBelowMinimumInterval(routine.schedule.every)) {
+    return `OpenBot runs a routine at most every ${OPENBOT_MIN_INTERVAL_MINUTES} minutes`;
   }
   return "OpenBot cannot hold this schedule";
+}
+
+/** True for an interval under what OpenBot runs a routine at; false for any other text. */
+function isBelowMinimumInterval(every: string): boolean {
+  try {
+    return everyToMs(every) < OPENBOT_MIN_INTERVAL_MINUTES * 60_000;
+  } catch {
+    return false;
+  }
+}
+
+/** `shape` with the start of its interval, when it is an interval and the start is known. */
+function withAnchor(
+  shape: Exclude<OpenBotSchedule, { kind: "once" }>,
+  anchorAt: string | undefined,
+): OpenBotSchedule {
+  return shape.kind === "interval" && anchorAt !== undefined ? { ...shape, anchorAt } : shape;
 }
 
 /** Where the interval of a routine started counting, if the bundle remembers it. */
@@ -772,20 +836,6 @@ function anchorOf(manifest: Manifest, routineName: string): string | undefined {
   const extra = isRecord(routines) ? routines[routineName] : undefined;
   const anchorAt = isRecord(extra) ? extra.anchorAt : undefined;
   return typeof anchorAt === "string" && !Number.isNaN(Date.parse(anchorAt)) ? anchorAt : undefined;
-}
-
-// OpenBot stores an `advanced` schedule with the days and the time as choices of their own; the
-// plain form of `OpenBotSchedule` is how the design names it, not what OpenBot reads.
-function wireSchedule(shape: Exclude<OpenBotSchedule, { kind: "once" }>, anchorAt?: string): Json {
-  if (shape.kind === "advanced") {
-    return {
-      kind: "advanced",
-      months: shape.months,
-      days: { kind: "days-of-month", days: shape.days },
-      time: { kind: "at-time", time: shape.time },
-    };
-  }
-  return shape.kind === "interval" && anchorAt !== undefined ? { ...shape, anchorAt } : shape;
 }
 
 type Items = WriteResult["items"];
@@ -824,15 +874,26 @@ function writeAgent(
     );
   }
   const description = descriptionOf(text);
-  const hasFullInstructions = text.length > MAX_DESCRIPTION_CHARS;
-  if (hasFullInstructions) {
-    approximate(
-      "instructions",
-      `over the ${MAX_DESCRIPTION_CHARS} characters OpenBot takes in a description: the ` +
-        `description holds the first lines, the whole text is in ` +
-        `${FILES_PREFIX}${INSTRUCTIONS_FILE}`,
-    );
-    files[`${prefix}${FILES_PREFIX}${INSTRUCTIONS_FILE}`] = encoder.encode(text);
+  const overflows = text.length > MAX_DESCRIPTION_CHARS;
+  if (overflows) {
+    // The reader inflates this file whatever it is asked for, so it holds it to the limit of a
+    // text entry; a text over it would make an archive the reader refuses.
+    const whole = encoder.encode(text);
+    if (whole.length <= MAX_TEXT_ENTRY_BYTES) {
+      approximate(
+        "instructions",
+        `over the ${MAX_DESCRIPTION_CHARS} characters OpenBot takes in a description: the ` +
+          `description holds the first lines, the whole text is in ${FULL_INSTRUCTIONS}`,
+      );
+      files[`${prefix}${FULL_INSTRUCTIONS}`] = whole;
+    } else {
+      approximate(
+        "instructions",
+        `over the ${MAX_DESCRIPTION_CHARS} characters OpenBot takes in a description and over ` +
+          `the ${MAX_TEXT_ENTRY_BYTES} bytes OpenTeleport reads back from ${FULL_INSTRUCTIONS}: ` +
+          "the description holds the first lines and the rest is left out",
+      );
+    }
   }
 
   let avatar: string | null = null;
@@ -891,7 +952,7 @@ function writeAgent(
       instruction: routine.instruction,
       active: routine.enabled,
       timezone: routine.timezone,
-      schedule: wireSchedule(shape, anchorOf(bundle.manifest, routine.name)),
+      schedule: toOpenBotWireSchedule(withAnchor(shape, anchorOf(bundle.manifest, routine.name))),
     });
   }
 
@@ -915,8 +976,8 @@ function writeAgent(
       const field = `file:${file.path}`;
       if (!isSafeArchivePath(file.path) || isForbiddenPath(file.path)) {
         skip(field, "OpenBot refuses this path");
-      } else if (hasFullInstructions && file.path === INSTRUCTIONS_FILE) {
-        skip(field, "the full instructions are written under this name");
+      } else if (overflows && file.path === INSTRUCTIONS_FILE) {
+        skip(field, "this name is kept for the full instructions");
       } else {
         files[`${prefix}${FILES_PREFIX}${file.path}`] = file.bytes;
       }
@@ -935,6 +996,39 @@ function writeAgent(
     memories,
     files: hasFiles ? `${prefix}files` : null,
   };
+}
+
+/**
+ * Refuses an archive that OpenBot or the reader of this module would refuse: more entries than
+ * OpenBot takes, more than `MAX_FILES_BYTES` in the workspaces, more than `MAX_ARCHIVE_BYTES` in
+ * all. Better here, with the limit named, than a move that cannot read its own artifact back.
+ */
+function assertWithinArchiveLimits(entries: Readonly<Record<string, Uint8Array>>): void {
+  const paths = Object.keys(entries);
+  if (paths.length > MAX_ARCHIVE_ENTRIES) {
+    throw new Error(
+      `the archive would hold ${paths.length} entries, over the ${MAX_ARCHIVE_ENTRIES} OpenBot ` +
+        "takes; leave out the files of the workspace",
+    );
+  }
+  let filesBytes = 0;
+  let totalBytes = 0;
+  for (const path of paths) {
+    const size = (entries[path] as Uint8Array).length;
+    totalBytes += size;
+    if (agentEntry(path)?.rest.startsWith(FILES_PREFIX) === true) filesBytes += size;
+  }
+  if (filesBytes > MAX_FILES_BYTES) {
+    throw new Error(
+      `the files of the workspace would be ${filesBytes} bytes, over the ${MAX_FILES_BYTES} ` +
+        "byte limit; leave them out",
+    );
+  }
+  if (totalBytes > MAX_ARCHIVE_BYTES) {
+    throw new Error(
+      `the archive would be ${totalBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`,
+    );
+  }
 }
 
 /**
@@ -981,5 +1075,6 @@ export function writeOpenBotImportZip(
     [OPENBOT_IMPORT_MANIFEST]: encoder.encode(`${JSON.stringify(manifest, null, 2)}\n`),
     ...files,
   };
+  assertWithinArchiveLimits(entries);
   return { bytes: zipSync(entries), items };
 }
