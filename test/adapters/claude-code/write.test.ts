@@ -286,6 +286,33 @@ describe("write", () => {
       expect(await ids()).toEqual({ ada: ADA_ID, "ada-2": OTHER_ID });
     });
 
+    it("updates the -N copy that already holds this agent on update", async () => {
+      await claudeCodeAdapter.write(ctx, ada(ADA_ID, "First.\n"), UPDATE);
+      await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Other.\n"), UPDATE);
+      const third = await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Again.\n"), UPDATE);
+
+      expect(third.targetAgentId).toBe("ada-2");
+      expect(third.items.warnings).toEqual([]);
+      expect(await bodyOf("ada")).toBe("First.\n");
+      expect(await bodyOf("ada-2")).toBe("Again.\n");
+      expect(await exists(agentFile(project, "ada-3"))).toBe(false);
+      expect(await ids()).toEqual({ ada: ADA_ID, "ada-2": OTHER_ID });
+    });
+
+    it("never updates this agent's copy through a link", async (context) => {
+      await claudeCodeAdapter.write(ctx, ada(ADA_ID, "First.\n"), UPDATE);
+      await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Other.\n"), UPDATE);
+      const outside = join(root, "outside.md");
+      await writeFile(outside, "ORIGINAL\n");
+      await rm(agentFile(project, "ada-2"));
+      await fileLink(outside, agentFile(project, "ada-2"), () => context.skip());
+
+      const again = await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Again.\n"), UPDATE);
+
+      expect(again.targetAgentId).toBe("ada-3");
+      expect(await readFile(outside, "utf8")).toBe("ORIGINAL\n");
+    });
+
     it("counts an agent file it has no id for as another agent on update", async () => {
       const before = await readFile(agentFile(project, "reviewer"), "utf8");
       const reviewer = bundleOf({ manifest: { id: ADA_ID, name: "Reviewer" } });

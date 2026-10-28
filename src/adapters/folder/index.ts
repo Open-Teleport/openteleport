@@ -215,6 +215,18 @@ async function freeSibling(wanted: string): Promise<string> {
   }
 }
 
+/** The `<wanted>-2`, `<wanted>-3`... that exist next to `wanted`, in number order, gaps skipped. */
+async function numberedSiblings(wanted: string): Promise<string[]> {
+  const parent = dirname(wanted);
+  const prefix = `${basename(wanted)}-`;
+  return (await namesIn(parent))
+    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
+    .map((name) => ({ name, n: Number(name.slice(prefix.length)) }))
+    .filter(({ n }) => n >= 2)
+    .sort((a, b) => a.n - b.n)
+    .map(({ name }) => join(parent, name));
+}
+
 /** The `id` in the `jetpack.json` of `folder`; `undefined` when none can be read. */
 async function manifestId(folder: string): Promise<string | undefined> {
   try {
@@ -236,9 +248,10 @@ async function manifestId(folder: string): Promise<string | undefined> {
 
 /**
  * Settles where the agent goes when `wanted` is already taken, and makes the place ready.
- * `update` writes in place only over this very agent, the one with the Bundle's id; another
- * agent of the same name keeps its folder and this one goes to the first free `-2`, `-3`...,
- * with a warning that says why. Nothing is removed before the Bundle is known to be writable.
+ * `update` writes in place only over this very agent, the one with the Bundle's id, whether it
+ * is in `wanted` or in a `-N` folder an earlier move gave it. Another agent of the same name
+ * keeps its folder, and this one goes to the first free `-2`, `-3`..., with a warning that says
+ * why. Nothing is removed before the Bundle is known to be writable.
  */
 async function claimTarget(
   ctx: Ctx,
@@ -270,6 +283,13 @@ async function claimTarget(
 
   const id = await manifestId(wanted);
   if (id === bundle.manifest.id) return { target: wanted };
+  // An earlier move may already have given this agent a `-N` folder of its own: update that one.
+  for (const sibling of await numberedSiblings(wanted)) {
+    const info = await statOrUndefined(sibling);
+    if (info?.isDirectory() && (await manifestId(sibling)) === bundle.manifest.id) {
+      return { target: sibling };
+    }
+  }
   const target = await freeSibling(wanted);
   const whose = id === undefined ? "no readable id" : `id ${id}`;
   return {

@@ -86,11 +86,34 @@ function toolsOf(manifest: Manifest): string[] | undefined {
 }
 
 /**
+ * The `<base>-N` stem that `ids` records for the agent with `id`, the lowest N first, when its
+ * file is not a link; `undefined` when there is none.
+ */
+async function recordedCopy(
+  dir: string,
+  base: string,
+  id: string,
+  ids: AgentIds,
+): Promise<string | undefined> {
+  const prefix = `${base}-`;
+  const copies = Object.entries(ids)
+    .filter(([slug, recorded]) => recorded === id && slug.startsWith(prefix))
+    .map(([slug]) => ({ slug, n: slug.slice(prefix.length) }))
+    .filter(({ n }) => /^[1-9]\d*$/.test(n) && Number(n) >= 2)
+    .sort((a, b) => Number(a.n) - Number(b.n));
+  for (const { slug } of copies) {
+    if (!(await lstatOf(join(dir, `${slug}.md`)))?.isSymbolicLink()) return slug;
+  }
+  return undefined;
+}
+
+/**
  * The stem of the agent file to write. A free `<slug>.md` is taken. When it is taken, `copy`
  * goes to the first free `<slug>-2.md`, `<slug>-3.md`...; a link is never written through, so it
  * gets a name of its own in every mode; `replace` writes over the file; and `update` writes
- * over it only when `ids` records this very agent (the Bundle's id) there. Any other agent of
- * the same name keeps its file and this one becomes a copy, with a warning that says so.
+ * over it only when `ids` records this very agent (the Bundle's id) there, or else over the
+ * `<slug>-N.md` that `ids` records for it. Any other agent of the same name keeps its file and
+ * this one becomes a copy, with a warning that says so.
  */
 async function agentFileSlug(
   dir: string,
@@ -118,7 +141,11 @@ async function agentFileSlug(
   }
   if (opts.onConflict === "replace") return base;
   // An empty id is no id: nothing proves the agent there is this one.
-  if (bundle.manifest.id !== "" && ids[base] === bundle.manifest.id) return base;
+  const { id } = bundle.manifest;
+  if (id !== "" && ids[base] === id) return base;
+  // An earlier move may already have given this agent a `-N` file of its own: update that one.
+  const own = id === "" ? undefined : await recordedCopy(dir, base, id, ids);
+  if (own !== undefined) return own;
   const slug = await freeName(dir, base, ".md");
   items.warnings.push(`agent '${base}' already exists; written as '${slug}'`);
   return slug;

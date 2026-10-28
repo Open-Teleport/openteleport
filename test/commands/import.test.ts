@@ -98,6 +98,26 @@ describe("import", () => {
     expect(kept.id).toBe(ADA_ID);
   });
 
+  it("updates the -2 copy when that other agent comes again", async () => {
+    const first = await adaJetpack("ada.jetpack");
+    const other = await adaJetpack("other-ada.jetpack", (bundle) => {
+      bundle.manifest.id = OTHER_ID;
+    });
+    await run(box, ["import", "--to", "folder", first]);
+    await run(box, ["import", "--to", "folder", other]);
+    const third = await run(box, ["import", "--to", "folder", other, "--json"]);
+    const fourth = await run(box, ["import", "--to", "folder", other, "--json"]);
+
+    for (const result of [third, fourth]) {
+      expect(result.exitCode).toBe(0);
+      expect(json<MoveReport>(result).target).toEqual({
+        app: "folder",
+        agent: join(box.cwd, "ada-2"),
+      });
+    }
+    expect((await readdir(box.cwd)).sort()).toEqual(["ada", "ada-2"]);
+  });
+
   it("updates the same agent in place when it comes again", async () => {
     const file = await adaJetpack("ada.jetpack");
     await run(box, ["import", "--to", "folder", file]);

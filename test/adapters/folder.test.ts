@@ -585,6 +585,39 @@ describe("folder adapter: write", () => {
       expect(JSON.parse(await text(join(copy, "jetpack.json"))).id).toBe(OTHER_ID);
     });
 
+    it("update finds the -N copy that already holds this agent and updates it", async () => {
+      const source = await ada();
+      const other = (instructions: string): Bundle => ({
+        ...source,
+        instructions,
+        manifest: { ...source.manifest, id: OTHER_ID },
+      });
+      await folderAdapter.write(ctx, source, WRITE);
+      await folderAdapter.write(ctx, other("Second.\n"), WRITE);
+      const third = await folderAdapter.write(ctx, other("Third.\n"), WRITE);
+
+      const copy = join(ctx.cwd, "ada-2");
+      expect(third.targetAgentId).toBe(copy);
+      expect(third.items.warnings).toEqual([ROUTINES_WARNING]);
+      expect(await text(join(copy, "AGENTS.md"))).toBe("Third.\n");
+      expect((await readdir(ctx.cwd)).sort()).toEqual(["ada", "ada-2"]);
+    });
+
+    it("update looks past a -N copy of yet another agent, and past a gap", async () => {
+      const source = await ada();
+      const withId = (id: string): Bundle => ({ ...source, manifest: { ...source.manifest, id } });
+      const third = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2W";
+      await folderAdapter.write(ctx, source, WRITE); // ada
+      await folderAdapter.write(ctx, withId(third), WRITE); // ada-2
+      await folderAdapter.write(ctx, withId(OTHER_ID), WRITE); // ada-3
+      await rm(join(ctx.cwd, "ada-2"), { recursive: true });
+
+      const again = await folderAdapter.write(ctx, withId(OTHER_ID), WRITE);
+
+      expect(again.targetAgentId).toBe(join(ctx.cwd, "ada-3"));
+      expect((await readdir(ctx.cwd)).sort()).toEqual(["ada", "ada-3"]);
+    });
+
     it("update counts an earlier export without a readable id as a different agent", async () => {
       const target = join(root, "out");
       await put(join(target, "jetpack.json"), "{ not json\n");
