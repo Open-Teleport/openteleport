@@ -117,7 +117,9 @@ export async function writeJobsFile(
   if (existing?.isSymbolicLink()) {
     throw new Error(`${file} is a symbolic link; not written through`);
   }
-  if (existing !== undefined && !existing.isFile()) throw new Error(`${file} is not a regular file`);
+  if (existing !== undefined && !existing.isFile()) {
+    throw new Error(`${file} is not a regular file`);
+  }
   if (existing !== undefined) await backUp(file, now);
 
   const mode = existing === undefined ? 0o600 : existing.mode & 0o777;

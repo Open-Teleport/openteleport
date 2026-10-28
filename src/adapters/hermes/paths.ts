@@ -36,7 +36,8 @@ export function hermesHome(ctx: Ctx, platform: NodeJS.Platform = process.platfor
     platform === "win32"
       ? join(nonBlank(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local"), "hermes")
       : join(ctx.home, ".hermes");
-  return resolve(ctx.cwd, ctx.sourceDir ?? ctx.targetDir ?? nonBlank(ctx.env.HERMES_HOME) ?? fallback);
+  const home = ctx.sourceDir ?? ctx.targetDir ?? nonBlank(ctx.env.HERMES_HOME) ?? fallback;
+  return resolve(ctx.cwd, home);
 }
 
 /**

@@ -11,7 +11,15 @@ import {
   MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
 } from "../../core/paths.js";
-import type { Bundle, FileEntry, Manifest, ModelPref, Note, Routine, Skill } from "../../core/schema.js";
+import type {
+  Bundle,
+  FileEntry,
+  Manifest,
+  ModelPref,
+  Note,
+  Routine,
+  Skill,
+} from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
 import { lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
@@ -90,7 +98,11 @@ async function isDirectory(path: string): Promise<boolean> {
  * not a file or is over the size a text file may have in a bundle (then with a warning). A link
  * is followed: Hermes does the same with its own files.
  */
-async function readText(path: string, label: string, warnings: string[]): Promise<string | undefined> {
+async function readText(
+  path: string,
+  label: string,
+  warnings: string[],
+): Promise<string | undefined> {
   let info: Awaited<ReturnType<typeof stat>>;
   try {
     info = await stat(path);
@@ -302,7 +314,8 @@ async function findSkillFolders(skillsDir: string, warnings: string[]): Promise<
 async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
   const skillsDir = join(dir, "skills");
   const folders = await findSkillFolders(skillsDir, warnings);
-  const bundled = folders.length === 0 ? new Set<string>() : await bundledNames(skillsDir, warnings);
+  const bundled =
+    folders.length === 0 ? new Set<string>() : await bundledNames(skillsDir, warnings);
 
   const skills: Skill[] = [];
   const taken = new Set<string>();
@@ -323,7 +336,9 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
     let name = folderName;
     for (let n = 2; taken.has(name); n += 1) name = `${folderName}-${n}`;
     if (name !== folderName) {
-      warnings.push(`skill '${folderName}' appears more than once (${folder.path}); exported as '${name}'`);
+      warnings.push(
+        `skill '${folderName}' appears more than once (${folder.path}); exported as '${name}'`,
+      );
     }
     taken.add(name);
     if (skills.length >= MAX_SKILLS) {
@@ -337,7 +352,8 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
   }
   if (dropped.length > 0) {
     warnings.push(
-      `${plural(dropped.length, "skill")} over the limit of ${MAX_SKILLS} not exported: ${named(dropped)}`,
+      `${plural(dropped.length, "skill")} over the limit of ${MAX_SKILLS} not exported: ` +
+        named(dropped),
     );
   }
   return skills;
@@ -362,14 +378,18 @@ async function readMemory(
   ] as const) {
     const text = await readText(join(dir, "memories", file), `memories/${file}`, warnings);
     for (const [index, entry] of parseEntries(text ?? "").entries()) {
-      if (entry.length > MAX_FACT_CHARS) notes.push({ name: `${prefix}-${index + 1}`, text: entry });
-      else facts.push(entry);
+      if (entry.length > MAX_FACT_CHARS) {
+        notes.push({ name: `${prefix}-${index + 1}`, text: entry });
+      } else {
+        facts.push(entry);
+      }
     }
   }
   if (notes.length > 0) {
+    const one = notes.length === 1;
     warnings.push(
-      `${plural(notes.length, "memory entry", "memory entries")} over ${MAX_FACT_CHARS} characters ` +
-        `${notes.length === 1 ? "was" : "were"} kept as ${notes.length === 1 ? "the note" : "the notes"} ` +
+      `${plural(notes.length, "memory entry", "memory entries")} over ${MAX_FACT_CHARS} ` +
+        `characters ${one ? "was" : "were"} kept as ${one ? "the note" : "the notes"} ` +
         notes.map((note) => note.name).join(", "),
     );
   }
@@ -404,18 +424,24 @@ async function readRoutines(
     const entry = jobToRoutine(job, timezone);
     if (entry === null) {
       warnings.push(
-        `cron job '${job.name.trim() || job.id}' has no prompt or a schedule OpenTeleport cannot express; not exported`,
+        `cron job '${job.name.trim() || job.id}' has no prompt or a schedule OpenTeleport ` +
+          "cannot express; not exported",
       );
       continue;
     }
     if (routines.length >= MAX_ROUTINES) {
-      warnings.push(`cron job '${entry.routine.name}' is over the limit of ${MAX_ROUTINES} routines; not exported`);
+      warnings.push(
+        `cron job '${entry.routine.name}' is over the limit of ${MAX_ROUTINES} routines; ` +
+          "not exported",
+      );
       continue;
     }
     let name = entry.routine.name;
     for (let n = 2; names.has(name); n += 1) name = `${entry.routine.name} (${n})`;
     if (name !== entry.routine.name) {
-      warnings.push(`cron job '${entry.routine.name}' appears more than once; exported as '${name}'`);
+      warnings.push(
+        `cron job '${entry.routine.name}' appears more than once; exported as '${name}'`,
+      );
     }
     names.add(name);
     routines.push({ ...entry.routine, name });
@@ -430,7 +456,8 @@ async function readRoutines(
 function modelsOf(config: HermesConfig | undefined): ModelPref[] {
   const model = config?.model;
   if (model?.default === undefined) return [];
-  return [{ ...(model.provider === undefined ? {} : { provider: model.provider }), model: model.default }];
+  const { provider } = model;
+  return [{ ...(provider === undefined ? {} : { provider }), model: model.default }];
 }
 
 /** The id an earlier move recorded in the profile, so that the profile keeps it on its way out. */

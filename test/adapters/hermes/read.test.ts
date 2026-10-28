@@ -340,6 +340,21 @@ describe("readHermesProfile", () => {
     expect(bundle.routines.map((routine) => routine.enabled)).toEqual([false, true, true]);
   });
 
+  it("reads at most 64 routines and names the others", async () => {
+    const jobs = Array.from({ length: 66 }, (_unused, index) => ({
+      id: `job${index}`,
+      name: `Job ${index + 1}`,
+      prompt: "Do it.",
+      schedule: { kind: "interval", minutes: 30 },
+    }));
+    await writeFile(join(hermes, "cron", "jobs.json"), JSON.stringify({ jobs }));
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+    expect(bundle.routines).toHaveLength(64);
+    expect(bundle.routines.at(-1)?.name).toBe("Job 64");
+    expect(warnings).toContain("cron job 'Job 65' is over the limit of 64 routines; not exported");
+    expect(warnings).toContain("cron job 'Job 66' is over the limit of 64 routines; not exported");
+  });
+
   it("reads one-off times and cron jobs in the time zone HERMES_TIMEZONE names", async () => {
     const { bundle } = await readHermesProfile(
       { ...ctx, env: { ...ctx.env, HERMES_TIMEZONE: "America/New_York" } },
