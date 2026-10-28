@@ -194,6 +194,33 @@ describe("profileSlug", () => {
     expect(profileSlug("NUL")).toBe("nul-r");
   });
 
+  // `_RESERVED_NAMES` (but `default`) and `_HERMES_SUBCOMMANDS` of hermes_cli/profiles.py.
+  const HERMES_RESERVED = [
+    "hermes", "test", "tmp", "root", "sudo",
+    "chat", "model", "gateway", "setup", "whatsapp", "login", "logout", "status", "cron", "doctor",
+    "dump", "config", "pairing", "skills", "tools", "mcp", "connectors", "sessions", "insights",
+    "version", "update", "uninstall", "profile", "plugins", "honcho", "acp",
+  ];
+
+  it.each(HERMES_RESERVED)("puts -agent after %s, which Hermes reserves", (name) => {
+    const slug = profileSlug(name);
+    expect(slug).toBe(`${name}-agent`);
+    expect(slug.length).toBeLessThanOrEqual(64);
+    expect(slug).toMatch(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+  });
+
+  it("finds a reserved name after the name is made into an id", () => {
+    expect(profileSlug("Status")).toBe("status-agent");
+    expect(profileSlug("  --TEST!! ")).toBe("test-agent");
+    expect(profileSlug("Hermes")).toBe("hermes-agent");
+  });
+
+  it("leaves a name that only contains a reserved one as it is", () => {
+    expect(profileSlug("tester")).toBe("tester");
+    expect(profileSlug("test-agent")).toBe("test-agent");
+    expect(profileSlug("my test")).toBe("my-test");
+  });
+
   it.each(["***", "", "   ", "!?"])("refuses %j, which holds no letter or digit", (name) => {
     expect(() => profileSlug(name)).toThrow(/no letters or digits/);
   });
@@ -317,17 +344,34 @@ describe("a new profile", () => {
     expect(items.warnings).toEqual([RESTART_WARNING, SCANNER_WARNING]);
   });
 
-  it("writes jobs paused even with enableRoutines, and says how to resume each", async () => {
+  it("writes jobs paused even with enableRoutines, and says how to resume them", async () => {
     const { items } = await writeHermesProfile(ctx, ada(), opts({ enableRoutines: true }));
     const { jobs } = await readJobs();
     expect(jobs.every((job) => job.enabled === false && job.state === "paused")).toBe(true);
+    // One approximated item for each job...
     for (const job of jobs) {
       expect(items.approximated).toContainEqual({
         field: `routine:${job.name}`,
-        detail: `Hermes jobs are written paused; resume it with \`hermes cron resume ${job.id}\``,
+        detail: `Hermes jobs are written paused; resume them with \`hermes cron resume ${job.id}\``,
       });
-      expect(items.warnings).toContain(`routine '${job.name}' stays paused: hermes cron resume ${job.id}`);
     }
+    // ...and one warning that lists every command.
+    const listing = items.warnings.filter((warning) => warning.includes("hermes cron resume"));
+    expect(listing).toHaveLength(1);
+    for (const job of jobs) expect(listing[0]).toContain(`hermes cron resume ${job.id}`);
+    expect(items.warnings).toEqual([listing[0], RESTART_WARNING, SCANNER_WARNING]);
+  });
+
+  it("says nothing about resuming when no job was written", async () => {
+    const old: Routine = { ...AT, name: "Old", schedule: { kind: "at", at: "2020-01-01T08:00:00.000Z" } };
+    const { items } = await writeHermesProfile(
+      ctx,
+      ada({ routines: [old] }),
+      opts({ enableRoutines: true }),
+    );
+    expect(items.skipped).toHaveLength(1);
+    expect(items.approximated.some((item) => item.field.startsWith("routine:"))).toBe(false);
+    expect(items.warnings).toEqual([RESTART_WARNING, SCANNER_WARNING]);
   });
 
   it("does not say so without enableRoutines", async () => {
@@ -364,6 +408,48 @@ describe("a new profile", () => {
     expect(parse(await text(join(profile("ada-lovelace"), "profile.yaml")))).toMatchObject({
       display_name: "Ada Lovelace",
     });
+  });
+
+  it.each([
+    ["test", "test-agent"],
+    ["Status", "status-agent"],
+    ["hermes", "hermes-agent"],
+  ])("writes the name %j, which Hermes reserves, as %j, and says so", async (name, id) => {
+    const result = await writeHermesProfile(ctx, ada({ manifest: { name } }), opts());
+    expect(result.targetAgentId).toBe(id);
+    expect(result.artifactPath).toBe(profile(id));
+    expect(result.items.warnings[0]).toBe(
+      `Hermes reserves the profile name '${name.toLowerCase()}'; written as '${id}'`,
+    );
+    // The name the user gave stays as the display name.
+    expect(parse(await text(join(profile(id), "profile.yaml")))).toMatchObject({ display_name: name });
+    expect(await readdir(join(hermes, "profiles"))).toEqual([id]);
+  });
+
+  it("updates test-agent in place, with the warning every time", async () => {
+    const bundle = ada({ manifest: { name: "test" } });
+    const first = await writeHermesProfile(ctx, bundle, opts());
+    await writeFile(join(profile("test-agent"), "memories", "extra.md"), "kept");
+    const second = await writeHermesProfile(ctx, { ...bundle, facts: ["Only one."] }, opts());
+
+    expect(second.targetAgentId).toBe("test-agent");
+    expect(await readdir(join(hermes, "profiles"))).toEqual(["test-agent"]);
+    const warning = "Hermes reserves the profile name 'test'; written as 'test-agent'";
+    expect(first.items.warnings).toContain(warning);
+    expect(second.items.warnings).toContain(warning);
+    expect(second.items.warnings).not.toContainEqual(expect.stringContaining("already exists"));
+    expect(parseEntries(await text(join(profile("test-agent"), "memories", "MEMORY.md")))).toEqual([
+      "Only one.",
+    ]);
+    expect(await text(join(profile("test-agent"), "memories", "extra.md"))).toBe("kept");
+  });
+
+  it("does not write over a test-agent that is not this agent's", async () => {
+    await mkdir(profile("test-agent"), { recursive: true });
+    await writeFile(join(profile("test-agent"), "SOUL.md"), "someone else's");
+    const result = await writeHermesProfile(ctx, ada({ manifest: { name: "test" } }), opts());
+    expect(result.targetAgentId).toBe("test-agent-2");
+    expect(await text(join(profile("test-agent"), "SOUL.md"))).toBe("someone else's");
   });
 
   it("writes a device name under another name", async () => {
@@ -785,6 +871,29 @@ describe("an agent that is already there", () => {
     expect(await text(edited)).toBe("the user's own version");
   });
 
+  it("does not take the folder of one skill for a copy of another, when the Bundle has foo and foo-2", async () => {
+    const skills = [skillOf("foo", "Body A.\n"), skillOf("foo-2", "Body B.\n")];
+    await firstWrite(ada({ skills }));
+    const folders = join(profile(), "skills");
+    const second = await readFile(join(folders, "foo-2", "SKILL.md"), "utf8");
+    await writeFile(join(folders, "foo", "SKILL.md"), "the user's own");
+
+    const { items } = await writeHermesProfile(ctx, ada({ skills }), opts());
+
+    // foo-2 stays foo-2's, and foo, whose folder the user changed, becomes foo-3.
+    expect(await text(join(folders, "foo", "SKILL.md"))).toBe("the user's own");
+    expect(await text(join(folders, "foo-2", "SKILL.md"))).toBe(second);
+    expect(await text(join(folders, "foo-3", "SKILL.md"))).toContain("Body A.");
+    expect((await readdir(folders)).sort()).toEqual(["foo", "foo-2", "foo-3"]);
+    expect(items.warnings).toContain(
+      "skill 'foo' already exists with different content; written as 'foo-3'",
+    );
+    expect((await readMarker()).skills).toMatchObject({
+      "foo-2": skillDigest(skills[1] as Skill),
+      "foo-3": skillDigest(skills[0] as Skill),
+    });
+  });
+
   it("leaves a skill that has a file the user added, since that folder is no longer ours", async () => {
     await firstWrite();
     await writeFile(join(profile(), "skills", "notes", "extra.md"), "added by the user");
@@ -903,6 +1012,26 @@ describe("an agent that is already there", () => {
       /Refusing to replace .*symbolic link/,
     );
     expect(await text(join(outside, "SOUL.md"))).toBe("mine");
+  });
+
+  it("is not written below a profiles folder that is a link, whatever the conflict mode", async (task) => {
+    const outside = join(root, "outside");
+    await mkdir(outside);
+    await link(outside, join(hermes, "profiles"), "junction", () => task.skip());
+    for (const onConflict of ["update", "copy", "replace"] as const) {
+      await expect(writeHermesProfile(ctx, ada(), opts({ onConflict }))).rejects.toThrow(
+        /Refusing to write a profile into .*profiles: it is a symbolic link/,
+      );
+    }
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("is not written below a profiles that is a file", async () => {
+    await writeFile(join(hermes, "profiles"), "not a folder");
+    await expect(writeHermesProfile(ctx, ada(), opts())).rejects.toThrow(
+      /Refusing to write a profile into .*profiles: it is not a folder/,
+    );
+    expect(await text(join(hermes, "profiles"))).toBe("not a folder");
   });
 
   it("takes an empty folder of the name as free", async () => {

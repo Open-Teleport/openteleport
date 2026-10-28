@@ -6,7 +6,7 @@
 
 | Path | What it shows | Source |
 |---|---|---|
-| `config.yaml` | `model.default`, `model.provider`, `timezone`, `memory.memory_char_limit` | H3, H18 |
+| `config.yaml` | `model.default`, `model.provider`, `timezone` (the time zone of cron expressions and one-off times: `HERMES_TIMEZONE`, then this key, then the server's zone), `memory.memory_char_limit` | H3, H15, H18 |
 | `profile.yaml`, `SOUL.md` | the default profile: a display name, a `SOUL.md` without the persona/instructions layout | H3, H4 |
 | `memories/MEMORY.md` | three entries joined by `"\n§\n"`, no trailing line break; the third is 700 characters | H5, H14 |
 | `memories/USER.md` | one entry | H5, H14 |

@@ -37,10 +37,55 @@ const SCANNER_WARNING =
   "an entry it rejects is dropped on its side";
 
 /** Names a profile cannot have, and why. */
-const RESERVED_PROFILES: ReadonlyMap<string, string> = new Map([
+const REFUSED_PROFILES: ReadonlyMap<string, string> = new Map([
   ["default", "it is the profile in the Hermes home itself, which OpenTeleport never overwrites"],
   ["profiles", "it is the folder the named profiles live in"],
 ]);
+
+/**
+ * Names Hermes will not take for a profile it is asked to use by name: `_RESERVED_NAMES` (without
+ * `default`, which is refused above) and `_HERMES_SUBCOMMANDS` in `hermes_cli/profiles.py`
+ * (https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/profiles.py). A profile of
+ * one of these names is listed by Hermes but cannot be selected, so the agent is written under
+ * the name with `-agent` after it.
+ */
+const HERMES_RESERVED_PROFILES: ReadonlySet<string> = new Set([
+  // _RESERVED_NAMES
+  "hermes",
+  "test",
+  "tmp",
+  "root",
+  "sudo",
+  // _HERMES_SUBCOMMANDS
+  "chat",
+  "model",
+  "gateway",
+  "setup",
+  "whatsapp",
+  "login",
+  "logout",
+  "status",
+  "cron",
+  "doctor",
+  "dump",
+  "config",
+  "pairing",
+  "skills",
+  "tools",
+  "mcp",
+  "connectors",
+  "sessions",
+  "insights",
+  "version",
+  "update",
+  "uninstall",
+  "profile",
+  "plugins",
+  "honcho",
+  "acp",
+]);
+
+const RESERVED_SUFFIX = "-agent";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -57,12 +102,10 @@ const charCount = (value: string): number => Array.from(value).length;
 const preview = (value: string): string => Array.from(value).slice(0, PREVIEW_CHARS).join("");
 
 /**
- * The profile id for an agent name: lower case, every run of characters outside `a-z0-9` one `-`,
- * no `-` at either end, at most 64 characters (what Hermes accepts as a profile id). A Windows
- * device name such as `con` gets `-r`, since its folder could not be created there. Throws for a
- * name that leaves nothing, and for `default` and `profiles`, which Hermes uses itself.
+ * The profile id for an agent name, and the name Hermes reserves when that is what the id had to
+ * be changed for (see `profileSlug`).
  */
-export function profileSlug(name: string): string {
+function slugOf(name: string): { slug: string; reserved?: string } {
   const base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -74,14 +117,29 @@ export function profileSlug(name: string): string {
       `Cannot make a Hermes profile name from ${JSON.stringify(name)}: it has no letters or digits`,
     );
   }
-  const reserved = RESERVED_PROFILES.get(base);
-  if (reserved !== undefined) {
+  const refused = REFUSED_PROFILES.get(base);
+  if (refused !== undefined) {
     throw new Error(
-      `Cannot name a Hermes profile "${base}": the name is reserved, ${reserved}. ` +
+      `Cannot name a Hermes profile "${base}": the name is reserved, ${refused}. ` +
         "Rename the agent.",
     );
   }
-  return isReservedDeviceName(base) ? `${base}-r` : base;
+  // A reserved name is short, so the suffix keeps the id within the 64 characters.
+  if (HERMES_RESERVED_PROFILES.has(base)) {
+    return { slug: `${base}${RESERVED_SUFFIX}`, reserved: base };
+  }
+  return { slug: isReservedDeviceName(base) ? `${base}-r` : base };
+}
+
+/**
+ * The profile id for an agent name: lower case, every run of characters outside `a-z0-9` one `-`,
+ * no `-` at either end, at most 64 characters (what Hermes accepts as a profile id). A Windows
+ * device name such as `con` gets `-r`, since its folder could not be created there, and a name
+ * Hermes reserves (`test`, `status`, `hermes`...) gets `-agent`. Throws for a name that leaves
+ * nothing, and for `default` and `profiles`, which Hermes uses itself.
+ */
+export function profileSlug(name: string): string {
+  return slugOf(name).slug;
 }
 
 /**
@@ -269,6 +327,22 @@ async function claimTarget(
   return fresh(copy);
 }
 
+/**
+ * Throws when the `profiles` folder is a link or not a folder: a profile is created below it, and
+ * nothing is written through a link. A folder that is not there yet is fine.
+ */
+async function assertProfilesFolder(profiles: string): Promise<void> {
+  const info = await lstatIfAny(profiles);
+  if (info === undefined || info.isDirectory()) return;
+  const what = info.isSymbolicLink()
+    ? "a symbolic link, and OpenTeleport never writes through one"
+    : "not a folder";
+  throw new Error(
+    `Refusing to write a profile into ${profiles}: it is ${what}. ` +
+      "Make it a real folder yourself if you mean it.",
+  );
+}
+
 // -- What an earlier move wrote ----------------------------------------------------------------
 
 type Recorded = {
@@ -439,10 +513,16 @@ async function ownFolder(
   skill: Skill,
   recorded: Record<string, string>,
   claimed: ReadonlySet<string>,
+  bundled: ReadonlySet<string>,
 ): Promise<{ name: string; stale: string[] } | undefined> {
+  // A `<name>-N` folder is a copy of this skill only when no skill of the Bundle is called that:
+  // with both `foo` and `foo-2` in the Bundle, `foo-2` is the folder of the second.
   const candidates = Object.keys(recorded)
     .map((name) => ({ name, n: copyNumber(name, skill.name) }))
-    .filter(({ name, n }) => n !== undefined && !claimed.has(name))
+    .filter(
+      ({ name, n }) =>
+        n !== undefined && !claimed.has(name) && (name === skill.name || !bundled.has(name)),
+    )
     .sort((a, b) => (a.n as number) - (b.n as number));
   for (const { name } of candidates) {
     const files = await readFolder(join(skillsDir, name));
@@ -483,6 +563,7 @@ async function writeProfileSkills(
   const skillsDir = join(dir, "skills");
   const blocked = await blockedBy(dir, "skills", "directory");
   const claimed = new Set<string>();
+  const bundled = new Set(skills.map((skill) => skill.name));
   for (const skill of skills) {
     const field = `skill:${skill.name}`;
     // A name with a leading dot is Hermes's own state (`.hub`).
@@ -498,7 +579,7 @@ async function writeProfileSkills(
       items.skipped.push({ field, detail: `${blocked}; not written` });
       continue;
     }
-    const own = await ownFolder(skillsDir, skill, recorded, claimed);
+    const own = await ownFolder(skillsDir, skill, recorded, claimed, bundled);
     const name = own?.name ?? (await placeSkill(skillsDir, skill, items));
     if (name === undefined) continue; // the same skill is already there
     claimed.add(name);
@@ -688,14 +769,17 @@ async function writeRoutines(
     return [...recorded];
   }
   items.approximated.push(...approximated);
-  if (opts.enableRoutines) {
+  if (opts.enableRoutines && created.length > 0) {
     for (const { routine, job } of created) {
       items.approximated.push({
         field: `routine:${routine.name}`,
-        detail: `Hermes jobs are written paused; resume it with \`hermes cron resume ${job.id}\``,
+        detail: `Hermes jobs are written paused; resume them with \`hermes cron resume ${job.id}\``,
       });
-      items.warnings.push(`routine '${routine.name}' stays paused: hermes cron resume ${job.id}`);
     }
+    const commands = created.map(
+      ({ routine, job }) => `hermes cron resume ${job.id} (${routine.name})`,
+    );
+    items.warnings.push(`To run the paused jobs: ${commands.join("; ")}`);
   }
   return created.map(({ job }) => job.id);
 }
@@ -770,13 +854,13 @@ export async function writeHermesProfile(
 ): Promise<WriteResult> {
   const items: Items = { approximated: [], skipped: [], warnings: [] };
   const profiles = join(hermesHome(ctx), "profiles");
-  const target = await claimTarget(
-    profiles,
-    profileSlug(bundle.manifest.name),
-    bundle,
-    opts.onConflict,
-    items.warnings,
-  );
+  const { slug, reserved } = slugOf(bundle.manifest.name);
+  await assertProfilesFolder(profiles);
+  if (reserved !== undefined) {
+    // Said on every move, not only the first: the profile is not the one the name suggests.
+    items.warnings.push(`Hermes reserves the profile name '${reserved}'; written as '${slug}'`);
+  }
+  const target = await claimTarget(profiles, slug, bundle, opts.onConflict, items.warnings);
   const now = new Date();
 
   if (target.mode === "replace") await rm(target.dir, { recursive: true, force: true });
