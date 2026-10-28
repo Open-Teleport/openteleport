@@ -617,6 +617,58 @@ function readMemories(
   return { facts: kept.map(({ text }) => text), inclusions };
 }
 
+/** A routine of OpenBot, once its parts are read; see `toBundleRoutine`. */
+export type OpenBotRoutine = {
+  /** Trimmed, and not empty. */
+  name: string;
+  /** Not blank. */
+  instruction: string;
+  active: boolean;
+  /** `""` when OpenBot keeps none. */
+  timezone: string;
+  /** What OpenBot keeps as the schedule; `undefined` when it keeps none. */
+  schedule: unknown;
+  /** Taken when it is one of the policies OpenBot knows. */
+  limitPolicy?: unknown;
+  missedPolicy?: unknown;
+};
+
+/**
+ * The routine as a bundle holds it. What the bundle has no field for (the policy of the routine,
+ * the start of an interval) comes back as `extra`, when there is any. When the routine cannot be
+ * carried, `problem` says why, to follow "the routine is left out because".
+ */
+export function toBundleRoutine(
+  routine: OpenBotRoutine,
+): { routine: Routine; extra?: Json } | { problem: string } {
+  const { timezone } = routine;
+  if (timezone === "") return { problem: "it has no time zone" };
+  if (!RoutineSchema.shape.timezone.safeParse(timezone).success) {
+    return { problem: `"${timezone}" is not a time zone` };
+  }
+  if (routine.schedule === undefined) return { problem: "it has no schedule" };
+  const schedule = fromOpenBotSchedule(routine.schedule, timezone);
+  if (schedule === null) return { problem: "its schedule cannot be carried over" };
+  const extra: Json = { ...schedule.extra };
+  const { limitPolicy, missedPolicy } = routine;
+  if (typeof limitPolicy === "string" && ROUTINE_LIMIT_POLICIES.includes(limitPolicy)) {
+    extra.limitPolicy = limitPolicy;
+  }
+  if (typeof missedPolicy === "string" && ROUTINE_MISSED_POLICIES.includes(missedPolicy)) {
+    extra.missedPolicy = missedPolicy;
+  }
+  return {
+    routine: {
+      name: routine.name,
+      instruction: routine.instruction,
+      enabled: routine.active,
+      timezone,
+      schedule: schedule.schedule,
+    },
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
+  };
+}
+
 /**
  * The routines of an agent as a bundle holds them. What the bundle has no field for (the policy
  * of a routine, the start of an interval) comes back in `extras`, by routine name. A routine that
@@ -653,40 +705,22 @@ function readRoutines(
       leave("it has no instruction");
       continue;
     }
-    if (typeof value.timezone !== "string" || value.timezone === "") {
-      leave("it has no time zone");
-      continue;
-    }
-    if (!RoutineSchema.shape.timezone.safeParse(value.timezone).success) {
-      leave(`"${value.timezone}" is not a time zone`);
-      continue;
-    }
-    const schedule = fromOpenBotSchedule(value.schedule, value.timezone);
-    if (schedule === null) {
-      leave("its schedule cannot be carried over");
-      continue;
-    }
-    routines.push({
+    const carried = toBundleRoutine({
       name,
       instruction: value.instruction,
-      enabled: typeof value.active === "boolean" ? value.active : true,
-      timezone: value.timezone,
-      schedule: schedule.schedule,
+      active: typeof value.active === "boolean" ? value.active : true,
+      timezone: typeof value.timezone === "string" ? value.timezone : "",
+      // A transfer file that gives no schedule has one that "cannot be carried over".
+      schedule: value.schedule ?? null,
+      limitPolicy: value.limitPolicy,
+      missedPolicy: value.missedPolicy,
     });
-    const extra: Json = { ...schedule.extra };
-    if (
-      typeof value.limitPolicy === "string" &&
-      ROUTINE_LIMIT_POLICIES.includes(value.limitPolicy)
-    ) {
-      extra.limitPolicy = value.limitPolicy;
+    if ("problem" in carried) {
+      leave(carried.problem);
+      continue;
     }
-    if (
-      typeof value.missedPolicy === "string" &&
-      ROUTINE_MISSED_POLICIES.includes(value.missedPolicy)
-    ) {
-      extra.missedPolicy = value.missedPolicy;
-    }
-    if (Object.keys(extra).length > 0) extras.set(name, extra);
+    routines.push(carried.routine);
+    if (carried.extra !== undefined) extras.set(name, carried.extra);
   }
   return { routines, extras };
 }

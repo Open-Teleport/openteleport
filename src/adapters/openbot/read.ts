@@ -11,16 +11,8 @@ import {
   isForbiddenPath,
   isSafeArchivePath,
 } from "../../core/paths.js";
-import { fromOpenBotSchedule } from "../../core/schedule.js";
-import {
-  type Bundle,
-  type FileEntry,
-  type Manifest,
-  type Note,
-  type Routine,
-  RoutineSchema,
-} from "../../core/schema.js";
-import { openBotModelPref, readOpenBotZip } from "../../formats/openbot-zip.js";
+import type { Bundle, FileEntry, Manifest, Note, Routine } from "../../core/schema.js";
+import { openBotModelPref, readOpenBotZip, toBundleRoutine } from "../../formats/openbot-zip.js";
 import { lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
 import {
@@ -37,8 +29,6 @@ const APP = "openbot";
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const IMAGE_EXTENSION = /\.(png|jpe?g|webp)$/i;
-const LIMIT_POLICIES = ["wait", "skip"];
-const MISSED_POLICIES = ["skip", "run-once"];
 
 const HINT =
   "Install OpenBot, or pass --source-dir <export.zip> " +
@@ -217,34 +207,21 @@ function readRoutines(
       leave("it has no instruction");
       continue;
     }
-    if (!RoutineSchema.shape.timezone.safeParse(row.timezone).success) {
-      leave(row.timezone === "" ? "it has no time zone" : `"${row.timezone}" is not a time zone`);
-      continue;
-    }
-    if (row.schedule === undefined) {
-      leave("it has no schedule");
-      continue;
-    }
-    const schedule = fromOpenBotSchedule(row.schedule, row.timezone);
-    if (schedule === null) {
-      leave("its schedule cannot be carried over");
-      continue;
-    }
-    routines.push({
+    const carried = toBundleRoutine({
       name,
       instruction: row.instruction,
-      enabled: row.active,
+      active: row.active,
       timezone: row.timezone,
-      schedule: schedule.schedule,
+      schedule: row.schedule,
+      limitPolicy: row.limitPolicy,
+      missedPolicy: row.missedPolicy,
     });
-    const extra: Json = { ...schedule.extra };
-    if (typeof row.limitPolicy === "string" && LIMIT_POLICIES.includes(row.limitPolicy)) {
-      extra.limitPolicy = row.limitPolicy;
+    if ("problem" in carried) {
+      leave(carried.problem);
+      continue;
     }
-    if (typeof row.missedPolicy === "string" && MISSED_POLICIES.includes(row.missedPolicy)) {
-      extra.missedPolicy = row.missedPolicy;
-    }
-    if (Object.keys(extra).length > 0) extras[name] = extra;
+    routines.push(carried.routine);
+    if (carried.extra !== undefined) extras[name] = carried.extra;
   }
   return { routines, extras };
 }

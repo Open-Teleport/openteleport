@@ -23,8 +23,10 @@ import {
 import {
   OPENBOT_IMPORT_MANIFEST,
   OPENBOT_TRANSFER_MANIFEST,
+  type OpenBotRoutine,
   openBotModelPref,
   readOpenBotZip,
+  toBundleRoutine,
   writeOpenBotImportZip,
 } from "../../src/formats/openbot-zip.js";
 import { zipDirectoryToFile } from "../helpers/zip.js";
@@ -1819,5 +1821,72 @@ describe("OpenBot zip round trips", () => {
       routines: { "Inbox sweep": { anchorAt: "2026-10-28T09:00:00.000Z" } },
     });
     expect(back.agents[0]?.bundle.facts).toEqual(ada.facts);
+  });
+});
+
+describe("toBundleRoutine", () => {
+  const routine = (patch: Partial<OpenBotRoutine> = {}): OpenBotRoutine => ({
+    name: "Weekly review",
+    instruction: "Summarise the week.",
+    active: true,
+    timezone: WARSAW,
+    schedule: { kind: "weekly", weekday: 1, time: "09:30" },
+    ...patch,
+  });
+
+  it("gives the routine a bundle holds, and no extra when there is none", () => {
+    expect(toBundleRoutine(routine())).toEqual({
+      routine: {
+        name: "Weekly review",
+        instruction: "Summarise the week.",
+        enabled: true,
+        timezone: WARSAW,
+        schedule: { kind: "cron", expression: "30 9 * * 1" },
+      },
+    });
+  });
+
+  it("carries the active flag over as enabled", () => {
+    const carried = toBundleRoutine(routine({ active: false }));
+
+    expect("routine" in carried && carried.routine.enabled).toBe(false);
+  });
+
+  it("keeps the start of an interval and the two policies as extra", () => {
+    const carried = toBundleRoutine(
+      routine({
+        schedule: { kind: "interval", amount: 2, unit: "hours", anchorAt: "2026-10-27T08:00:00.000Z" },
+        limitPolicy: "wait",
+        missedPolicy: "run-once",
+      }),
+    );
+
+    expect(carried).toMatchObject({
+      routine: { schedule: { kind: "every", every: "2h" } },
+      extra: { anchorAt: "2026-10-27T08:00:00.000Z", limitPolicy: "wait", missedPolicy: "run-once" },
+    });
+  });
+
+  it("ignores a policy OpenBot does not know, or one that is not text", () => {
+    const carried = toBundleRoutine(routine({ limitPolicy: "queue", missedPolicy: 3 }));
+
+    expect(carried).not.toHaveProperty("extra");
+  });
+
+  it.each([
+    ["has no time zone", { timezone: "" }, "it has no time zone"],
+    ["has a zone that does not exist", { timezone: "Mars/Olympus" }, '"Mars/Olympus" is not a time zone'],
+    ["has no schedule", { schedule: undefined }, "it has no schedule"],
+    ["has a schedule that is not an object", { schedule: "daily" }, "its schedule cannot be carried over"],
+    ["has a schedule out of range", { schedule: { kind: "hourly", minute: 99 } }, "its schedule cannot be carried over"],
+    ["has a custom schedule that is not cron", { schedule: { kind: "custom", expression: "soon" } }, "its schedule cannot be carried over"],
+  ])("says why a routine that %s cannot be carried", (_what, patch, problem) => {
+    expect(toBundleRoutine(routine(patch))).toEqual({ problem });
+  });
+
+  it("looks at the time zone before the schedule", () => {
+    expect(toBundleRoutine(routine({ timezone: "", schedule: undefined }))).toEqual({
+      problem: "it has no time zone",
+    });
   });
 });
