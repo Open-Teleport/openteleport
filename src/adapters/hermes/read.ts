@@ -1,19 +1,12 @@
 // Reads a Hermes profile as a Bundle. Hermes keeps the persona in `SOUL.md`, memory as entries in
 // `memories/*.md`, jobs in `cron/jobs.json` and skills below `skills/`, all inside the profile
 // directory; nothing is read from a running Hermes, and nothing is changed.
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { splitFrontmatter } from "../../core/frontmatter.js";
-import {
-  MAX_FACT_CHARS,
-  MAX_ROUTINES,
-  MAX_SKILLS,
-  MAX_TEXT_ENTRY_BYTES,
-  isForbiddenPath,
-} from "../../core/paths.js";
+import { MAX_FACT_CHARS, MAX_ROUTINES, MAX_SKILLS, MAX_TEXT_ENTRY_BYTES } from "../../core/paths.js";
 import {
   type Bundle,
-  type FileEntry,
   type Manifest,
   type ModelPref,
   type Note,
@@ -21,9 +14,10 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { splitInstructions } from "../../core/text.js";
-import { lstatIfAny } from "../fs.js";
+import { byCodeUnit, splitInstructions } from "../../core/text.js";
+import { entriesOf, lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
+import { claimSkillName, findSkillFolders, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { jobToRoutine, readJobsFile } from "./cron.js";
 import { parseEntries } from "./memory.js";
@@ -54,8 +48,6 @@ const MEBIBYTE = 1024 * 1024;
 const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-// Plain code-unit order, so that the result does not depend on the locale.
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const isMissing = (error: unknown): boolean =>
   (error as NodeJS.ErrnoException).code === "ENOENT" ||
@@ -72,15 +64,6 @@ const named = (names: readonly string[]): string =>
     ? names.join(", ")
     : `${names.slice(0, LISTED_NAMES).join(", ")} and ${names.length - LISTED_NAMES} more`;
 
-/** The entries of `dir` with their types, or none when it does not exist. */
-async function entriesOf(dir: string) {
-  try {
-    return await readdir(dir, { withFileTypes: true });
-  } catch (error) {
-    if (isMissing(error)) return [];
-    throw error;
-  }
-}
 
 /** Whether `path` is a directory, a link to one included. */
 async function isDirectory(path: string): Promise<boolean> {
@@ -232,84 +215,15 @@ function frontmatterName(markdown: string): string | undefined {
   }
 }
 
-const linkWarning = (skill: string, path?: string): string =>
-  path === undefined
-    ? `skill '${skill}' is a symlink; not exported`
-    : `skill '${skill}': '${path}' is a symlink; not exported`;
-
-/**
- * Files below `dir` as `/`-separated paths. Links (symbolic links and junctions) are never
- * followed; they, forbidden paths and special files are left out and named.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    // Dirent types come from lstat, so a link is neither a file nor a directory here.
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isSymbolicLink()) {
-        warnings.push(linkWarning(skill, path));
-      } else if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
-        warnings.push(`skill '${skill}': left out '${path}'`);
-      } else if (entry.isDirectory()) {
-        await walk(absolute, path);
-      } else {
-        files.push({ path, bytes: new Uint8Array(await readFile(absolute)) });
-      }
-    }
-  }
-  await walk(dir, "");
-  // SKILL.md first, then the others in code-unit order.
-  return files.sort((a, b) =>
-    a.path === SKILL_FILE ? -1 : b.path === SKILL_FILE ? 1 : byCodeUnit(a.path, b.path),
-  );
-}
-
-type SkillFolder = { path: string; dir: string };
-
-/**
- * The folders below `skillsDir` that hold a real `SKILL.md`, by path. A folder without one is a
- * category and is searched; one with it is a skill and is not searched further. Names that start
- * with a dot (`.hub`, `.bundled_manifest`) are Hermes's own state. A link is never followed: it
- * is named in a warning instead.
- */
-async function findSkillFolders(skillsDir: string, warnings: string[]): Promise<SkillFolder[]> {
-  const found: SkillFolder[] = [];
-  async function walk(dir: string, prefix: string): Promise<void> {
-    const entries = (await entriesOf(dir)).sort((a, b) => byCodeUnit(a.name, b.name));
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(dir, entry.name);
-      if (entry.isSymbolicLink()) {
-        warnings.push(linkWarning(entry.name));
-        continue;
-      }
-      if (!entry.isDirectory()) continue;
-      const skillFile = await lstatIfAny(join(absolute, SKILL_FILE));
-      if (skillFile?.isSymbolicLink()) {
-        warnings.push(linkWarning(entry.name, SKILL_FILE));
-      } else if (skillFile?.isFile()) {
-        found.push({ path, dir: absolute });
-      } else {
-        await walk(absolute, path);
-      }
-    }
-  }
-  await walk(skillsDir, "");
-  return found;
-}
-
 /**
  * Every skill of the profile, without the ones that ship with Hermes (`.bundled_manifest`) and
- * the state of the skills hub. Categories are flattened: a skill is named after its folder, and
- * a second skill of the same name gets `-2`, `-3`... with a warning. At most `MAX_SKILLS` come
- * back.
+ * the state of the skills hub (hidden names). Categories are flattened: a skill is named after
+ * its folder, and a second skill of the same name gets `-2`, `-3`... with a warning. At most
+ * `MAX_SKILLS` come back. The files of a skill are read only once it is kept.
  */
 async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
   const skillsDir = join(dir, "skills");
-  const folders = await findSkillFolders(skillsDir, warnings);
+  const folders = await findSkillFolders(skillsDir, warnings, { skipHidden: true, nested: true });
   const bundled =
     folders.length === 0 ? new Set<string>() : await bundledNames(skillsDir, warnings);
 
@@ -318,30 +232,21 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
   const dropped: string[] = [];
   let leftBehind = 0;
   for (const folder of folders) {
-    const folderName = folder.path.split("/").at(-1) as string;
     if (bundled !== undefined && bundled.size > 0) {
-      const skillName =
-        bundled.has(folderName)
-          ? folderName
-          : frontmatterName(await readFile(join(folder.dir, SKILL_FILE), "utf8"));
+      const skillName = bundled.has(folder.name)
+        ? folder.name
+        : frontmatterName(await readFile(join(folder.dir, SKILL_FILE), "utf8"));
       if (skillName !== undefined && bundled.has(skillName)) {
         leftBehind += 1;
         continue;
       }
     }
-    let name = folderName;
-    for (let n = 2; taken.has(name); n += 1) name = `${folderName}-${n}`;
-    if (name !== folderName) {
-      warnings.push(
-        `skill '${folderName}' appears more than once (${folder.path}); exported as '${name}'`,
-      );
-    }
-    taken.add(name);
+    const name = claimSkillName(folder, taken, warnings);
     if (skills.length >= MAX_SKILLS) {
       dropped.push(name);
       continue;
     }
-    skills.push({ name, files: await skillFiles(folder.dir, name, warnings) });
+    skills.push({ name, files: await readSkillFiles(folder.dir, name, warnings) });
   }
   if (leftBehind > 0) {
     warnings.push(`${plural(leftBehind, "bundled Hermes skill")} left behind`);

@@ -1,9 +1,10 @@
 // Small file system checks every file-based adapter needs.
-import { type Stats, constants } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { type Dirent, type Stats, constants } from "node:fs";
+import { chmod, copyFile, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ulid } from "ulid";
 import { isSafeArchivePath } from "../core/paths.js";
+import { byCodeUnit } from "../core/text.js";
 
 /**
  * `lstat`, or `undefined` when nothing is there (the path is missing, or something on the way to
@@ -16,6 +17,22 @@ export async function lstatIfAny(path: string): Promise<Stats | undefined> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The entries of `dir` with their types, in code-unit order of their names, or none when `dir` is
+ * not there (or something on the way to it is a file). The type of an entry is its own: a link is
+ * neither a file nor a directory. Any other error, such as a refused permission, is thrown.
+ */
+export async function entriesOf(dir: string): Promise<Dirent[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.sort((a, b) => byCodeUnit(a.name, b.name));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
     throw error;
   }
 }

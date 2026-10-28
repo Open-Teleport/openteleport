@@ -1,22 +1,21 @@
 // Reads Codex (the CLI and the app) from the files it keeps. An "agent" is the global setup
 // (`AGENTS.md`, the user's skills, `config.toml`) or one custom agent file `agents/<name>.toml`.
-import type { Dirent } from "node:fs";
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse } from "smol-toml";
-import { MAX_TEXT_ENTRY_BYTES, isForbiddenPath } from "../../core/paths.js";
+import { MAX_TEXT_ENTRY_BYTES } from "../../core/paths.js";
 import {
   type Bundle,
-  type FileEntry,
   type Manifest,
   type ModelPref,
   type Note,
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { splitInstructions } from "../../core/text.js";
-import { lstatIfAny } from "../fs.js";
+import { byCodeUnit, splitInstructions } from "../../core/text.js";
+import { entriesOf, lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
+import { readSkillFolders } from "../skill-files.js";
 import type { Adapter, AgentRef, Ctx } from "../types.js";
 import {
   AGENT_EXTENSION,
@@ -36,11 +35,9 @@ const GLOBAL_NAME = "Codex";
 const GLOBAL_LABEL = "Codex (global)";
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
-const SKILL_FILE = "SKILL.md";
 /** The note that carries `memories/MEMORY.md`. */
 const MEMORY_NOTE = "codex-memory";
 const NOT_FOUND_HINT = "Install Codex or pass --source-dir <CODEX_HOME>";
-/** Same rule as the manifest `id` in `schema.ts`. */
 
 /** What an agent file holds that a Bundle has a place for. Everything else is `rest`. */
 export type CodexAgentFile = {
@@ -57,9 +54,6 @@ type Table = Record<string, unknown>;
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(isString);
-
-// Plain code-unit order, so that the result does not depend on the locale.
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The text with Windows line endings turned into line feeds. */
 const lf = (text: string): string => text.replace(/\r\n/g, "\n");
@@ -100,16 +94,6 @@ async function readText(path: string, label: string): Promise<string | undefined
   const text = await readFile(path, "utf8");
   // Some Windows editors start a UTF-8 file with a byte order mark, which would hide `# Persona`.
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-}
-
-/** The entries of `dir`, or none when it does not exist. */
-async function entriesOf(dir: string): Promise<Dirent[]> {
-  try {
-    return await readdir(dir, { withFileTypes: true });
-  } catch (error) {
-    if (isMissing(error)) return [];
-    throw error;
-  }
 }
 
 // -- Detection -----------------------------------------------------------------------------------
@@ -230,76 +214,20 @@ async function locate(home: string, agent: string): Promise<AgentFileRef> {
 
 // -- Pieces of a Bundle --------------------------------------------------------------------------
 
-const linkWarning = (skill: string, path?: string): string =>
-  path === undefined
-    ? `skill '${skill}' is a symlink; not exported`
-    : `skill '${skill}': '${path}' is a symlink; not exported`;
-
-/**
- * Files below `dir` as `/`-separated paths. Links (symbolic links and junctions) are never
- * followed; they, forbidden paths and special files are left out and named.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    // Dirent types come from lstat, so a link is neither a file nor a directory here.
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isSymbolicLink()) {
-        warnings.push(linkWarning(skill, path));
-      } else if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
-        warnings.push(`skill '${skill}': left out '${path}'`);
-      } else if (entry.isDirectory()) {
-        await walk(absolute, path);
-      } else {
-        files.push({ path, bytes: new Uint8Array(await readFile(absolute)) });
-      }
-    }
-  }
-  await walk(dir, "");
-  // SKILL.md first, then the others in code-unit order.
-  return files.sort((a, b) =>
-    a.path === SKILL_FILE ? -1 : b.path === SKILL_FILE ? 1 : byCodeUnit(a.path, b.path),
-  );
-}
-
-/**
- * Every real folder of `skillsDir` that holds a real `SKILL.md`, in name order. A linked skill
- * folder or `SKILL.md` is never followed, since it can point anywhere on disk; it is named in a
- * warning instead. Hidden folders are left alone: Codex keeps its bundled skills in `.system`.
- */
-async function readSkills(skillsDir: string, warnings: string[]): Promise<Skill[]> {
-  const skills: Skill[] = [];
-  const names = (await entriesOf(skillsDir)).map((entry) => entry.name).sort(byCodeUnit);
-  for (const name of names) {
-    if (name.startsWith(".")) continue;
-    const dir = join(skillsDir, name);
-    const folder = await lstatIfAny(dir);
-    if (folder?.isSymbolicLink()) {
-      warnings.push(linkWarning(name));
-      continue;
-    }
-    if (!folder?.isDirectory()) continue;
-    const skillFile = await lstatIfAny(join(dir, SKILL_FILE));
-    if (skillFile?.isSymbolicLink()) {
-      warnings.push(linkWarning(name, SKILL_FILE));
-      continue;
-    }
-    if (!skillFile?.isFile()) continue;
-    skills.push({ name, files: await skillFiles(dir, name, warnings) });
-  }
-  return skills;
-}
-
 /**
  * The skills of `~/.agents/skills` and of the deprecated `<CODEX_HOME>/skills`, in name order.
  * Codex does not merge skills that share a name; the one in `~/.agents/skills` is exported.
  */
 async function readAllSkills(ctx: Ctx, home: string, warnings: string[]): Promise<Skill[]> {
-  const skills = await readSkills(userSkillsDir(ctx), warnings);
+  // Hidden folders are left alone: Codex keeps its bundled skills in `.system`.
+  const read = async (dir: string): Promise<Skill[]> => {
+    const found = await readSkillFolders(dir, { skipHidden: true });
+    warnings.push(...found.warnings);
+    return found.skills;
+  };
+  const skills = await read(userSkillsDir(ctx));
   const taken = new Set(skills.map(({ name }) => name));
-  for (const skill of await readSkills(legacySkillsDir(home), warnings)) {
+  for (const skill of await read(legacySkillsDir(home))) {
     if (taken.has(skill.name)) {
       warnings.push(
         `skill '${skill.name}' is in both ~/.agents/skills and the deprecated skills folder; ` +

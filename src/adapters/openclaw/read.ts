@@ -1,5 +1,4 @@
-import type { Dirent } from "node:fs";
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { splitFrontmatter } from "../../core/frontmatter.js";
 import { MAX_AVATAR_BYTES, MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
@@ -7,7 +6,6 @@ import { fromOpenClawJob } from "../../core/schedule.js";
 import {
   type Bundle,
   type Capability,
-  type FileEntry,
   type Manifest,
   type ModelPref,
   type Note,
@@ -16,8 +14,10 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { lstatIfAny } from "../fs.js";
+import { byCodeUnit } from "../../core/text.js";
+import { entriesOf, lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
+import { type SkillMessages, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli } from "./cli.js";
 import {
@@ -77,9 +77,6 @@ function isWithin(root: string, path: string): boolean {
 const toBytes = (buffer: Buffer): Uint8Array =>
   new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
-// Plain code-unit order, so that the result does not depend on the locale.
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 async function readText(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");
@@ -94,17 +91,6 @@ async function isDirectory(path: string): Promise<boolean> {
     return (await stat(path)).isDirectory();
   } catch (error) {
     if (isNotFound(error)) return false;
-    throw error;
-  }
-}
-
-/** The entries of a directory sorted by name; none when it does not exist. */
-async function listDirectory(path: string): Promise<Dirent[]> {
-  try {
-    const entries = await readdir(path, { withFileTypes: true });
-    return entries.sort((a, b) => compare(a.name, b.name));
-  } catch (error) {
-    if (isNotFound(error)) return [];
     throw error;
   }
 }
@@ -256,7 +242,7 @@ async function readMemory(
   if (user !== undefined) notes.push({ name: USER_NOTE, text: user });
 
   const memoryDir = join(workspace, "memory");
-  for (const dirent of await listDirectory(memoryDir)) {
+  for (const dirent of await entriesOf(memoryDir)) {
     if (!dirent.isFile() || !/\.md$/i.test(dirent.name)) continue;
     const name = dirent.name.slice(0, -".md".length);
     if (notes.some((note) => note.name === name)) {
@@ -265,13 +251,25 @@ async function readMemory(
     }
     notes.push({ name, text: await readFile(join(memoryDir, dirent.name), "utf8") });
   }
-  notes.sort((a, b) => compare(a.name, b.name));
+  notes.sort((a, b) => byCodeUnit(a.name, b.name));
   return { facts, notes, warnings };
 }
 
 // -- Skills ------------------------------------------------------------------------------------
 
 const SKILL_FILE = "SKILL.md";
+
+const leftOutOfSkill: SkillMessages["leftOut"] = (skill, path, why) =>
+  why === "forbidden"
+    ? `skill '${skill}': left out ${path}`
+    : `skill '${skill}': left out ${path} (not a regular file)`;
+
+/** OpenClaw's words for what is left out of a skill; a link below it is not a regular file. */
+const SKILL_MESSAGES: SkillMessages = {
+  link: (skill, path = "") =>
+    leftOutOfSkill(skill, path, isForbiddenPath(path) ? "forbidden" : "special"),
+  leftOut: leftOutOfSkill,
+};
 
 /** The `name` in a SKILL.md frontmatter block, if there is one. */
 function frontmatterName(bytes: Uint8Array): string | undefined {
@@ -280,33 +278,6 @@ function frontmatterName(bytes: Uint8Array): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * Every file of a skill directory except SKILL.md, sorted by path. Paths that never go into an
- * archive (`.env*`, `node_modules`, `.git`, nested archives) and anything that is not a regular
- * file or directory are left out, with a warning.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    for (const dirent of await listDirectory(current)) {
-      const path = prefix === "" ? dirent.name : `${prefix}/${dirent.name}`;
-      if (path === SKILL_FILE) continue;
-      const absolute = join(current, dirent.name);
-      if (isForbiddenPath(dirent.name)) {
-        warnings.push(`skill '${skill}': left out ${path}`);
-      } else if (dirent.isDirectory()) {
-        await walk(absolute, path);
-      } else if (dirent.isFile()) {
-        files.push({ path, bytes: toBytes(await readFile(absolute)) });
-      } else {
-        warnings.push(`skill '${skill}': left out ${path} (not a regular file)`);
-      }
-    }
-  }
-  await walk(dir, "");
-  return files.sort((a, b) => compare(a.path, b.path));
 }
 
 /**
@@ -326,7 +297,7 @@ async function readSkills(
   const present = new Set<string>();
   const root = join(workspace, "skills");
 
-  for (const dirent of await listDirectory(root)) {
+  for (const dirent of await entriesOf(root)) {
     if (isForbiddenPath(dirent.name)) continue;
     if (dirent.isSymbolicLink()) {
       warnings.push(`skills/${dirent.name} is a symbolic link; not exported`);
@@ -351,8 +322,8 @@ async function readSkills(
       warnings.push(`skill '${dirent.name}' is not on the agent's skill allowlist; not exported`);
       continue;
     }
-    const rest = await skillFiles(dir, dirent.name, warnings);
-    skills.push({ name: dirent.name, files: [{ path: SKILL_FILE, bytes: mainBytes }, ...rest] });
+    const files = await readSkillFiles(dir, dirent.name, warnings, SKILL_MESSAGES);
+    skills.push({ name: dirent.name, files });
   }
 
   for (const name of allowed ?? []) {

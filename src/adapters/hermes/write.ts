@@ -15,6 +15,7 @@ import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/sc
 import { mergeInstructions } from "../../core/text.js";
 import { isSafeName, lstatIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
+import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type HermesJob, newJobId, readJobsFile, routineToJob, writeJobsFile } from "./cron.js";
@@ -461,28 +462,15 @@ async function writeSoul(dir: string, bundle: Bundle, items: Items): Promise<voi
 // -- Skills ------------------------------------------------------------------------------------
 
 /**
- * The files of the real folder `dir`, or `undefined` when it is not one or holds a link or any
- * other special file anywhere below it: such a folder is not one OpenTeleport wrote.
+ * The files of the real folder `dir`, or `undefined` when it is not one or holds a link, any
+ * other special file or a path that never goes into an archive anywhere below it (`readSkillFiles`
+ * would leave it out): such a folder is not one OpenTeleport wrote.
  */
 async function readFolder(dir: string): Promise<FileEntry[] | undefined> {
   if (!(await lstatIfAny(dir))?.isDirectory()) return undefined;
-  const found: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<boolean> {
-    // Dirent types come from lstat, so a link is neither a file nor a directory here.
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (!(await walk(absolute, path))) return false;
-      } else if (entry.isFile()) {
-        found.push({ path, bytes: new Uint8Array(await readFile(absolute)) });
-      } else {
-        return false;
-      }
-    }
-    return true;
-  }
-  return (await walk(dir, "")) ? found : undefined;
+  const leftOut: string[] = [];
+  const files = await readSkillFiles(dir, "", leftOut);
+  return leftOut.length === 0 ? files : undefined;
 }
 
 /** 1 for `name` itself, N for `<name>-N` (N from 2), `undefined` for any other folder name. */

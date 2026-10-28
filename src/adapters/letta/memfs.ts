@@ -6,12 +6,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { splitFrontmatter } from "../../core/frontmatter.js";
-import { isForbiddenPath, isSafeArchivePath } from "../../core/paths.js";
+import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import type { Bundle, FileEntry, Note, Skill } from "../../core/schema.js";
 import { factsToProse } from "../../core/text.js";
-import { isSafeName, lstatIfAny } from "../fs.js";
-import { byCodeUnit, entriesOf, oneLine, truncate, withoutMark } from "./util.js";
+import { isSafeName } from "../fs.js";
+import { EXPORT_MESSAGES, type SkillMessages, readSkillFolders } from "../skill-files.js";
+import { entriesOf, oneLine, truncate, withoutMark } from "./util.js";
 
 /** The files of the memory root that mean something of their own; any other `*.md` is a note. */
 export const RESERVED_ROOT = ["MEMORY.md", "persona.md", "human.md", "instructions.md"] as const;
@@ -34,7 +35,6 @@ export type MemFs = {
 const INDEX_FILE = "MEMORY.md";
 const REFERENCE_DIR = "reference";
 const SKILLS_DIR = "skills";
-const SKILL_FILE = "SKILL.md";
 /** What a note read from `reference/` is called, so it cannot be mistaken for a root note. */
 export const REFERENCE_PREFIX = "reference--";
 /** The `name` in the frontmatter of `persona.md`: in MemFS that is the label of the memory. */
@@ -64,6 +64,15 @@ const isHidden = (name: string): boolean => name.startsWith(".");
 
 const linkWarning = (shown: string): string => `'${shown}' is a symbolic link; not read`;
 
+/** The words for what is not read of a skill: Letta's, not the exporting adapters'. */
+const SKILL_MESSAGES: SkillMessages = {
+  ...EXPORT_MESSAGES,
+  link: (skill, path) =>
+    path === undefined
+      ? `skill '${skill}' is a symbolic link; not read`
+      : `skill '${skill}': '${path}' is a symbolic link; not read`,
+};
+
 /** A note is kept as the file has it, apart from the byte order mark. */
 async function readNote(dir: string, fileName: string): Promise<Note> {
   const text = withoutMark(await readFile(join(dir, fileName), "utf8"));
@@ -85,56 +94,6 @@ async function readReference(dir: string, warnings: string[]): Promise<Note[]> {
     }
   }
   return notes;
-}
-
-/**
- * Files below `dir` as `/`-separated paths, `SKILL.md` first. Links are never followed; they,
- * forbidden paths and special files are left out and named.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    for (const entry of await entriesOf(current)) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isSymbolicLink()) {
-        warnings.push(`skill '${skill}': '${path}' is a symbolic link; not read`);
-      } else if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
-        warnings.push(`skill '${skill}': left out '${path}'`);
-      } else if (entry.isDirectory()) {
-        await walk(absolute, path);
-      } else {
-        files.push({ path, bytes: new Uint8Array(await readFile(absolute)) });
-      }
-    }
-  }
-  await walk(dir, "");
-  return files.sort((a, b) =>
-    a.path === SKILL_FILE ? -1 : b.path === SKILL_FILE ? 1 : byCodeUnit(a.path, b.path),
-  );
-}
-
-/** Every real folder of `skills/` that holds a real `SKILL.md`, in name order. */
-async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
-  const skills: Skill[] = [];
-  for (const entry of await entriesOf(dir)) {
-    if (isHidden(entry.name)) continue;
-    if (entry.isSymbolicLink()) {
-      warnings.push(`skill '${entry.name}' is a symbolic link; not read`);
-      continue;
-    }
-    if (!entry.isDirectory()) continue;
-    const skillFile = await lstatIfAny(join(dir, entry.name, SKILL_FILE));
-    if (skillFile?.isSymbolicLink()) {
-      warnings.push(`skill '${entry.name}': '${SKILL_FILE}' is a symbolic link; not read`);
-    } else if (skillFile?.isFile()) {
-      skills.push({
-        name: entry.name,
-        files: await skillFiles(join(dir, entry.name), entry.name, warnings),
-      });
-    }
-  }
-  return skills;
 }
 
 /** The text of a memory file without its frontmatter; a frontmatter that is no YAML stays text. */
@@ -187,7 +146,9 @@ export async function readMemFs(dir: string): Promise<MemFs> {
       if (entry.name === REFERENCE_DIR) {
         memfs.referenceNotes = await readReference(file, warnings);
       } else if (entry.name === SKILLS_DIR) {
-        memfs.skills = await readSkills(file, warnings);
+        const found = await readSkillFolders(file, { skipHidden: true, messages: SKILL_MESSAGES });
+        memfs.skills = found.skills;
+        warnings.push(...found.warnings);
       } else {
         warnings.push(
           `folder '${entry.name}/' is not read; only ${REFERENCE_DIR}/ and ${SKILLS_DIR}/ are`,

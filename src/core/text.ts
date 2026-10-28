@@ -1,3 +1,6 @@
+/** Plain code-unit order, so that a sorted list does not depend on the locale. */
+export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 const PERSONA_HEADING = "# Persona";
 const INSTRUCTIONS_HEADING = "# Instructions";
 
