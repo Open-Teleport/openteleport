@@ -93,14 +93,18 @@ async function personaInfo(memoryDir: string): Promise<{ name?: string; descript
   return readPersona(file, []);
 }
 
-/** The agent's name and description: the record's, else those in the frontmatter of persona.md. */
+/**
+ * The agent's name and description. The name is the record's, else the agent's id: the `name` in
+ * the frontmatter of persona.md is the label of the memory, not the agent's name. The
+ * description is the record's, else the one in that frontmatter.
+ */
 function identityOf(
   located: Located,
-  persona: { name?: string; description?: string },
+  persona: { description?: string },
 ): { name: string; description?: string } {
   const description = text(located.record?.description) ?? persona.description;
   return {
-    name: text(located.record?.name) ?? persona.name ?? located.id,
+    name: text(located.record?.name) ?? located.id,
     ...(description === undefined ? {} : { description }),
   };
 }

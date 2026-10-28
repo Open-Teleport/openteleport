@@ -104,17 +104,21 @@ describe("list", () => {
     expect(await listLettaAgents(ctxFor(join(root, "nothing")))).toEqual([]);
   });
 
-  it("names a Cloud agent after its persona's frontmatter, with its description as the title", async () => {
+  it("lists a Cloud agent by its id, with its persona's description as the title", async () => {
     const letta = await copyOfFixture();
+    // The `name` here is the label of the memory, not the agent's name.
     await writeFile(
       join(letta, "agents", CLOUD, "memory", "persona.md"),
-      "---\nname: Helper\ndescription: Answers briefly\n---\nShort.\n",
+      "---\nname: persona\ndescription: Answers briefly\n---\nShort.\n",
     );
-    expect((await listLettaAgents(ctxFor(letta)))[1]).toMatchObject({
+    expect((await listLettaAgents(ctxFor(letta)))[1]).toEqual({
       id: CLOUD,
-      name: "Helper",
+      name: CLOUD,
       title: "Answers briefly",
+      location: join(letta, "agents", CLOUD, "memory"),
     });
+    const { bundle } = await readLettaAgent(ctxFor(letta), CLOUD);
+    expect(bundle.manifest).toMatchObject({ name: CLOUD, title: "Answers briefly" });
   });
 
   it("lists an agent whose record cannot be read under its file name", async () => {
@@ -310,8 +314,9 @@ describe("read a local agent", () => {
       JSON.stringify({ id: LOCAL, model: "gpt-5.5" }),
     );
     const { bundle } = await readLettaAgent(ctxFor(letta), LOCAL);
-    // The name and title fall back to the persona's frontmatter.
-    expect(bundle.manifest).toMatchObject({ name: "Reviewer", title: "Reviews pull requests" });
+    // The name falls back to the id (the persona's `name` is the memory's label), the title to
+    // the persona's description.
+    expect(bundle.manifest).toMatchObject({ name: LOCAL, title: "Reviews pull requests" });
     expect(bundle.instructions).toBe("");
     expect(bundle.manifest.models).toEqual([{ model: "gpt-5.5" }]);
     expect(bundle.manifest["x-letta"]).toMatchObject({ backend: "local" });

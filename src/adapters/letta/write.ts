@@ -169,14 +169,14 @@ export function renderCommands(
       ? [
           "#!/usr/bin/env bash",
           "# Written by OpenTeleport. Run it as it is, there is nothing to edit: it creates the",
-          "# agent in Letta Code, loads the memory folder next to this script into it and adds the",
-          "# routines.",
+          "# agent in Letta Code, loads the memory folder into it and adds the routines. The",
+          "# commands name this folder by its full path, so it has to stay where it is.",
           "set -eu",
         ]
       : [
           "# Written by OpenTeleport. Run it as it is, there is nothing to edit: it creates the",
-          "# agent in Letta Code, loads the memory folder next to this script into it and adds the",
-          "# routines.",
+          "# agent in Letta Code, loads the memory folder into it and adds the routines. The",
+          "# commands name this folder by its full path, so it has to stay where it is.",
           '$ErrorActionPreference = "Stop"',
         ],
     ...(shell === "ps1" ? [POWERSHELL_LETTA] : []),

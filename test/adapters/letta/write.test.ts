@@ -116,7 +116,7 @@ describe("writeLettaAgent: the folder", () => {
     await writeLettaAgent(ctx, adaBundle(), ENABLE);
     const memory = join(ADA_DIR(), "memory");
     expect(parseFrontmatter(await text(join(memory, "persona.md")))).toEqual({
-      data: { name: "Ada", description: "Research assistant" },
+      data: { name: "persona", description: "Research assistant" },
       body: "Curious, precise and brief.\n",
     });
     expect(await text(join(memory, "instructions.md"))).toBe(
@@ -149,6 +149,22 @@ describe("writeLettaAgent: the folder", () => {
     }
   });
 
+  it("reads the prompt files by literal path, so that [ and ] in the folder are not a wildcard", async () => {
+    const out = join(root, "out[x]", "[1]");
+    const result = await writeLettaAgent({ ...ctx, targetDir: out }, adaBundle(), ENABLE);
+    const dir = result.artifactPath as string;
+    const ps1 = await text(join(dir, "letta-commands.ps1"));
+    const prompts = lines(ps1).filter((line) => line.includes("Get-Content"));
+    expect(prompts).toHaveLength(3);
+    for (const line of prompts) {
+      expect(line).toContain(`(Get-Content -Raw -Encoding UTF8 -LiteralPath "${inScript(out)}/`);
+    }
+    // The prompt is in the folder with brackets in its name.
+    expect(await text(join(dir, "routines", "launch-day.txt"))).toBe("Post the launch note.");
+    // The shell script needs no such care: `cat` takes the path as it is.
+    expect(await text(join(dir, "letta-commands.sh"))).toContain(`cat "${inScript(out)}/`);
+  });
+
   it("writes each routine's prompt byte for byte", async () => {
     const bundle = adaBundle();
     const prompt = "Line one,\r\n\r\n  indented \"two\" with $HOME and `ticks`\n\nZażółć gęślą jaźń\n";
@@ -163,7 +179,9 @@ describe("writeLettaAgent: the folder", () => {
     const out = join(root, "out", "deeper");
     const result = await writeLettaAgent({ ...ctx, targetDir: out }, adaBundle(), ENABLE);
     expect(result.artifactPath).toBe(join(out, "ada-letta-memory"));
-    expect(await text(join(out, "ada-letta-memory", "memory", "persona.md"))).toContain("name: Ada");
+    expect(await text(join(out, "ada-letta-memory", "memory", "persona.md"))).toContain(
+      "name: persona\n",
+    );
     // A relative target directory is relative to the working directory.
     const relative = await writeLettaAgent({ ...ctx, targetDir: "rel" }, adaBundle(), ENABLE);
     expect(relative.artifactPath).toBe(join(cwd, "rel", "ada-letta-memory"));
@@ -296,10 +314,10 @@ describe("writeLettaAgent: the scripts", () => {
       `letta memory restore --agent "$AGENT_ID" --from "${memory}" --force`,
     );
     expect(lines(script)).toContain(
-      `letta cron add --name "Morning digest" --prompt (Get-Content -Raw -Encoding UTF8 "${routines}/morning-digest.txt") --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning digest" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/morning-digest.txt") --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
     );
     expect(lines(script)).toContain(
-      `# letta cron add --name "Half hourly check" --prompt (Get-Content -Raw -Encoding UTF8 "${routines}/half-hourly-check.txt") --cron "*/30 * * * *" --agent "$AGENT_ID"`,
+      `# letta cron add --name "Half hourly check" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/half-hourly-check.txt") --cron "*/30 * * * *" --agent "$AGENT_ID"`,
     );
     // Each command is checked, and a commented one is commented together with its check.
     expect(script.match(/\$LASTEXITCODE -ne 0/g)).toHaveLength(5);
@@ -712,7 +730,7 @@ describe("a move from Letta to Letta", () => {
       "skills/triage/SKILL.md",
     ]);
     const memfs = await readMemFs(join(dir, "memory"));
-    expect(memfs.persona?.name).toBe("Reviewer");
+    expect(memfs.persona).toMatchObject({ name: "persona", description: "Reviews pull requests" });
     expect(memfs.instructions).toBe("You review PRs.\n");
     expect(memfs.referenceNotes.map((note) => note.name).sort()).toEqual(["human", "notes", "style"]);
 

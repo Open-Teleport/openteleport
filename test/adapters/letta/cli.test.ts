@@ -58,7 +58,9 @@ describe("import --to letta", () => {
     expect(JSON.parse(await readFile(join(folder(), ".openteleport.json"), "utf8"))).toMatchObject({
       id: ADA_ID,
     });
-    expect(await readFile(join(folder(), "memory", "persona.md"), "utf8")).toContain("name: Ada");
+    expect(await readFile(join(folder(), "memory", "persona.md"), "utf8")).toContain(
+      "name: persona\n",
+    );
   });
 
   it("leaves the routines as comments unless --enable-routines is given", async () => {

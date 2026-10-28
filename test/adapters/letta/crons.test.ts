@@ -157,6 +157,17 @@ describe("taskToRoutine", () => {
     expect(taskToRoutine(task({ cron: null, recurring: false, scheduled_for: "tomorrow" }))).toBeNull();
   });
 
+  it("is null for a task whose cron expression is not valid", () => {
+    for (const cron of ["every day", "61 * * * *", "* * * *", "*/0 * * * *"]) {
+      expect(taskToRoutine(task({ cron }))).toBeNull();
+    }
+    // Six fields, with seconds, are a valid shape.
+    expect(taskToRoutine(task({ cron: "30 0 9 * * 1-5" }))?.routine.schedule).toEqual({
+      kind: "cron",
+      expression: "30 0 9 * * 1-5",
+    });
+  });
+
   it("takes UTC for a recurring task without a valid time zone", () => {
     expect(taskToRoutine(task({ timezone: "Mars/Olympus" }))?.routine.timezone).toBe("UTC");
     expect(taskToRoutine(task({ timezone: undefined }))?.routine.timezone).toBe("UTC");
@@ -176,6 +187,20 @@ describe("taskWarnings", () => {
       taskWarnings(task({ cron: null, recurring: false, scheduled_for: "tomorrow" }))[0],
     ).toContain("not an ISO 8601 instant");
     expect(taskWarnings(task({ name: "", id: "cron-7" }))[0]).toMatch(/^routine 'cron-7' /);
+  });
+
+  it("names the cron expression when that is what is wrong, and the time when that is", () => {
+    expect(taskWarnings(task({ cron: "61 * * * *" }))).toEqual([
+      "routine 'Morning review' was not exported: its cron expression is not valid " +
+        '(Invalid minute field "61")',
+    ]);
+    expect(taskWarnings(task({ cron: "every day" }))[0]).toContain(
+      "its cron expression is not valid (Expected 5 or 6 fields, found 2)",
+    );
+    expect(taskWarnings(task({ cron: "61 * * * *" }))[0]).not.toContain("ISO 8601");
+    expect(
+      taskWarnings(task({ cron: null, recurring: false, scheduled_for: "tomorrow" }))[0],
+    ).not.toContain("cron expression is not valid");
   });
 
   it("says when UTC was assumed, and says nothing about a task that came across as it was", () => {
@@ -229,7 +254,7 @@ describe("cronAddCommand", () => {
 
   it("is one line for PowerShell that reads the prompt from its file", () => {
     expect(cronAddCommand(cron, file, "ps1")).toBe(
-      `letta cron add --name "Morning review" --prompt (Get-Content -Raw -Encoding UTF8 "${file}") --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning review" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${file}") --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
     );
   });
 

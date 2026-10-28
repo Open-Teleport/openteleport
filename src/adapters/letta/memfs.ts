@@ -36,7 +36,8 @@ const SKILLS_DIR = "skills";
 const SKILL_FILE = "SKILL.md";
 /** What a note read from `reference/` is called, so it cannot be mistaken for a root note. */
 export const REFERENCE_PREFIX = "reference--";
-const PERSONA_DESCRIPTION = "Who the agent is and how it behaves";
+/** The `name` in the frontmatter of `persona.md`: in MemFS that is the label of the memory. */
+const PERSONA_LABEL = "persona";
 const MAX_DESCRIPTION_CHARS = 120;
 
 // The opening fence must be the first line; the closing one is the next line that is only `---`.
@@ -262,7 +263,8 @@ function renderIndex(title: string, entries: readonly (readonly [string, string]
  *
  * - `MEMORY.md`, the index: one line per file or folder below, each with a description;
  * - `persona.md`, with `name` and `description` frontmatter (always, because it carries the
- *   agent's name);
+ *   agent's title). The `name` is the label of the memory, `persona`, not the agent's name; the
+ *   `description` is the title, else "Persona of <agent name>";
  * - `instructions.md` and `human.md` (the facts as bullets), each only when there is something
  *   to put in it;
  * - `reference/<note>.md` for each note, with `reference/MEMORY.md` as its index;
@@ -278,18 +280,22 @@ export function renderMemFs(bundle: Bundle, skipped: Item[] = []): FileEntry[] {
   const put = (path: string, text: string): void => {
     files.push({ path, bytes: encoder.encode(text) });
   };
-  const rootIndex: [string, string][] = [["persona.md", PERSONA_DESCRIPTION]];
+  const rootIndex: [string, string][] = [
+    ["persona.md", "Who the agent is and how it behaves"],
+  ];
 
   const { manifest } = bundle;
-  const described = oneLine(manifest.title ?? manifest.description ?? "");
+  const title = oneLine(manifest.title ?? "");
   const persona = bundle.persona?.trim() ?? "";
   put(
     "persona.md",
     renderFrontmatter(
       {
-        name: oneLine(manifest.name),
-        description:
-          described === "" ? PERSONA_DESCRIPTION : truncate(described, MAX_DESCRIPTION_CHARS),
+        name: PERSONA_LABEL,
+        description: truncate(
+          title === "" ? `Persona of ${oneLine(manifest.name)}` : title,
+          MAX_DESCRIPTION_CHARS,
+        ),
       },
       persona === "" ? "" : `${persona}\n`,
     ),

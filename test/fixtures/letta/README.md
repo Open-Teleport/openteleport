@@ -12,8 +12,9 @@ nothing here was produced by a real Letta Code. Source numbers refer to
 - `lc-local-backend/memfs/agent-local-1111/memory/`: that agent's MemFS (version 2: a root
   `MEMORY.md` index, core memory files in the root, `reference/` with an index of its own,
   `skills/<name>/SKILL.md`) [L10][L13][L18]. `persona.md` starts with a UTF-8 byte order mark
-  and has `name` and `description` frontmatter; `human.md` holds two bullets and a paragraph of
-  prose; `notes.md` is a loose file in the root.
+  and has `name` and `description` frontmatter, where `name` is the memory's label (`persona`) and
+  not the agent's name [L10]; `human.md` holds two bullets and a paragraph of prose; `notes.md`
+  is a loose file in the root.
 - `agents/agent-cloud-2222/memory/`: the MemFS of a Letta Cloud agent, kept under
   `~/.letta/agents/<agentId>/memory/` [L18]. Cloud has no local record, so there is no name or
   system prompt here; `persona.md` has no frontmatter and `human.md` is empty.

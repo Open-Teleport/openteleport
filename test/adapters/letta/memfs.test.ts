@@ -104,7 +104,8 @@ describe("renderFrontmatter", () => {
 describe("readMemFs", () => {
   it("reads the local fixture: persona without the byte order mark, notes, skills", async () => {
     const memfs = await readMemFs(LOCAL_MEMORY);
-    expect(memfs.persona?.name).toBe("Reviewer");
+    // `name` in the frontmatter is the label of the memory, not the agent's name.
+    expect(memfs.persona?.name).toBe("persona");
     expect(memfs.persona?.description).toBe("Reviews pull requests");
     expect(memfs.persona?.body.startsWith(BOM)).toBe(false);
     expect(memfs.persona?.body.trim()).toBe(
@@ -267,7 +268,7 @@ describe("renderMemFs", () => {
       "skills/web-brief/references/checklist.md",
     ]);
     expect(textOf(entries, "persona.md")).toBe(
-      "---\nname: Ada\ndescription: Research assistant\n---\nCurious, precise and brief.\n",
+      "---\nname: persona\ndescription: Research assistant\n---\nCurious, precise and brief.\n",
     );
     expect(textOf(entries, "instructions.md")).toBe("Read the papers first.\nThen summarise them.\n");
     expect(textOf(entries, "human.md")).toBe(
@@ -290,27 +291,34 @@ describe("renderMemFs", () => {
     const entries = renderMemFs(bundle);
     expect(paths(entries)).toEqual(["MEMORY.md", "persona.md"]);
     expect(textOf(entries, "persona.md")).toBe(
-      "---\nname: Ada\ndescription: Research assistant\n---\n",
+      "---\nname: persona\ndescription: Research assistant\n---\n",
     );
     expect(textOf(entries, "MEMORY.md")).not.toContain("instructions.md");
     expect(textOf(entries, "MEMORY.md")).not.toContain("reference/");
   });
 
-  it("gives the persona a description even when the agent has no title", () => {
-    const bundle = adaBundle();
-    delete bundle.manifest.title;
-    expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data).toEqual({
-      name: "Ada",
-      description: "Who the agent is and how it behaves",
+  it("labels the persona memory 'persona', never with the agent's name", () => {
+    expect(parseFrontmatter(textOf(renderMemFs(adaBundle()), "persona.md")).data).toEqual({
+      name: "persona",
+      description: "Research assistant",
     });
   });
 
-  it("uses the long description when there is no title", () => {
+  it("describes the persona as that of the agent when the agent has no title", () => {
+    const bundle = adaBundle();
+    delete bundle.manifest.title;
+    expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data).toEqual({
+      name: "persona",
+      description: "Persona of Ada",
+    });
+  });
+
+  it("does not take the long description of the agent for the persona's", () => {
     const bundle = adaBundle();
     delete bundle.manifest.title;
     bundle.manifest.description = "Reads papers and web pages.";
     expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data.description).toBe(
-      "Reads papers and web pages.",
+      "Persona of Ada",
     );
   });
 
@@ -380,10 +388,10 @@ describe("renderMemFs", () => {
 
   it("keeps the agent's name on one line of the frontmatter", () => {
     const bundle = adaBundle();
+    delete bundle.manifest.title;
     bundle.manifest.name = "Ada\nname: Eve";
-    expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data.name).toBe(
-      "Ada name: Eve",
-    );
+    const { data } = parseFrontmatter(textOf(renderMemFs(bundle), "persona.md"));
+    expect(data).toEqual({ name: "persona", description: "Persona of Ada name: Eve" });
   });
 
   it("reads back as what was put in: persona, instructions, facts, notes and skills", async () => {
@@ -394,7 +402,7 @@ describe("renderMemFs", () => {
     const memfs = await readMemFs(dir);
     expect(memfs.warnings).toEqual([]);
     expect(memfs.persona).toEqual({
-      name: "Ada",
+      name: "persona",
       description: "Research assistant",
       body: "Curious, precise and brief.\n",
     });

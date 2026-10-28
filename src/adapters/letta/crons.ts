@@ -1,7 +1,7 @@
 // Letta Code's scheduled tasks: `~/.letta/crons.json` on the way in, `letta cron add` lines on the
 // way out [L9][L12][L17].
 import { readFile } from "node:fs/promises";
-import { everyToCron } from "../../core/schedule.js";
+import { everyToCron, parseCron } from "../../core/schedule.js";
 import { type Routine, RoutineSchema, ScheduleSchema } from "../../core/schema.js";
 import { isRecord, oneLine, text, withoutMark } from "./util.js";
 
@@ -104,9 +104,17 @@ function convert(task: LettaCronTask): Converted | { skip: string } {
   const cron = text(task.cron);
   const when = text(task.scheduled_for);
   let schedule: unknown;
-  if (cron !== undefined && task.recurring !== false) schedule = { kind: "cron", expression: cron };
-  else if (when !== undefined) schedule = { kind: "at", at: when };
-  else return { skip: "it has neither a cron expression nor a scheduled_for time" };
+  if (cron !== undefined && task.recurring !== false) {
+    const checkedCron = parseCron(cron);
+    if (!checkedCron.ok) {
+      return { skip: `its cron expression is not valid (${checkedCron.reason})` };
+    }
+    schedule = { kind: "cron", expression: cron };
+  } else if (when !== undefined) {
+    schedule = { kind: "at", at: when };
+  } else {
+    return { skip: "it has neither a cron expression nor a scheduled_for time" };
+  }
   const parsed = ScheduleSchema.safeParse(schedule);
   if (!parsed.success) return { skip: "its scheduled_for time is not an ISO 8601 instant" };
 
@@ -191,7 +199,8 @@ export function shellQuote(shell: Shell, value: string): string {
 /**
  * The `letta cron add` command for `routine`, on one line, to run against the agent in
  * `$AGENT_ID`. The prompt is read from `promptFile` when the command runs (`$(cat ...)` in `sh`,
- * `Get-Content -Raw` in PowerShell), so it may be as long as it is and span lines. An `every`
+ * `Get-Content -Raw -LiteralPath` in PowerShell, which does not read `[` and `]` in the path as a
+ * wildcard), so it may be as long as it is and span lines. An `every`
  * schedule becomes a cron expression, an `at` one `--at` with the instant. `description` is the
  * task's own `description`, when it had one. Every value is quoted for the shell.
  */
@@ -205,7 +214,7 @@ export function cronAddCommand(
   const prompt =
     shell === "sh"
       ? `"$(cat ${quote(promptFile)})"`
-      : `(Get-Content -Raw -Encoding UTF8 ${quote(promptFile)})`;
+      : `(Get-Content -Raw -Encoding UTF8 -LiteralPath ${quote(promptFile)})`;
   const { schedule } = routine;
   const when =
     schedule.kind === "cron"
