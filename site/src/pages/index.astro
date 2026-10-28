@@ -1,15 +1,14 @@
 ---
-const title = "OpenTeleport";
+import Base from "../layouts/Base.astro";
+import Scene from "../components/Scene.astro";
+import Format from "../components/Format.astro";
+import Safety from "../components/Safety.astro";
+import Install from "../components/Install.astro";
 ---
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-  </head>
-  <body>
-    <h1>{title}</h1>
-    <p>Move your AI agent between apps in one command.</p>
-  </body>
-</html>
+
+<Base>
+  <Scene />
+  <Format />
+  <Safety />
+  <Install />
+</Base>

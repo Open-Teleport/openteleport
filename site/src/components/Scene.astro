@@ -1,0 +1,453 @@
+---
+// The hero and the two sections after it share one pinned ASCII terminal. Scrolling past a section
+// disintegrates the terminal and resolves it into that section's screen: move, export and import, adapters.
+---
+
+<div class="scene" id="scene">
+  <div class="stage">
+    <canvas
+      id="term"
+      width="800"
+      height="360"
+      role="img"
+      aria-label="A terminal. First it moves the agent reviewer from Claude Code to OpenClaw and prints the report. Then it exports the same agent to a .jetpack file and imports it into a folder. Last it lists the adapters: folder, openclaw and claude-code."
+    ></canvas>
+  </div>
+
+  <section class="sec" aria-labelledby="h-move">
+    <p class="label">01 / move</p>
+    <h1 class="display" id="h-move">Move your AI agent between apps in one command.</h1>
+    <div class="prose">
+      <p>Its instructions, persona, skills, routines and remembered facts, read from one app and written into another. <strong>Every move ends with a report:</strong> what moved, what was approximated, what was skipped.</p>
+    </div>
+    <ul class="rows">
+      <li><span>move</span><span>one app to another, in one step</span></li>
+      <li><span>export</span><span>any app to a .jetpack file</span></li>
+      <li><span>import</span><span>a .jetpack file into any app</span></li>
+    </ul>
+    <p class="status">claude-code → openclaw · reviewer · 0 secrets found · source not modified</p>
+  </section>
+
+  <section class="sec" aria-labelledby="h-how">
+    <p class="label">02 / how it works</p>
+    <h2 class="display" id="h-how">Export. One file. Import.</h2>
+    <div class="prose">
+      <p><code>move</code> does both steps at once. Apart, they let an agent be sent, archived or checked before it lands.</p>
+    </div>
+    <ol class="steps">
+      <li><b>Export from any app</b><span>The agent is read where the app keeps it. The source is only read, never changed.</span></li>
+      <li><b>One .jetpack file</b><span>A zip that unzips to a working agent folder, on the file names tools already share.</span></li>
+      <li><b>Import into any app</b><span>Written where the target keeps its agents, with the report of what moved.</span></li>
+    </ol>
+    <p class="status">reviewer.jetpack · 18 KB · move-report.md next to it</p>
+  </section>
+
+  <section class="sec" aria-labelledby="h-apps">
+    <p class="label">03 / apps</p>
+    <h2 class="display" id="h-apps">Every app, the same door.</h2>
+    <div class="prose">
+      <p>Every adapter reads and writes. <strong>None of them is the home of the format.</strong> An app can ship its own adapter without a change to the package.</p>
+    </div>
+    <ul class="rows apps">
+      <li><span>folder</span><span>any directory with an AGENTS.md: Codex, Cursor, Gemini CLI, Cline and more</span></li>
+      <li><span>OpenClaw</span><span>the state directory and the openclaw CLI, routines as cron jobs</span></li>
+      <li><span>Claude Code</span><span>subagents, the project's skills and its memory</span></li>
+      <li class="soon"><span>coming next</span><span>OpenBot, Hermes, Codex, Grok Bot, Letta</span></li>
+    </ul>
+    <p class="status">3 adapters · read and write · OPENTELEPORT_EXTRA_ADAPTER for your own</p>
+  </section>
+</div>
+
+<div class="hud" aria-hidden="true">
+  <span>openteleport · <b id="hud-n">01</b> / 03</span>
+  <span>transfer <b id="hud-p">0 %</b></span>
+</div>
+
+<style>
+  .scene {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 56px;
+  }
+  .stage {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    align-self: start;
+    position: sticky;
+    top: 56px;
+    height: calc(100svh - 56px);
+    display: grid;
+    place-items: center;
+    min-width: 0;
+  }
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: 10% 0;
+    background: radial-gradient(ellipse at 50% 50%, var(--glow), transparent 62%);
+    pointer-events: none;
+  }
+  canvas {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: 560px;
+    height: auto;
+    font-family: var(--font-code);
+  }
+  .sec {
+    grid-column: 2;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 20px;
+    padding-block: 72px 104px;
+    min-width: 0;
+  }
+  .steps {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+    counter-reset: step;
+    border-top: 1px solid var(--line);
+  }
+  .steps li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 4px 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 15px;
+  }
+  .steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    font-family: var(--font-code);
+    font-size: 12px;
+    color: var(--accent);
+    padding-top: 4px;
+  }
+  .steps b {
+    font-weight: 500;
+  }
+  .steps span {
+    grid-column: 2;
+    color: var(--fg-2);
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .apps li.soon span:first-child {
+    color: var(--fg-2);
+  }
+  .hud {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    pointer-events: none;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    font-family: var(--font-code);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--fg-3);
+    background: linear-gradient(0deg, color-mix(in srgb, var(--bg) 96%, transparent) 40%, transparent);
+  }
+  .hud b {
+    font-weight: 500;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 860px) {
+    .scene {
+      display: block;
+    }
+    .stage {
+      top: 50px;
+      height: 44svh;
+      background: var(--bg);
+      z-index: 1;
+      padding-block: 6px 10px;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+    }
+    .sec {
+      min-height: 72svh;
+      justify-content: flex-start;
+      padding-block: 24px 64px;
+    }
+    .hud span:last-child {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  type Screen = string[];
+  type Kinds = number[];
+
+  const cv = document.getElementById("term") as HTMLCanvasElement;
+  const ctx = cv.getContext("2d");
+  const scene = document.getElementById("scene") as HTMLElement;
+  const hudN = document.getElementById("hud-n") as HTMLElement;
+  const hudP = document.getElementById("hud-p") as HTMLElement;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const COLS = 52;
+  const ROWS = 19;
+  const INNER = COLS - 4;
+
+  function frame(title: string, lines: string[]): Screen {
+    const out: string[] = [];
+    const head = `┌─ ${title} `;
+    out.push(head + "─".repeat(Math.max(0, COLS - head.length - 1)) + "┐");
+    for (let i = 0; i < ROWS - 2; i++) {
+      const l = (lines[i] ?? "").slice(0, INNER);
+      out.push("│ " + l + " ".repeat(INNER - l.length) + " │");
+    }
+    out.push("└" + "─".repeat(COLS - 2) + "┘");
+    return out;
+  }
+
+  const S1 = frame("move", [
+    "$ npx openteleport move --from claude-code \\",
+    "    --to openclaw --agent reviewer",
+    "",
+    "  read   claude-code  .claude/agents/reviewer.md",
+    "  scan   secrets      0 findings",
+    "  write  openclaw     reviewer",
+    "",
+    "  Moved         AGENTS.md, SOUL.md, 3 skills,",
+    "                MEMORY.md (12 facts), 2 notes",
+    "  Approximated  nothing",
+    "  Skipped       routines (none in Claude Code)",
+    "",
+    "  report  ~/.openteleport/reports/reviewer.md",
+    "  source  not modified",
+  ]);
+  const S2 = frame("export · import", [
+    "$ npx openteleport export --from claude-code \\",
+    "    --agent reviewer --out reviewer.jetpack",
+    "",
+    "  reviewer.jetpack  18 KB    move-report.md",
+    "",
+    "$ unzip -l reviewer.jetpack",
+    "  jetpack.json  AGENTS.md  SOUL.md  MEMORY.md",
+    "  memory/       skills/    routines/",
+    "",
+    "$ npx openteleport import --to folder \\",
+    "    --target-dir agents/reviewer \\",
+    "    reviewer.jetpack",
+    "",
+    "  written  agents/reviewer",
+    "  a working agent folder for any tool",
+  ]);
+  const S3 = frame("adapters", [
+    "$ npx openteleport adapters",
+    "",
+    "  folder       read  write  any AGENTS.md folder",
+    "  openclaw     read  write  installed",
+    "  claude-code  read  write  installed",
+    "",
+    "  coming next  OpenBot, Hermes, Codex,",
+    "               Grok Bot, Letta",
+    "",
+    "  your own     OPENTELEPORT_EXTRA_ADAPTER=app.js",
+    "",
+    "$ _",
+  ]);
+  const BLANK: Screen = Array.from({ length: ROWS }, () => " ".repeat(COLS));
+  // The first screen with only its command rows, for the typing intro.
+  const S1_CMD: Screen = S1.map((l, r) => (r <= 2 || r === ROWS - 1 ? l : " ".repeat(COLS)));
+  const screens = [S1, S2, S3];
+
+  // 1 = command, 2 = output, 3 = frame
+  function kind(line: string, row: number): number {
+    if (row === 0 || row === ROWS - 1) return 3;
+    const t = line.trim();
+    return t.startsWith("$") || t.startsWith("--") ? 1 : 2;
+  }
+  const kinds: Kinds[] = screens.map((s) => s.map(kind));
+  const K1 = kinds[0];
+
+  const N = COLS * ROWS;
+  const rnd = new Float32Array(N);
+  const jx = new Float32Array(N);
+  const jy = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    rnd[i] = Math.random();
+    jx[i] = Math.random() * 2 - 1;
+    jy[i] = Math.random() * 2 - 1;
+  }
+  const GLYPHS = "01·:/\\|-+*#=.";
+
+  let W = 0;
+  let H = 0;
+  let fs = 14;
+  let cw = 0;
+  let ch = 0;
+  const col: Record<number, string> = {};
+
+  function colors() {
+    const cs = getComputedStyle(document.documentElement);
+    col[1] = cs.getPropertyValue("--term-cmd").trim();
+    col[2] = cs.getPropertyValue("--term-out").trim();
+    col[3] = cs.getPropertyValue("--term-frame").trim();
+  }
+
+  function resize() {
+    if (!ctx) return;
+    const box = cv.parentElement!.getBoundingClientRect();
+    const maxW = Math.min(box.width, 560);
+    const maxH = Math.max(120, box.height - 24);
+    fs = Math.max(7, Math.min(maxW / (COLS * 0.6), maxH / (ROWS * 1.3)));
+    cw = fs * 0.6;
+    ch = fs * 1.3;
+    W = Math.round(COLS * cw + fs);
+    H = Math.round(ROWS * ch + fs);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    cv.style.width = W + "px";
+    cv.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = `${fs}px ${getComputedStyle(cv).fontFamily || "monospace"}`;
+    ctx.textBaseline = "top";
+    colors();
+  }
+
+  // Draws screen A turning into screen B. p = 0 shows A, p = 1 shows B; in between each cell flips at
+  // its own threshold and scatters a little around it. `limit` caps the characters drawn on the command
+  // rows of B (rows 1 and 2), which is how the intro types the command.
+  function draw(A: Screen, B: Screen, KA: Kinds | null, KB: Kinds, p: number, limit = Infinity) {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, W, H);
+    const band = reduce ? 0.001 : 0.14;
+    const x0 = fs / 2;
+    const y0 = fs / 2;
+    let count = 0;
+    for (let r = 0; r < ROWS; r++) {
+      const la = A[r];
+      const lb = B[r];
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+        const a = la.charAt(c);
+        const b = lb.charAt(c);
+        if (a === " " && b === " ") continue;
+        let chr: string;
+        let k = 0;
+        let useB: boolean;
+        if (p <= 0) {
+          chr = a;
+          useB = false;
+        } else if (p >= 1) {
+          chr = b;
+          useB = true;
+        } else {
+          const d = p - rnd[i];
+          if (d < -band) {
+            chr = a;
+            useB = false;
+          } else if (d > band) {
+            chr = b;
+            useB = true;
+          } else {
+            k = 1 - Math.abs(d) / band;
+            useB = d > 0;
+            chr = useB ? b : a;
+            if (k > 0.45 && Math.random() < 0.35) chr = GLYPHS.charAt((Math.random() * GLYPHS.length) | 0);
+          }
+        }
+        if (chr === " ") continue;
+        if (useB && (r === 1 || r === 2) && c >= 2 && c < COLS - 2) {
+          count++;
+          if (count > limit) continue;
+        }
+        const kd = useB ? KB[r] : KA ? KA[r] : 2;
+        ctx.globalAlpha = 1 - 0.65 * k;
+        ctx.fillStyle = col[kd] ?? col[2];
+        ctx.fillText(chr, x0 + c * cw + jx[i] * k * cw * 1.6, y0 + r * ch + jy[i] * k * ch * 0.9);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function smooth(t: number) {
+    t = Math.min(1, Math.max(0, t));
+    return t * t * (3 - 2 * t);
+  }
+
+  let raf = 0;
+  let booted = false;
+
+  function state() {
+    const rect = scene.getBoundingClientRect();
+    const total = Math.max(1, scene.offsetHeight - window.innerHeight);
+    const s = Math.min(1, Math.max(0, -rect.top / total)) * 2;
+    let idx = Math.min(1, Math.floor(s));
+    let p = smooth((s - idx - 0.28) / 0.44);
+    if (s >= 2) {
+      idx = 1;
+      p = 1;
+    }
+    hudN.textContent = "0" + (Math.round(s) + 1);
+    hudP.textContent = Math.round((s / 2) * 100) + " %";
+    return { from: idx, to: idx + 1, p };
+  }
+
+  function render() {
+    raf = 0;
+    const st = state();
+    if (st.p <= 0) draw(screens[st.from], screens[st.from], kinds[st.from], kinds[st.from], 1);
+    else draw(screens[st.from], screens[st.to], kinds[st.from], kinds[st.to], st.p);
+  }
+  function schedule() {
+    if (!raf) raf = requestAnimationFrame(render);
+  }
+
+  function boot() {
+    resize();
+    if (reduce) {
+      booted = true;
+      render();
+      return;
+    }
+    const chars = [1, 2].reduce((n, r) => n + S1[r].slice(2, COLS - 2).replace(/ /g, "").length, 0);
+    const typeMs = chars * 22;
+    const resolveMs = 900;
+    const t0 = performance.now();
+    const tick = () => {
+      const t = performance.now() - t0;
+      if (t < typeMs) {
+        draw(BLANK, S1_CMD, null, K1, 1, Math.floor((t / typeMs) * chars));
+        requestAnimationFrame(tick);
+        return;
+      }
+      const p = smooth((t - typeMs) / resolveMs);
+      draw(S1_CMD, S1, K1, K1, p);
+      if (p < 1) requestAnimationFrame(tick);
+      else {
+        booted = true;
+        render();
+      }
+    };
+    tick();
+  }
+
+  window.addEventListener("scroll", () => { if (booted) schedule(); }, { passive: true });
+  window.addEventListener("resize", () => { resize(); if (booted) schedule(); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { colors(); schedule(); });
+  new MutationObserver(() => { colors(); schedule(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  if (document.fonts?.load) document.fonts.load(`14px ${getComputedStyle(cv).fontFamily}`).then(boot, boot);
+  else boot();
+</script>

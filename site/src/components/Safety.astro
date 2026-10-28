@@ -1,0 +1,63 @@
+---
+const facts = [
+  {
+    title: "Secrets block exports",
+    text: "Before anything is written, the bundle is scanned for keys, tokens and private keys of known shapes. A finding stops the command and names the file and line, never the secret.",
+  },
+  {
+    title: "Routines land disabled",
+    text: "The same task never runs in two apps without you knowing. --enable-routines keeps them as they were.",
+  },
+  {
+    title: "The source is never modified",
+    text: "move reads a snapshot and writes a copy. Nothing is deleted from the app it came from.",
+  },
+  {
+    title: "Nothing is overwritten by surprise",
+    text: "Same agent, same id: updated in place. Another agent of the same name is written next to it, and --replace asks first.",
+  },
+];
+---
+
+<section class="block" aria-labelledby="h-safety">
+  <p class="label">safety</p>
+  <h2 class="display" id="h-safety">Boring on purpose.</h2>
+  <dl class="facts">
+    {facts.map((f) => (
+      <div>
+        <dt>{f.title}</dt>
+        <dd>{f.text}</dd>
+      </div>
+    ))}
+  </dl>
+</section>
+
+<style>
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 48px;
+    margin: 0;
+    border-top: 1px solid var(--line);
+  }
+  .facts > div {
+    padding: 20px 0 22px;
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  dt {
+    font-weight: 500;
+    margin: 0 0 6px;
+  }
+  dd {
+    margin: 0;
+    color: var(--fg-2);
+    font-size: 15px;
+    max-width: 48ch;
+  }
+  @media (max-width: 860px) {
+    .facts {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

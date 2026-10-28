@@ -78,3 +78,9 @@ Dwa odniesienia wskazał właściciel (szablony Modulify: [VOIDEN](https://voide
 | Tryb jasny i ciemny | tylko ciemny (zamierzony) | oba | oba |
 
 Czcionki: A: Cormorant Garamond + IBM Plex Mono; B: Pixelify Sans + Geist + JetBrains Mono (wszystkie OFL, Google Fonts); C: system font + system mono (zero pobierania).
+
+## Decyzja (2026-10-28): A + B
+
+Właściciel: "A i B mi się podobają". Zbudowana strona łączy je: szkielet i przypięty terminal ASCII z B (to on jest tym, czego nie było), w trybie ciemnym skóra z A (pustka, nieruchome gwiazdy, cienki serif w wersalikach, bursztynowy akcent, poświata za terminalem), w trybie jasnym papier z B (monochromatycznie, akcent = tusz). Z A przejęty też licznik "transfer", połączony z "01 / 03" z B w jeden pasek na dole.
+
+Czcionki na stronie: Cormorant Garamond (300, 400) dla nagłówków, JetBrains Mono (400, 500) dla etykiet i terminala, system font dla akapitów. Obie pobierane z Fontsource w czasie builda przez Fonts API Astro i serwowane lokalnie z preloadem; strona nie robi żadnych zewnętrznych requestów. Hero: komenda pisze się sama (ok. 2 s), raport wyłania się z szumu; przy `prefers-reduced-motion` wszystko stoi od razu, a ekrany zmieniają się bez rozsypywania.
