@@ -59,7 +59,8 @@ export async function detectGrokBot(
 ): Promise<{ found: boolean; location?: string; hint?: string }> {
   const zip = await findZip(ctx);
   if ("file" in zip) return { found: true, location: zip.file };
-  return { found: false, ...(zip.location === undefined ? {} : { location: zip.location }), hint: HINT };
+  const { location } = zip;
+  return { found: false, ...(location === undefined ? {} : { location }), hint: HINT };
 }
 
 /** The Bot of `archive` that `wanted` names: its key, else its name in any case. */
@@ -70,15 +71,15 @@ function pick(agents: readonly OpenBotZipAgent[], wanted: string, file: string):
   const byName = agents.filter(({ bundle }) => bundle.manifest.name.toLowerCase() === lower);
   const [only, ...more] = byName;
   if (only !== undefined && more.length === 0) return only;
-  const keys = agents.map(({ key }) => key).join(", ");
+  const keys = (list: readonly OpenBotZipAgent[]): string => list.map(({ key }) => key).join(", ");
   throw new Error(
     only === undefined
-      ? `${file} has no Bot "${wanted}". Available: ${keys}`
-      : `Several Bots in ${file} are called "${wanted}": ${byName.map(({ key }) => key).join(", ")}. Pass the key.`,
+      ? `${file} has no Bot "${wanted}". Available: ${keys(agents)}`
+      : `Several Bots in ${file} are called "${wanted}": ${keys(byName)}. Pass the key.`,
   );
 }
 
-/** The Bots in the zip `--source-dir` names: the key is the id, the zip and the key the location. */
+/** The Bots in the zip `--source-dir` names: the key is the id, `<zip>#<key>` the location. */
 export async function listGrokBots(ctx: Ctx): Promise<AgentRef[]> {
   const file = await requireZip(ctx);
   const { agents } = await readOpenBotZip(file);
