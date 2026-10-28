@@ -5,9 +5,9 @@ import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
-import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle } from "../../core/schema.js";
-import { lstatIfAny } from "../fs.js";
+import { byCodeUnit, slugify } from "../../core/text.js";
+import { freeSibling, isFree, lstatIfAny, numberedSiblings } from "../fs.js";
 import type {
   Adapter,
   AdapterCapabilities,
@@ -21,8 +21,6 @@ const INSTRUCTIONS_FILE = "AGENTS.md";
 const MANIFEST_FILE = "jetpack.json";
 /** Files whose absence from a source folder is worth a warning. */
 const OPTIONAL_FILES = ["SOUL.md", "MEMORY.md"] as const;
-
-const MAX_SLUG_CHARS = 64;
 
 const DETECT_HINT = "Pass --source-dir <folder> with an AGENTS.md inside";
 const ROUTINES_WARNING = "routines are stored in the folder; no app runs them from here yet";
@@ -78,8 +76,6 @@ const baseDir = (ctx: Ctx): string => resolve(ctx.cwd, ctx.sourceDir ?? ctx.targ
 /** Folders that hold other things than agents are not searched. */
 const isSearched = (name: string): boolean => name !== "node_modules" && !name.startsWith(".");
 
-/** Plain code-unit order, so that the result does not depend on the locale. */
-const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The immediate subfolders of `dir` that hold an `AGENTS.md`, sorted by name. */
 async function agentFolders(dir: string): Promise<string[]> {
@@ -87,7 +83,7 @@ async function agentFolders(dir: string): Promise<string[]> {
   const holding = await Promise.all(
     names.map(async (name) => ((await isFile(join(dir, name, INSTRUCTIONS_FILE))) ? name : "")),
   );
-  return holding.filter((name) => name !== "").sort(byName);
+  return holding.filter((name) => name !== "").sort(byCodeUnit);
 }
 
 /** `name` from the folder's `jetpack.json`, else the folder's own name. */
@@ -133,20 +129,10 @@ function folderOf(dir: string, agent: string): string {
 // -- Writing --------------------------------------------------------------------------------
 
 /**
- * Lowercases a name, turns every run of characters outside `a-z0-9` into one `-`, trims the
- * dashes and cuts the result to 64 characters. Nothing usable gives `agent`; a Windows device
- * name such as `con` gets `-r` because a folder of that name cannot be created there.
+ * The folder name for an agent's name (see `slugify`). Nothing usable gives `agent`; a Windows
+ * device name such as `con` gets `-r` because a folder of that name cannot be created there.
  */
-function slug(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (base === "") return "agent";
-  return isReservedDeviceName(base) ? `${base}-r` : base;
-}
+const slug = (name: string): string => slugify(name, { fallback: "agent", deviceSuffix: "-r" });
 
 /** A copy of the Bundle as this adapter stores it; the argument is left alone. */
 function prepareBundle(bundle: Bundle, opts: WriteOpts): Bundle {
@@ -201,35 +187,6 @@ async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
   if (isWithin(target, cwd)) refuse("it is the working folder or contains it");
 }
 
-/**
- * Free means nothing is there, or there is an empty folder to write into. A link (symbolic link
- * or junction) is never free, wherever it leads: nothing is written through one.
- */
-async function isFree(path: string): Promise<boolean> {
-  const info = await lstatIfAny(path);
-  if (info === undefined) return true;
-  return info.isDirectory() && (await namesIn(path)).length === 0;
-}
-
-/** The first free `<wanted>-2`, `<wanted>-3`... */
-async function freeSibling(wanted: string): Promise<string> {
-  for (let n = 2; ; n += 1) {
-    const candidate = `${wanted}-${n}`;
-    if (await isFree(candidate)) return candidate;
-  }
-}
-
-/** The `<wanted>-2`, `<wanted>-3`... that exist next to `wanted`, in number order, gaps skipped. */
-async function numberedSiblings(wanted: string): Promise<string[]> {
-  const parent = dirname(wanted);
-  const prefix = `${basename(wanted)}-`;
-  return (await namesIn(parent))
-    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
-    .map((name) => ({ name, n: Number(name.slice(prefix.length)) }))
-    .filter(({ n }) => n >= 2)
-    .sort((a, b) => a.n - b.n)
-    .map(({ name }) => join(parent, name));
-}
 
 /**
  * The first `<wanted>-N` folder that already holds the agent with `id`, as an earlier move may

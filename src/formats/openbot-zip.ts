@@ -14,6 +14,7 @@ import { stat } from "node:fs/promises";
 import { zipSync } from "fflate";
 import { isSafeName } from "../adapters/fs.js";
 import type { WriteResult } from "../adapters/types.js";
+import { FrontmatterError, hasFrontmatter, splitFrontmatter } from "../core/frontmatter.js";
 import {
   MAX_ARCHIVE_BYTES,
   MAX_AVATAR_BYTES,
@@ -26,7 +27,6 @@ import {
   isReservedDeviceName,
   isSafeArchivePath,
 } from "../core/paths.js";
-import { FrontmatterError, hasFrontmatter, splitFrontmatter } from "../core/frontmatter.js";
 import {
   OPENBOT_MIN_INTERVAL_MINUTES,
   type OpenBotSchedule,
@@ -45,6 +45,7 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../core/schema.js";
+import { slugify } from "../core/text.js";
 import { type ZipPolicy, readZipEntries } from "../core/zip.js";
 
 export const OPENBOT_IMPORT_MANIFEST = "openbot-import.json";
@@ -701,14 +702,7 @@ function cut(text: string, max: number): string {
 
 /** The folder name of an agent: a slug of its name, not taken by another agent of the archive. */
 function agentKey(name: string, taken: Set<string>): string {
-  let base = name
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .replace(/ł/gi, "l")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "");
-  base = cut(base, MAX_KEY_CHARS).replace(/-+$/, "");
+  let base = slugify(name, { fold: true, maxChars: MAX_KEY_CHARS });
   // A folder of that name must not be refused by the reader here or by a Windows disk.
   if (base === "" || isReservedDeviceName(base) || isForbiddenPath(base)) base = "agent";
   let key = base;

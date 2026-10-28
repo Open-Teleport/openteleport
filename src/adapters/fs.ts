@@ -1,7 +1,7 @@
 // Small file system checks every file-based adapter needs.
 import { type Dirent, type Stats, constants } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { ulid } from "ulid";
 import { isSafeArchivePath } from "../core/paths.js";
 import { byCodeUnit } from "../core/text.js";
@@ -19,6 +19,40 @@ export async function lstatIfAny(path: string): Promise<Stats | undefined> {
     if (code === "ENOENT" || code === "ENOTDIR") return undefined;
     throw error;
   }
+}
+
+/**
+ * Free means nothing is there, or an empty folder to write into. A link (symbolic link or
+ * junction) is never free, even a broken one: nothing is written through it.
+ */
+export async function isFree(path: string): Promise<boolean> {
+  const info = await lstatIfAny(path);
+  if (info === undefined) return true;
+  return info.isDirectory() && (await entriesOf(path)).length === 0;
+}
+
+/** The first free `<wanted>-2`, `<wanted>-3`... (see `isFree`). */
+export async function freeSibling(wanted: string): Promise<string> {
+  for (let n = 2; ; n += 1) {
+    const candidate = `${wanted}-${n}`;
+    if (await isFree(candidate)) return candidate;
+  }
+}
+
+/**
+ * The `<wanted>-2`, `<wanted>-3`... that exist next to `wanted` (whatever they are), in number
+ * order, gaps skipped.
+ */
+export async function numberedSiblings(wanted: string): Promise<string[]> {
+  const parent = dirname(wanted);
+  const prefix = `${basename(wanted)}-`;
+  return (await entriesOf(parent))
+    .map(({ name }) => name)
+    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
+    .map((name) => ({ name, n: Number(name.slice(prefix.length)) }))
+    .filter(({ n }) => n >= 2)
+    .sort((a, b) => a.n - b.n)
+    .map(({ name }) => join(parent, name));
 }
 
 /**

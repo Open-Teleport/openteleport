@@ -1,17 +1,16 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
-import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle, Manifest } from "../../core/schema.js";
-import { factsToProse, mergeInstructions } from "../../core/text.js";
+import { factsToProse, mergeInstructions, slugify } from "../../core/text.js";
 import { isSafeName, lstatIfAny } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
+import { freeName, recordedCopy } from "../names.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
 
-const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
 const MEMORY_FILE = "MEMORY.md";
 /**
@@ -29,31 +28,13 @@ type Items = WriteResult["items"];
  * a Windows device name such as `con` gets `-agent`.
  */
 export function agentSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "") return "agent";
-  return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-agent" });
 }
 
 /** Cuts `text` to `max` characters, the last one an ellipsis. */
 const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-/**
- * `<base><ext>` in `dir`, or the first of `<base>-2<ext>`, `<base>-3<ext>`... that is free. A
- * link, even a broken one, takes its name.
- */
-async function freeName(dir: string, base: string, ext: string): Promise<string> {
-  let name = base;
-  for (let n = 2; (await lstatIfAny(join(dir, `${name}${ext}`))) !== undefined; n += 1) {
-    name = `${base}-${n}`;
-  }
-  return name;
-}
 
 /** The first sentence of the instructions' prose, headings and list markers left out. */
 function firstSentence(instructions: string): string {
@@ -75,27 +56,6 @@ function toolsOf(manifest: Manifest): string[] | undefined {
   return tools.every((tool) => typeof tool === "string") ? [...tools] : undefined;
 }
 
-/**
- * The `<base>-N` stem that `ids` records for the agent with `id`, the lowest N first, when its
- * file is not a link; `undefined` when there is none.
- */
-async function recordedCopy(
-  dir: string,
-  base: string,
-  id: string,
-  ids: AgentIds,
-): Promise<string | undefined> {
-  const prefix = `${base}-`;
-  const copies = Object.entries(ids)
-    .filter(([slug, recorded]) => recorded === id && slug.startsWith(prefix))
-    .map(([slug]) => ({ slug, n: slug.slice(prefix.length) }))
-    .filter(({ n }) => /^[1-9]\d*$/.test(n) && Number(n) >= 2)
-    .sort((a, b) => Number(a.n) - Number(b.n));
-  for (const { slug } of copies) {
-    if (!(await lstatIfAny(join(dir, `${slug}.md`)))?.isSymbolicLink()) return slug;
-  }
-  return undefined;
-}
 
 /**
  * The stem of the agent file to write. A free `<slug>.md` is taken. When it is taken, `copy`
@@ -134,7 +94,7 @@ async function agentFileSlug(
   const { id } = bundle.manifest;
   if (id !== "" && ids[base] === id) return base;
   // An earlier move may already have given this agent a `-N` file of its own: update that one.
-  const own = id === "" ? undefined : await recordedCopy(dir, base, id, ids);
+  const own = id === "" ? undefined : await recordedCopy(dir, base, ".md", id, ids);
   if (own !== undefined) return own;
   const slug = await freeName(dir, base, ".md");
   items.warnings.push(`agent '${base}' already exists; written as '${slug}'`);

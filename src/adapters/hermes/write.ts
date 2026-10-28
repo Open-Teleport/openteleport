@@ -6,14 +6,14 @@
 // profile in place and leaves what Hermes and the user added since.
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { stringify } from "yaml";
-import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
+import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
-import { mergeInstructions } from "../../core/text.js";
-import { isSafeName, lstatIfAny, replaceFile } from "../fs.js";
+import { mergeInstructions, slugify } from "../../core/text.js";
+import { freeSibling, isFree, isSafeName, lstatIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
@@ -24,7 +24,6 @@ import { type HermesConfig, hermesHome, hermesTimezone, readConfig } from "./pat
 
 type Items = WriteResult["items"];
 
-const MAX_SLUG_CHARS = 64;
 /** The memory limit Hermes uses when `config.yaml` sets none (`memory_char_limit`). */
 const DEFAULT_MEMORY_LIMIT = 2200;
 /** How much of a fact the report quotes when it skips it. */
@@ -106,12 +105,7 @@ const preview = (value: string): string => Array.from(value).slice(0, PREVIEW_CH
  * be changed for (see `profileSlug`).
  */
 function slugOf(name: string): { slug: string; reserved?: string } {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
+  const base = slugify(name, { deviceSuffix: "-r" });
   if (base === "") {
     throw new Error(
       `Cannot make a Hermes profile name from ${JSON.stringify(name)}: it has no letters or digits`,
@@ -128,7 +122,7 @@ function slugOf(name: string): { slug: string; reserved?: string } {
   if (HERMES_RESERVED_PROFILES.has(base)) {
     return { slug: `${base}${RESERVED_SUFFIX}`, reserved: base };
   }
-  return { slug: isReservedDeviceName(base) ? `${base}-r` : base };
+  return { slug: base };
 }
 
 /**
@@ -219,17 +213,9 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   return (await readdir(path)).length === 0;
 }
 
-/** Free means nothing is there, or an empty folder. A link, even a broken one, takes its name. */
-async function isFree(path: string): Promise<boolean> {
-  const info = await lstatIfAny(path);
-  return info === undefined || (info.isDirectory() && (await isEmptyDirectory(path)));
-}
-
 /** The first free `<base>-2`, `<base>-3`... */
 async function freeId(profiles: string, base: string): Promise<string> {
-  for (let n = 2; ; n += 1) {
-    if (await isFree(join(profiles, `${base}-${n}`))) return `${base}-${n}`;
-  }
+  return basename(await freeSibling(join(profiles, base)));
 }
 
 /**

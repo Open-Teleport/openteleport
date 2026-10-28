@@ -11,7 +11,6 @@ import {
   MAX_SKILLS,
   MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
-  isReservedDeviceName,
   isSafeArchivePath,
 } from "./paths.js";
 import {
@@ -24,6 +23,7 @@ import {
   type Skill,
   parseManifest,
 } from "./schema.js";
+import { byCodeUnit, slugify } from "./text.js";
 import { type ZipPolicy, readZipEntries } from "./zip.js";
 
 const MANIFEST_PATH = "jetpack.json";
@@ -357,22 +357,13 @@ export function entriesToBundle(
 
 // -- Bundle -> archive entries ---------------------------------------------------------------
 
-const MAX_SLUG_CHARS = 64;
-
 /**
- * Lowercases a routine name, turns every run of characters outside `a-z0-9` into one `-`, trims
- * the dashes and cuts the result to 64 characters. A name with nothing usable, or one that would
- * make a forbidden file name, becomes `routine`; a Windows device name such as `con` gets `-r`.
+ * A slug of a routine name (see `slugify`). A name with nothing usable, or one that would make a
+ * forbidden file name, becomes `routine`; a Windows device name such as `con` gets `-r`.
  */
 function routineSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "" || isForbiddenPath(`${slug}.json`)) return "routine";
-  return isReservedDeviceName(slug) ? `${slug}-r` : slug;
+  const slug = slugify(name, { deviceSuffix: "-r" });
+  return slug === "" || isForbiddenPath(`${slug}.json`) ? "routine" : slug;
 }
 
 /** `base`, then `base-2`, `base-3`... for the names that collapse to the same slug. */
@@ -582,10 +573,6 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
   return bundle;
 }
 
-// Plain code-unit order, so that the result does not depend on the locale.
-function byCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
 
 /** What an export puts at the top of a directory besides `jetpack.json` and the avatar. */
 const LAYOUT_NAMES: ReadonlySet<string> = new Set([

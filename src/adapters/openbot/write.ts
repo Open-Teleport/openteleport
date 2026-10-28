@@ -4,30 +4,16 @@
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Bundle } from "../../core/schema.js";
+import { slugify } from "../../core/text.js";
 import { readOpenBotZip, writeOpenBotImportZip } from "../../formats/openbot-zip.js";
 import { VERSION } from "../../version.js";
 import { lstatIfAny, replaceFile } from "../fs.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 
-const MAX_SLUG_CHARS = 64;
 const ARTIFACT_SUFFIX = "-openbot-import";
 const ARTIFACT_EXTENSION = ".zip";
 /** The `source.app` of the archive: who made it. */
 const APP = "openteleport";
-
-/** Lowercase letters and digits, runs of anything else one `-`; `agent` when nothing is left. */
-function slugOf(name: string): string {
-  const slug = name
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .replace(/ł/gi, "l")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-+$/, "");
-  return slug === "" ? "agent" : slug;
-}
 
 // -- Where the archive goes -------------------------------------------------------------------
 
@@ -155,7 +141,8 @@ export async function writeOpenBotAgent(
   });
 
   const folder = resolve(ctx.cwd, ctx.targetDir ?? ".");
-  const stem = join(folder, `${slugOf(bundle.manifest.name)}${ARTIFACT_SUFFIX}`);
+  const slug = slugify(bundle.manifest.name, { fallback: "agent", fold: true });
+  const stem = join(folder, `${slug}${ARTIFACT_SUFFIX}`);
   const path = await claimTarget(stem, bundle.manifest.id, opts.onConflict, items.warnings);
   await replaceFile(path, bytes);
 

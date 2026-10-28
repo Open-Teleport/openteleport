@@ -11,7 +11,7 @@ import { UnknownAdapterError, listAdapters, registerAdapter } from "../adapters/
 import type { Adapter, AgentRef, Ctx, WriteOpts } from "../adapters/types.js";
 import { SecretsFoundError } from "../core/engine.js";
 import { readBundle } from "../core/bundle.js";
-import { isReservedDeviceName } from "../core/paths.js";
+import { slugify } from "../core/text.js";
 import { type MoveReport, renderReportMarkdown, renderReportTerminal } from "../core/report.js";
 import type { Bundle } from "../core/schema.js";
 import type { SecretFinding } from "../core/secrets.js";
@@ -166,18 +166,9 @@ export function printReport(report: MoveReport, opts: CommonOptions, reportPath:
 /** What `inspect` and `validate` say about an agent folder that holds no `jetpack.json`. */
 export const NO_MANIFEST_WARNING = "no jetpack.json; manifest would be synthesized";
 
-const MAX_SLUG_CHARS = 64;
-
 /** A file name made from an agent's name: `Ada Lovelace` → `ada-lovelace`. */
 export function fileSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "") return "agent";
-  return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-agent" });
 }
 
 /**

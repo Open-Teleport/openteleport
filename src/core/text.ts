@@ -1,5 +1,35 @@
+import { isReservedDeviceName } from "./paths.js";
+
 /** Plain code-unit order, so that a sorted list does not depend on the locale. */
 export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The longest slug an adapter makes unless it says otherwise (what Hermes accepts as an id). */
+const DEFAULT_SLUG_CHARS = 64;
+
+/**
+ * `name` as a slug: lower case, every run of characters outside `a-z0-9` one `-`, no `-` at
+ * either end, cut to `maxChars` (64). `fold` first takes the accents off letters and makes `ł`
+ * an `l`. Nothing usable gives `fallback`, or `""` without one. A Windows device name such as
+ * `con` could not be a file or folder there, so it gets `deviceSuffix` after it (`con-r`); without
+ * one it stays as it is.
+ */
+export function slugify(
+  name: string,
+  opts: { fallback?: string; deviceSuffix?: string; maxChars?: number; fold?: boolean } = {},
+): string {
+  const letters =
+    opts.fold === true ? name.normalize("NFKD").replace(/\p{M}/gu, "").replace(/ł/gi, "l") : name;
+  const slug = letters
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-/, "")
+    .slice(0, opts.maxChars ?? DEFAULT_SLUG_CHARS)
+    .replace(/-$/, "");
+  if (slug === "") return opts.fallback ?? "";
+  return opts.deviceSuffix !== undefined && isReservedDeviceName(slug)
+    ? `${slug}${opts.deviceSuffix}`
+    : slug;
+}
 
 const PERSONA_HEADING = "# Persona";
 const INSTRUCTIONS_HEADING = "# Instructions";

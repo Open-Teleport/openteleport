@@ -3,11 +3,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "smol-toml";
-import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle, ModelPref } from "../../core/schema.js";
-import { factsToProse, mergeInstructions } from "../../core/text.js";
+import { factsToProse, mergeInstructions, slugify } from "../../core/text.js";
 import { lstatIfAny, replaceFile } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
+import { freeName, recordedCopy } from "../names.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import {
@@ -22,7 +22,6 @@ import {
 } from "./paths.js";
 import { type CodexAgentFile, parseAgentToml } from "./read.js";
 
-const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
 /** What Codex accepts as a nickname: ASCII letters, digits, spaces, `-` and `_` (C11). */
 const NICKNAME = /^[A-Za-z0-9 _-]+$/;
@@ -35,12 +34,7 @@ type Items = WriteResult["items"];
  * is the global setup, are refused; a Windows device name such as `con` gets `-agent`.
  */
 export function agentSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
+  const slug = slugify(name, { deviceSuffix: "-agent" });
   if (slug === "") {
     throw new Error(
       `Cannot name a Codex agent file after ${JSON.stringify(name)}: it has no letters or digits. ` +
@@ -53,7 +47,7 @@ export function agentSlug(name: string): string {
         "Codex setup. Rename the agent and move it again.",
     );
   }
-  return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
+  return slug;
 }
 
 /**
@@ -75,39 +69,6 @@ export function renderAgentToml(agent: CodexAgentFile, rest: Record<string, unkn
 
 // -- Where the agent goes ------------------------------------------------------------------------
 
-/**
- * `<base>-2`, `<base>-3`... whichever is the first free name in `dir`. A link, even a broken one,
- * takes its name.
- */
-async function freeName(dir: string, base: string): Promise<string> {
-  let name = base;
-  for (let n = 2; (await lstatIfAny(join(dir, `${name}${AGENT_EXTENSION}`))) !== undefined; n += 1) {
-    name = `${base}-${n}`;
-  }
-  return name;
-}
-
-/**
- * The `<base>-N` stem that `ids` records for the agent with `id`, the lowest N first, when its
- * file is a real file; `undefined` when there is none.
- */
-async function recordedCopy(
-  dir: string,
-  base: string,
-  id: string,
-  ids: AgentIds,
-): Promise<string | undefined> {
-  const prefix = `${base}-`;
-  const copies = Object.entries(ids)
-    .filter(([slug, recorded]) => recorded === id && slug.startsWith(prefix))
-    .map(([slug]) => ({ slug, n: slug.slice(prefix.length) }))
-    .filter(({ n }) => /^[1-9]\d*$/.test(n) && Number(n) >= 2)
-    .sort((a, b) => Number(a.n) - Number(b.n));
-  for (const { slug } of copies) {
-    if ((await lstatIfAny(join(dir, `${slug}${AGENT_EXTENSION}`)))?.isFile()) return slug;
-  }
-  return undefined;
-}
 
 /**
  * The stem of the agent file to write. A free `<slug>.toml` is taken. When it is taken, `copy`
@@ -130,7 +91,7 @@ async function agentFileSlug(
   if (existing === undefined) return base;
 
   if (opts.onConflict === "copy") {
-    const slug = await freeName(dir, base);
+    const slug = await freeName(dir, base, AGENT_EXTENSION);
     items.warnings.push(
       `an agent named ${base} already exists in Codex; this one was written as ${slug}`,
     );
@@ -151,7 +112,7 @@ async function agentFileSlug(
   }
   if (existing.isSymbolicLink() || !existing.isFile()) {
     // Overwriting would write wherever the link points, so the agent gets a name of its own.
-    const slug = await freeName(dir, base);
+    const slug = await freeName(dir, base, AGENT_EXTENSION);
     items.warnings.push(
       existing.isSymbolicLink()
         ? `agent file '${base}.toml' is a symlink; written as '${slug}.toml'`
@@ -163,9 +124,9 @@ async function agentFileSlug(
   const { id } = bundle.manifest;
   if (id !== "" && Object.hasOwn(ids, base) && ids[base] === id) return base;
   // An earlier move may already have given this agent a `-N` file of its own: update that one.
-  const own = id === "" ? undefined : await recordedCopy(dir, base, id, ids);
+  const own = id === "" ? undefined : await recordedCopy(dir, base, AGENT_EXTENSION, id, ids);
   if (own !== undefined) return own;
-  const slug = await freeName(dir, base);
+  const slug = await freeName(dir, base, AGENT_EXTENSION);
   items.warnings.push(`agent '${base}' already exists; written as '${slug}'`);
   return slug;
 }

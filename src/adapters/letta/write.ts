@@ -3,20 +3,19 @@
 // agent itself is not created here (see the spec, section 8.4): `letta agents create` takes no
 // system prompt, and writing the local backend's files would mean rebuilding an agent record
 // from code that is not documented, so the last step stays with the user.
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
-import { isReservedDeviceName } from "../../core/paths.js";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 import type { Item } from "../../core/report.js";
 import { describeSchedule } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
-import { lstatIfAny } from "../fs.js";
-import { MARKER_FILE, carriesMarker, readMarker, writeMarker } from "../marker.js";
+import { slugify } from "../../core/text.js";
+import { MARKER_FILE, writeMarker } from "../marker.js";
+import { claimFolder } from "../names.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type Shell, cronAddCommand, shellQuote } from "./crons.js";
 import { renderMemFs } from "./memfs.js";
 import { isRecord, oneLine, text } from "./util.js";
 
-const MAX_SLUG_CHARS = 64;
 const FOLDER_SUFFIX = "-letta-memory";
 const MEMORY_DIR = "memory";
 const ROUTINES_DIR = "routines";
@@ -34,16 +33,6 @@ const UNVERIFIED_WARNING =
 
 type Items = WriteResult["items"];
 
-/** Lowercase, every run of characters outside `a-z0-9` one `-`, no `-` at either end. */
-function slugOf(name: string, fallback: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  return slug === "" ? fallback : slug;
-}
 
 /**
  * The file stem of each routine's prompt in `routines/`, in the order of `routines`: the name as
@@ -53,8 +42,7 @@ function slugOf(name: string, fallback: string): string {
 export function routineSlugs(routines: readonly Routine[]): string[] {
   const taken = new Set<string>();
   return routines.map(({ name }) => {
-    const slug = slugOf(name, "routine");
-    const base = isReservedDeviceName(slug) ? `${slug}-r` : slug;
+    const base = slugify(name, { fallback: "routine", deviceSuffix: "-r" });
     let candidate = base;
     for (let n = 2; taken.has(candidate); n += 1) candidate = `${base}-${n}`;
     taken.add(candidate);
@@ -255,95 +243,6 @@ Good to know:
 `;
 }
 
-// -- Where the folder goes --------------------------------------------------------------------
-
-type Placement = {
-  dir: string;
-  /** The folder is one OpenTeleport wrote before: what it generated can be written again. */
-  owned: boolean;
-};
-
-/** Free: nothing there, or an empty folder. A link is never free, wherever it leads. */
-async function isFree(path: string): Promise<boolean> {
-  const info = await lstatIfAny(path);
-  return info === undefined || (info.isDirectory() && (await readdir(path)).length === 0);
-}
-
-/** The first free `<wanted>-2`, `<wanted>-3`... */
-async function freeSibling(wanted: string): Promise<string> {
-  for (let n = 2; ; n += 1) {
-    if (await isFree(`${wanted}-${n}`)) return `${wanted}-${n}`;
-  }
-}
-
-/**
- * The `<wanted>-N` folder (lowest N first) that carries the marker of the agent with `id`, as an
- * earlier move may have left it; `undefined` when there is none.
- */
-async function ownSibling(wanted: string, id: string): Promise<string | undefined> {
-  if (id === "") return undefined;
-  let names: string[];
-  try {
-    names = await readdir(dirname(wanted));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-  const prefix = `${basename(wanted)}-`;
-  const copies = names
-    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
-    .map((name) => ({ path: join(dirname(wanted), name), n: Number(name.slice(prefix.length)) }))
-    .filter(({ n }) => n >= 2)
-    .sort((a, b) => a.n - b.n);
-  for (const { path } of copies) {
-    if ((await lstatIfAny(path))?.isDirectory() && (await carriesMarker(path, id))) return path;
-  }
-  return undefined;
-}
-
-/**
- * Settles where the folder goes. A free `wanted` is taken. When it is taken, `copy` goes to the
- * first free `<wanted>-2`, `<wanted>-3`...; `replace` writes over `wanted` only when it holds a
- * marker (whose agent it was does not matter) and refuses otherwise; `update` writes over it only
- * when its marker is this agent's, or else over the `<wanted>-N` folder that carries it. Any
- * other folder keeps its content and this one goes to the first free `-N`, with a warning. A link
- * is never written through.
- */
-async function claimTarget(
-  wanted: string,
-  bundle: Bundle,
-  onConflict: WriteOpts["onConflict"],
-  warnings: string[],
-): Promise<Placement> {
-  if (await isFree(wanted)) return { dir: wanted, owned: false };
-  if (onConflict === "copy") return { dir: await freeSibling(wanted), owned: false };
-
-  const info = await lstatIfAny(wanted);
-  const marker = info?.isDirectory() === true ? await readMarker(wanted) : undefined;
-  if (onConflict === "replace") {
-    if (marker !== undefined) return { dir: wanted, owned: true };
-    const why = info?.isSymbolicLink()
-      ? "it is a symbolic link"
-      : info?.isDirectory() === true
-        ? `it holds no ${MARKER_FILE}, so it is not a folder OpenTeleport wrote`
-        : "it is not a folder";
-    throw new Error(`Refusing to replace ${wanted}: ${why}. Delete it yourself if you mean it.`);
-  }
-
-  const { id } = bundle.manifest;
-  if (marker !== undefined && id !== "" && marker.id === id) return { dir: wanted, owned: true };
-  const own = await ownSibling(wanted, id);
-  if (own !== undefined) return { dir: own, owned: true };
-  const dir = await freeSibling(wanted);
-  const why = info?.isSymbolicLink()
-    ? "is a symbolic link, which is not written through"
-    : marker === undefined
-      ? `holds no ${MARKER_FILE} of this agent`
-      : "holds a different agent";
-  warnings.push(`${wanted} ${why}; written as ${dir}`);
-  return { dir, owned: false };
-}
-
 // -- Writing ----------------------------------------------------------------------------------
 
 /**
@@ -419,8 +318,8 @@ export async function writeLettaAgent(
   const memory = renderMemFs(bundle, items.skipped);
   const slugs = routineSlugs(bundle.routines);
   const base = resolve(ctx.cwd, ctx.targetDir ?? ".");
-  const wanted = join(base, `${slugOf(manifest.name, "agent")}${FOLDER_SUFFIX}`);
-  const placement = await claimTarget(wanted, bundle, opts.onConflict, items.warnings);
+  const wanted = join(base, `${slugify(manifest.name, { fallback: "agent" })}${FOLDER_SUFFIX}`);
+  const placement = await claimFolder(wanted, bundle, opts.onConflict, items.warnings);
   const { dir } = placement;
 
   const sh = renderCommands(bundle, dir, "sh", opts.enableRoutines);

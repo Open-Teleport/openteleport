@@ -5,12 +5,12 @@ import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import JSON5 from "json5";
 import { SecretsFoundError } from "../../core/engine.js";
-import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
+import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
-import { factsToProse } from "../../core/text.js";
+import { factsToProse, slugify } from "../../core/text.js";
 import { backUp, lstatIfAny, replaceFile } from "../fs.js";
 import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
@@ -95,19 +95,12 @@ function warnGatewayDown(items: Items): void {
 // -- Where the agent goes ----------------------------------------------------------------------
 
 /**
- * The agent id for a name: lower case, every run of characters outside `a-z0-9` one `-`, dashes
- * trimmed, at most 32 characters. Nothing usable gives `agent`; a Windows device name such as
- * `con` gets `-r`, since its workspace folder could not be created there.
+ * The agent id for a name: a slug of at most 32 characters (see `slugify`). Nothing usable gives
+ * `agent`; a Windows device name such as `con` gets `-r`, since its workspace folder could not
+ * be created there.
  */
 function agentIdFor(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_ID_CHARS)
-    .replace(/-$/, "");
-  if (base === "") return "agent";
-  return isReservedDeviceName(base) ? `${base}-r` : base;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-r", maxChars: MAX_ID_CHARS });
 }
 
 /** `<base>-<n>`, the base cut so that the whole stays within 32 characters. */

@@ -2,18 +2,18 @@
 // this Bot, one file for each kind of thing, and a README with the five steps. Grok Bot imports
 // nothing but memory (spec, section 7.2), so the Bot itself is made in the app, by hand, from
 // what is pasted into its chat.
-import { mkdir, readdir, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, rm } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { describeSchedule, everyToMs } from "../../core/schedule.js";
 import type { Bundle, FileEntry, Manifest, Routine, Skill } from "../../core/schema.js";
-import { factsToProse } from "../../core/text.js";
-import { isSafeName, lstatIfAny, replaceFile } from "../fs.js";
-import { MARKER_FILE, carriesMarker, readMarker, writeMarker } from "../marker.js";
+import { factsToProse, slugify } from "../../core/text.js";
+import { isSafeName, replaceFile } from "../fs.js";
+import { MARKER_FILE, writeMarker } from "../marker.js";
+import { claimFolder } from "../names.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 
-const MAX_SLUG_CHARS = 64;
 const FOLDER_SUFFIX = "-for-grok-bot";
 const README_FILE = "README.md";
 const CHAT_FILE = "1-paste-into-chat.md";
@@ -37,16 +37,6 @@ type Items = WriteResult["items"];
 
 const encoder = new TextEncoder();
 
-/** Lowercase, every run of characters outside `a-z0-9` one `-`, no `-` at either end. */
-function slugOf(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  return slug === "" ? "agent" : slug;
-}
 
 /** `value` on one line: each line break, with the blanks around it, becomes one space. */
 const oneLine = (value: string): string =>
@@ -199,96 +189,6 @@ function fitRoutines(routines: readonly Routine[], skipped: Item[]): Routine[] {
   return slowEnough.slice(0, MAX_ROUTINES);
 }
 
-// -- Where the folder goes --------------------------------------------------------------------
-
-type Placement = {
-  dir: string;
-  /** The folder is one OpenTeleport wrote before: what it generated can be written again. */
-  owned: boolean;
-};
-
-/** Free: nothing there, or an empty folder. A link is never free, wherever it leads. */
-async function isFree(path: string): Promise<boolean> {
-  const info = await lstatIfAny(path);
-  return info === undefined || (info.isDirectory() && (await readdir(path)).length === 0);
-}
-
-/** The first free `<wanted>-2`, `<wanted>-3`... */
-async function freeSibling(wanted: string): Promise<string> {
-  for (let n = 2; ; n += 1) {
-    if (await isFree(`${wanted}-${n}`)) return `${wanted}-${n}`;
-  }
-}
-
-/**
- * The `<wanted>-N` folder (lowest N first) that carries the marker of the agent with `id`, as an
- * earlier move may have left it; `undefined` when there is none.
- */
-async function ownSibling(wanted: string, id: string): Promise<string | undefined> {
-  if (id === "") return undefined;
-  let names: string[];
-  try {
-    names = await readdir(dirname(wanted));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-  const prefix = `${basename(wanted)}-`;
-  const copies = names
-    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
-    .map((name) => ({ path: join(dirname(wanted), name), n: Number(name.slice(prefix.length)) }))
-    .filter(({ n }) => n >= 2)
-    .sort((a, b) => a.n - b.n);
-  for (const { path } of copies) {
-    if ((await lstatIfAny(path))?.isDirectory() && (await carriesMarker(path, id))) return path;
-  }
-  return undefined;
-}
-
-/**
- * Settles where the folder goes, by the rule of the spec's section 3.4 for hand-over folders (the
- * same as the Letta adapter's). A free `wanted` is taken. When it is taken, `copy` goes to the
- * first free `<wanted>-2`, `<wanted>-3`...; `replace` writes over `wanted` only when it holds a
- * marker (whose agent it was does not matter) and refuses otherwise; `update` writes over it only
- * when its marker is this agent's, or else over the `<wanted>-N` folder that carries it. Any
- * other folder keeps its content and this one goes to the first free `-N`, with a warning. A link
- * is never written through.
- */
-async function claimTarget(
-  wanted: string,
-  bundle: Bundle,
-  onConflict: WriteOpts["onConflict"],
-  warnings: string[],
-): Promise<Placement> {
-  if (await isFree(wanted)) return { dir: wanted, owned: false };
-  if (onConflict === "copy") return { dir: await freeSibling(wanted), owned: false };
-
-  const info = await lstatIfAny(wanted);
-  const marker = info?.isDirectory() === true ? await readMarker(wanted) : undefined;
-  if (onConflict === "replace") {
-    if (marker !== undefined) return { dir: wanted, owned: true };
-    const why = info?.isSymbolicLink()
-      ? "it is a symbolic link"
-      : info?.isDirectory() === true
-        ? `it holds no ${MARKER_FILE}, so it is not a folder OpenTeleport wrote`
-        : "it is not a folder";
-    throw new Error(`Refusing to replace ${wanted}: ${why}. Delete it yourself if you mean it.`);
-  }
-
-  const { id } = bundle.manifest;
-  if (marker !== undefined && id !== "" && marker.id === id) return { dir: wanted, owned: true };
-  const own = await ownSibling(wanted, id);
-  if (own !== undefined) return { dir: own, owned: true };
-  const dir = await freeSibling(wanted);
-  const why = info?.isSymbolicLink()
-    ? "is a symbolic link, which is not written through"
-    : marker === undefined
-      ? `holds no ${MARKER_FILE} of this agent`
-      : "holds a different agent";
-  warnings.push(`${wanted} ${why}; written as ${dir}`);
-  return { dir, owned: false };
-}
-
 // -- Writing ----------------------------------------------------------------------------------
 
 
@@ -342,8 +242,8 @@ export async function writeGrokBot(
   const pack = renderPastePack({ ...bundle, routines });
 
   const base = resolve(ctx.cwd, ctx.targetDir ?? ".");
-  const wanted = join(base, `${slugOf(manifest.name)}${FOLDER_SUFFIX}`);
-  const placement = await claimTarget(wanted, bundle, opts.onConflict, items.warnings);
+  const wanted = join(base, `${slugify(manifest.name, { fallback: "agent" })}${FOLDER_SUFFIX}`);
+  const placement = await claimFolder(wanted, bundle, opts.onConflict, items.warnings);
   const { dir } = placement;
 
   items.approximated.push(...approximations(bundle, pack));
