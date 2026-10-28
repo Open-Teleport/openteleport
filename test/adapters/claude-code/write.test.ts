@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -34,6 +34,10 @@ const noExec = (() => {
   throw new Error("no command expected");
 }) as unknown as typeof execa;
 
+const ADA_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
+/** Another agent that is also called Ada. */
+const OTHER_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2V";
+
 const UPDATE: WriteOpts = { enableRoutines: false, includeFiles: false, onConflict: "update" };
 const COPY: WriteOpts = { ...UPDATE, onConflict: "copy" };
 const REPLACE: WriteOpts = { ...UPDATE, onConflict: "replace" };
@@ -47,6 +51,10 @@ let root: string;
 let project: string;
 let home: string;
 let ctx: Ctx;
+
+/** Where the adapter records which agent each agent file of `dir` holds, beside its memory. */
+const idsOf = (dir: string): string =>
+  join(home, ".claude", "projects", sanitize(resolve(dir)), "openteleport-ids.json");
 
 /** The memory directory Claude Code uses for `dir`, inside the temp home. */
 const memoryOf = (dir: string): string =>
@@ -238,15 +246,93 @@ describe("write", () => {
   });
 
   it("overwrites the agent file on update and on replace", async () => {
-    await claudeCodeAdapter.write(ctx, bundleOf({ instructions: "First.\n" }), COPY);
-    await claudeCodeAdapter.write(ctx, bundleOf({ instructions: "Second.\n" }), UPDATE);
+    const ada = (instructions: string) => bundleOf({ manifest: { id: ADA_ID }, instructions });
+    await claudeCodeAdapter.write(ctx, ada("First.\n"), COPY);
+    await claudeCodeAdapter.write(ctx, ada("Second.\n"), UPDATE);
     expect(parseAgentFile(await readFile(agentFile(project, "ada"), "utf8")).body).toBe("Second.\n");
 
-    const result = await claudeCodeAdapter.write(ctx, bundleOf({ instructions: "Third.\n" }), REPLACE);
+    const result = await claudeCodeAdapter.write(ctx, ada("Third.\n"), REPLACE);
 
     expect(result.targetAgentId).toBe("ada");
     expect(parseAgentFile(await readFile(agentFile(project, "ada"), "utf8")).body).toBe("Third.\n");
     expect(await exists(agentFile(project, "ada-2"))).toBe(false);
+  });
+
+  describe("telling agents of the same name apart", () => {
+    const ada = (id: string, instructions = "Answer briefly.\n") =>
+      bundleOf({ manifest: { id }, instructions });
+    const bodyOf = async (stem: string) =>
+      parseAgentFile(await readFile(agentFile(project, stem), "utf8")).body;
+    const ids = async () => JSON.parse(await readFile(idsOf(project), "utf8"));
+
+    it("updates the same agent in place when it is moved again", async () => {
+      const first = await claudeCodeAdapter.write(ctx, ada(ADA_ID, "First.\n"), UPDATE);
+      const second = await claudeCodeAdapter.write(ctx, ada(ADA_ID, "Second.\n"), UPDATE);
+
+      expect([first.targetAgentId, second.targetAgentId]).toEqual(["ada", "ada"]);
+      expect(second.items.warnings).toEqual([]);
+      expect(await bodyOf("ada")).toBe("Second.\n");
+      expect(await exists(agentFile(project, "ada-2"))).toBe(false);
+    });
+
+    it("writes a different agent of the same name as -2 on update, keeping the first", async () => {
+      await claudeCodeAdapter.write(ctx, ada(ADA_ID, "First.\n"), UPDATE);
+      const other = await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Other.\n"), UPDATE);
+
+      expect(other.targetAgentId).toBe("ada-2");
+      expect(other.items.warnings).toContain("agent 'ada' already exists; written as 'ada-2'");
+      expect(await bodyOf("ada")).toBe("First.\n");
+      expect(await bodyOf("ada-2")).toBe("Other.\n");
+      expect(await ids()).toEqual({ ada: ADA_ID, "ada-2": OTHER_ID });
+    });
+
+    it("counts an agent file it has no id for as another agent on update", async () => {
+      const before = await readFile(agentFile(project, "reviewer"), "utf8");
+      const reviewer = bundleOf({ manifest: { id: ADA_ID, name: "Reviewer" } });
+
+      const result = await claudeCodeAdapter.write(ctx, reviewer, UPDATE);
+
+      expect(result.targetAgentId).toBe("reviewer-2");
+      expect(result.items.warnings).toContain(
+        "agent 'reviewer' already exists; written as 'reviewer-2'",
+      );
+      expect(await readFile(agentFile(project, "reviewer"), "utf8")).toBe(before);
+    });
+
+    it("never takes an empty id for the agent that is there", async () => {
+      await claudeCodeAdapter.write(ctx, bundleOf({}), UPDATE);
+      const second = await claudeCodeAdapter.write(ctx, bundleOf({}), UPDATE);
+
+      expect(second.targetAgentId).toBe("ada-2");
+      expect(await exists(idsOf(project))).toBe(false);
+    });
+
+    it("writes over another agent on replace and records the new one", async () => {
+      await claudeCodeAdapter.write(ctx, ada(ADA_ID, "First.\n"), UPDATE);
+      const result = await claudeCodeAdapter.write(ctx, ada(OTHER_ID, "Other.\n"), REPLACE);
+
+      expect(result.targetAgentId).toBe("ada");
+      expect(await bodyOf("ada")).toBe("Other.\n");
+      expect(await ids()).toEqual({ ada: OTHER_ID });
+    });
+
+    it("keeps the ids beside the memory directory, never inside it", async () => {
+      await claudeCodeAdapter.write(ctx, ada(ADA_ID), UPDATE);
+
+      expect(dirname(idsOf(project))).toBe(dirname(memoryOf(project)));
+      expect(await ids()).toEqual({ ada: ADA_ID });
+      expect(await readdir(memoryOf(project))).not.toContain("openteleport-ids.json");
+    });
+
+    it("starts over from an id map that is not JSON", async () => {
+      await mkdir(dirname(idsOf(project)), { recursive: true });
+      await writeFile(idsOf(project), "{ not json");
+
+      const result = await claudeCodeAdapter.write(ctx, ada(ADA_ID), UPDATE);
+
+      expect(result.targetAgentId).toBe("ada");
+      expect(await ids()).toEqual({ ada: ADA_ID });
+    });
   });
 
   it.each([
@@ -621,7 +707,7 @@ describe("write", () => {
     expect(await readFile(join(memoryOf(cwd), "MEMORY.md"), "utf8")).toBe("- A.\n");
   });
 
-  it("never touches <home>/.claude outside the target project's memory directory", async () => {
+  it("never touches <home>/.claude outside the target project's memory and ids", async () => {
     const ada = await readBundle(ADA_DIR);
     const target = join(root, "target");
     await mkdir(target);
@@ -636,7 +722,10 @@ describe("write", () => {
       (path) => homeBefore[path] !== homeAfter[path],
     );
     expect(changed.length).toBeGreaterThan(0);
-    expect(changed.filter((path) => !path.startsWith(memoryPrefix))).toEqual([]);
+    const idsFile = relative(home, idsOf(target)).split("\\").join("/");
+    const elsewhere = changed.filter((path) => !path.startsWith(memoryPrefix) && path !== idsFile);
+    expect(elsewhere).toEqual([]);
+    expect(changed).toContain(idsFile);
     expect(await snapshot(project)).toEqual(sourceBefore);
   });
 

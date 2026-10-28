@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
@@ -11,6 +11,12 @@ import { claudePaths } from "./paths.js";
 const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
 const MEMORY_FILE = "MEMORY.md";
+/**
+ * Which agent each `<slug>.md` of a project holds, as `{ "<slug>": "<manifest id>" }`. It sits
+ * beside the project's memory directory, never inside it, so Claude Code does not read it as
+ * memory, and the agent file itself stays as Claude Code writes it.
+ */
+const IDS_FILE = "openteleport-ids.json";
 
 type Items = WriteResult["items"];
 
@@ -79,24 +85,54 @@ function toolsOf(manifest: Manifest): string[] | undefined {
   return tools.every((tool) => typeof tool === "string") ? [...tools] : undefined;
 }
 
+/**
+ * The stem of the agent file to write. A free `<slug>.md` is taken. When it is taken, `copy`
+ * goes to the first free `<slug>-2.md`, `<slug>-3.md`...; a link is never written through, so it
+ * gets a name of its own in every mode; `replace` writes over the file; and `update` writes
+ * over it only when `ids` records this very agent (the Bundle's id) there. Any other agent of
+ * the same name keeps its file and this one becomes a copy, with a warning that says so.
+ */
+async function agentFileSlug(
+  dir: string,
+  bundle: Bundle,
+  opts: WriteOpts,
+  ids: AgentIds,
+  items: Items,
+): Promise<string> {
+  const base = agentSlug(bundle.manifest.name);
+  const existing = await lstatOf(join(dir, `${base}.md`));
+  if (existing === undefined) return base;
+
+  if (opts.onConflict === "copy") {
+    const slug = await freeName(dir, base, ".md");
+    items.warnings.push(
+      `an agent named ${base} already exists in Claude Code; this one was written as ${slug}`,
+    );
+    return slug;
+  }
+  if (existing.isSymbolicLink()) {
+    // Overwriting would write wherever the link points, so the agent gets a name of its own.
+    const slug = await freeName(dir, base, ".md");
+    items.warnings.push(`agent file '${base}.md' is a symlink; written as '${slug}.md'`);
+    return slug;
+  }
+  if (opts.onConflict === "replace") return base;
+  // An empty id is no id: nothing proves the agent there is this one.
+  if (bundle.manifest.id !== "" && ids[base] === bundle.manifest.id) return base;
+  const slug = await freeName(dir, base, ".md");
+  items.warnings.push(`agent '${base}' already exists; written as '${slug}'`);
+  return slug;
+}
+
 async function writeAgentFile(
   dir: string,
   bundle: Bundle,
   opts: WriteOpts,
+  ids: AgentIds,
   items: Items,
 ): Promise<{ slug: string; path: string }> {
   const { manifest } = bundle;
-  const base = agentSlug(manifest.name);
-  let slug = opts.onConflict === "copy" ? await freeName(dir, base, ".md") : base;
-  if (slug !== base) {
-    items.warnings.push(
-      `an agent named ${base} already exists in Claude Code; this one was written as ${slug}`,
-    );
-  } else if ((await lstatOf(join(dir, `${base}.md`)))?.isSymbolicLink()) {
-    // Overwriting would write wherever the link points, so the agent gets a name of its own.
-    slug = await freeName(dir, base, ".md");
-    items.warnings.push(`agent file '${base}.md' is a symlink; written as '${slug}.md'`);
-  }
+  const slug = await agentFileSlug(dir, bundle, opts, ids, items);
 
   const model = manifest.models.find((pref) => pref.provider === "anthropic")?.model;
   if (model === undefined && manifest.models.length > 0) {
@@ -317,22 +353,80 @@ function unsupported(bundle: Bundle, opts: WriteOpts): Item[] {
   return skipped;
 }
 
+/** Agent slug → manifest id, as `IDS_FILE` holds it. */
+type AgentIds = Record<string, string>;
+
+/**
+ * The ids recorded for a project. A missing file records none, and so does one that is not a
+ * JSON object: it is replaced on the next write, which costs only an update that becomes a copy.
+ * Any other read error is thrown before anything is written.
+ */
+async function readIds(path: string): Promise<AgentIds> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return {};
+  return Object.fromEntries(
+    Object.entries(json).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+    ),
+  );
+}
+
+/**
+ * Records that `<slug>.md` holds the agent with `id`, keeping what was recorded for the other
+ * slugs. The file is replaced in one step through a temporary sibling, so it is never left half
+ * written and a link in its place is replaced rather than written through. A failure only costs
+ * a later in-place update, so it becomes a warning.
+ */
+async function recordId(path: string, slug: string, id: string, items: Items): Promise<void> {
+  if (id === "") return;
+  const temporary = `${path}.${process.pid}-${Date.now()}.tmp`;
+  try {
+    const ids = { ...(await readIds(path)), [slug]: id };
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(temporary, `${JSON.stringify(ids, null, 2)}
+`, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    items.warnings.push(
+      `could not record the agent's id in ${path} (${(error as Error).message}); a later move ` +
+        "will write a copy instead of updating it",
+    );
+  }
+}
+
 /**
  * Writes a Bundle as a project subagent of `ctx.targetDir` (or `ctx.cwd`): the agent file in
  * `.claude/agents/`, its skills in `.claude/skills/`, its facts and notes in the project's memory
- * directory under the user's Claude Code directory. Nothing else of that directory is touched,
- * and `bundle` is not changed.
+ * directory under the user's Claude Code directory, and its id in `IDS_FILE` beside that memory
+ * directory. Nothing else of the user's directory is touched, and `bundle` is not changed.
  */
 export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Promise<WriteResult> {
   const paths = claudePaths(ctx, ctx.targetDir ?? ctx.cwd);
   const items: Items = { approximated: [], skipped: [], warnings: [] };
 
-  const agent = await writeAgentFile(paths.projectAgents, bundle, opts, items);
-  await writeSkills(paths.projectSkills, bundle, opts, items);
   const memoryDir = paths.memoryDir(paths.projectDir);
+  const idsFile = join(dirname(memoryDir), IDS_FILE);
+
+  const ids = await readIds(idsFile);
+  const agent = await writeAgentFile(paths.projectAgents, bundle, opts, ids, items);
+  await writeSkills(paths.projectSkills, bundle, opts, items);
   await appendFacts(memoryDir, bundle.facts, items);
   await writeNotes(memoryDir, agent.slug, bundle, items);
   items.skipped.push(...unsupported(bundle, opts));
+  await recordId(idsFile, agent.slug, bundle.manifest.id, items);
 
   return { outcome: "done", targetAgentId: agent.slug, artifactPath: agent.path, items };
 }
