@@ -42,7 +42,7 @@ describe("list", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain('Unknown adapter "nope"');
     expect(result.stderr).toContain(
-      "folder, openclaw, claude-code, codex, letta, hermes, grok-bot, memory",
+      "folder, openclaw, claude-code, codex, letta, hermes, grok-bot, openbot, memory",
     );
     expect(result.stderr).not.toMatch(STACK_LINE);
     expect(result.stdout).toBe("");

@@ -33,3 +33,27 @@ another computer.
   `missedPolicy`, one `oneTimeRoutines` entry (`once`) and two memories, one with an `inclusion`.
   The `advanced` schedule is nested as OpenBot writes it. `settings` has all its lists empty,
   `shared` is `"shared"` and `shared/readme.txt` stands for the shared files.
+
+## schema.sql and seed.sql
+
+A small OpenBot database for the `openbot` adapter, built in a test with `node:sqlite`
+(`test/helpers/openbot-db.ts`): `schema.sql`, then `seed.sql`. Nothing here was read from a real
+installation.
+
+- `schema.sql`: the `CREATE TABLE` statements of `schema_migrations`, `projection_agents`,
+  `projection_agent_memories`, `projection_agent_routines` and `projection_routine_triggers`,
+  copied on 2026-10-28 from `src/backend/openbot-database-schema.ts` of nightly-labs/openbot
+  (`BASELINE_V8_SCHEMA_SQL`; the last commit that touched the file is `03ac30a`, 2026-10-27). The
+  columns `limit_policy` (migration 27) and `missed_policy` (migration 33) that OpenBot adds with
+  `ALTER TABLE` are written into the `CREATE TABLE` of `projection_agent_routines`, where the
+  latest schema (`withRoutinePolicies`) puts them. The file ends with the rows of
+  `schema_migrations` for versions 8 to 47, the latest known on that day. None of the migrations
+  after 8 changes the other four tables.
+- `seed.sql`: two agents. `ada` has the fields of `AgentSummary`
+  (`packages/contracts/src/ipc-agents.ts`: `provider: "claude"`, `model`, `reasoningEffort`,
+  `avatarSeed`, `avatarHue`, `avatarUrl: null`, `workspacePath`), three memories (the third has 600
+  characters) and four routines whose `schedule_json` has the shapes `daily`, `weekly`, `interval`
+  and `monthly` of `packages/contracts/src/ipc-routines.ts`; the `monthly` one is off and has
+  `limit_policy` `skip` and `missed_policy` `run-once`. `min` has only the required fields.
+- Not in the fixture: `agent_memory_selections` (`src/backend/agent-memory-selection.ts`), where
+  OpenBot keeps whether a memory is `essential` or `searchable`. The adapter does not read it.

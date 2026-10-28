@@ -37,6 +37,7 @@ describe("adapters", () => {
       "letta",
       "hermes",
       "grok-bot",
+      "openbot",
       "memory",
     ]);
     const [header] = result.stdout.split(/\r?\n/);
@@ -55,6 +56,7 @@ describe("adapters", () => {
       "letta",
       "hermes",
       "grok-bot",
+      "openbot",
       "memory",
     ]);
     for (const row of rows) {
@@ -63,7 +65,7 @@ describe("adapters", () => {
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[7]).toEqual({
+    expect(rows[8]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -71,8 +73,8 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw, Claude Code, Codex, Letta Code or Hermes lives in the sandbox home, and
-    // Grok Bot has no home at all: it is found only through a zip.
+    // Nothing of OpenClaw, Claude Code, Codex, Letta Code, Hermes or OpenBot lives in the sandbox
+    // home, and Grok Bot has no home at all: it is found only through a zip.
     expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[3]).toMatchObject({ found: false, hint: expect.any(String) });
@@ -96,6 +98,12 @@ describe("adapters", () => {
       version: null,
       hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>",
     });
+    expect(rows[7]).toMatchObject({
+      name: "openbot",
+      displayName: "OpenBot",
+      found: false,
+      hint: expect.stringContaining("pass --source-dir <export.zip>"),
+    });
   });
 
   it("lists only the built-in adapters without an extra one", async () => {
@@ -109,6 +117,7 @@ describe("adapters", () => {
       "letta",
       "hermes",
       "grok-bot",
+      "openbot",
     ]);
   });
 });
