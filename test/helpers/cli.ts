@@ -2,7 +2,7 @@
 // directory (`OPENTELEPORT_HOME`) and the working directory are fresh temp folders, the
 // app-specific locations an adapter could read from the environment point into the sandbox, and
 // `PATH` leads to an empty folder so that no real `openclaw` or `claude` binary ever runs.
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,7 +28,10 @@ export type Sandbox = {
 };
 
 export async function sandbox(): Promise<Sandbox> {
-  const root = await mkdtemp(join(tmpdir(), "openteleport-cli-"));
+  // The real path: on macOS `tmpdir()` is `/var/...`, a link to `/private/var/...`, which is how
+  // the CLI sees its working directory and so how it prints every path below it. Expectations
+  // built from the unresolved form would never match.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "openteleport-cli-")));
   const home = join(root, "home");
   const cwd = join(root, "cwd");
   const bin = join(root, "bin");
