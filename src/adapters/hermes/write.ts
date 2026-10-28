@@ -52,7 +52,7 @@ const nonBlank = (value: string | undefined): string | undefined =>
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The number of characters as Python's `len` counts them, which is how Hermes keeps its limit. */
-const length = (value: string): number => Array.from(value).length;
+const charCount = (value: string): number => Array.from(value).length;
 
 const preview = (value: string): string => Array.from(value).slice(0, PREVIEW_CHARS).join("");
 
@@ -372,23 +372,24 @@ async function writeSoul(dir: string, bundle: Bundle, items: Items): Promise<voi
   if (persona === "" && !hasInstructions) return;
 
   let content: string;
+  let approximated: string | undefined;
   if (persona !== "" && hasInstructions) {
     content = mergeInstructions(bundle.persona, bundle.instructions);
-    items.approximated.push({
-      field: "instructions",
-      detail: "persona and instructions share one file (SOUL.md)",
-    });
+    approximated = "persona and instructions share one file (SOUL.md)";
   } else if (persona !== "") {
     content = `${persona}\n`;
   } else {
     content = bundle.instructions;
-    items.approximated.push({
-      field: "instructions",
-      detail: "no persona to share SOUL.md with; Hermes reads all of SOUL.md as the persona",
-    });
+    approximated =
+      "no persona to share SOUL.md with; Hermes reads all of SOUL.md as the persona";
   }
   const why = await putFile(dir, "SOUL.md", content);
-  if (why === undefined) return;
+  if (why === undefined) {
+    if (approximated !== undefined) {
+      items.approximated.push({ field: "instructions", detail: approximated });
+    }
+    return;
+  }
   const detail = `${why}; not written`;
   if (persona !== "") items.skipped.push({ field: "persona", detail });
   if (hasInstructions) items.skipped.push({ field: "instructions", detail });
@@ -561,11 +562,15 @@ async function writeMemory(
       const detail = `${preview(entry)}… (${reason})`;
       items.skipped.push({ field: `fact:${index + 1}`, detail });
     };
-    if (entry === "") skip("empty");
-    else if (kept.includes(entry) || added.includes(entry)) continue;
-    else if (length(renderEntries([...kept, ...added, entry])) > limit) {
+    if (entry === "") {
+      skip("empty");
+    } else if (kept.includes(entry) || added.includes(entry)) {
+      continue;
+    } else if (charCount(renderEntries([...kept, ...added, entry])) > limit) {
       skip(`Hermes memory limit: ${limit} chars`);
-    } else added.push(entry);
+    } else {
+      added.push(entry);
+    }
   }
 
   const next = [...kept, ...added];
@@ -623,6 +628,9 @@ async function writeRoutines(
   const skipAll = (why: string): string[] => {
     for (const routine of bundle.routines) {
       items.skipped.push({ field: `routine:${routine.name}`, detail: `${why}; not written` });
+    }
+    if (recorded.length > 0) {
+      items.warnings.push(`${why}; the cron jobs written earlier were left as they are`);
     }
     return [...recorded];
   };

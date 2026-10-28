@@ -63,7 +63,7 @@ export async function readJobsFile(file: string): Promise<JobsFile | { error: st
   }
   let data: unknown;
   try {
-    data = JSON.parse(source.startsWith("﻿") ? source.slice(1) : source);
+    data = JSON.parse(source.startsWith("\uFEFF") ? source.slice(1) : source);
   } catch (error) {
     return { error: `${file} is not valid JSON: ${(error as Error).message}` };
   }

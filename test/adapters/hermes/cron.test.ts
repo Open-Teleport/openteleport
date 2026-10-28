@@ -69,7 +69,7 @@ describe("readJobsFile", () => {
 
   it("accepts an object without jobs and drops a byte order mark", async () => {
     const file = join(root, "jobs.json");
-    await writeFile(file, `﻿${JSON.stringify({ updated_at: "x" })}`);
+    await writeFile(file, `\uFEFF${JSON.stringify({ updated_at: "x" })}`);
     expect(await readJobsFile(file)).toEqual({ jobs: [], rest: { updated_at: "x" }, ignored: [] });
   });
 

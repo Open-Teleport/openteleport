@@ -116,7 +116,7 @@ async function readText(
     return undefined;
   }
   const text = await readFile(path, "utf8");
-  return text.startsWith("﻿") ? text.slice(1) : text;
+  return text.startsWith("\uFEFF") ? text.slice(1) : text;
 }
 
 // -- Profiles ----------------------------------------------------------------------------------

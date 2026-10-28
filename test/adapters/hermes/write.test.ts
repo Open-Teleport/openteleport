@@ -549,6 +549,8 @@ describe("the routines", () => {
       "routine:Renew the domain",
     ]);
     expect(items.skipped[0]?.detail).toMatch(/is not valid JSON.*not written/);
+    // The jobs written the first time are still there, and the report says so.
+    expect(items.warnings.some((w) => /earlier were left as they are/.test(w))).toBe(true);
     expect(await text(join(profile(), "cron", "jobs.json"))).toBe("{ not json");
     expect((await readMarker()).cronJobIds).toEqual(ids);
   });
@@ -1033,6 +1035,29 @@ describe("openteleport move --to hermes", () => {
       expect((await readJobs(join(home, "profiles", "ada"))).jobs.every((job) => job.enabled === false)).toBe(
         true,
       );
+    } finally {
+      await box.cleanup();
+    }
+  });
+
+  it("prints the report, ending in done, and updates the profile in place the second time", async () => {
+    const box = await sandbox();
+    try {
+      const home = join(box.home, ".hermes");
+      await mkdir(home, { recursive: true });
+      await writeFile(join(home, "config.yaml"), "memory:\n  memory_char_limit: 2200\n");
+      const args = ["move", "--from", "folder", "--source-dir", ADA_DIR, "--agent", "Ada", "--to", "hermes"];
+
+      const first = await run(box, args);
+      expect(first.exitCode).toBe(0);
+      expect(first.stdout).toContain("Target: hermes / ada");
+      expect(first.stdout).toContain("Outcome: done");
+      expect(first.stdout).toContain("Restart the Hermes gateway");
+
+      const second = await run(box, args);
+      expect(second.exitCode).toBe(0);
+      expect(second.stdout).toContain("Target: hermes / ada");
+      expect(await readdir(join(home, "profiles"))).toEqual(["ada"]);
     } finally {
       await box.cleanup();
     }

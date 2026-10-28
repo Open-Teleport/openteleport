@@ -19,7 +19,7 @@ describe("parseEntries", () => {
   });
 
   it("drops a byte order mark", () => {
-    expect(parseEntries("﻿one\n§\ntwo")).toEqual(["one", "two"]);
+    expect(parseEntries("\uFEFFone\n§\ntwo")).toEqual(["one", "two"]);
   });
 
   it("reads CRLF files", () => {
@@ -36,7 +36,7 @@ describe("parseEntries", () => {
 
   it("is empty for an empty or blank file", () => {
     expect(parseEntries("")).toEqual([]);
-    expect(parseEntries("﻿ \n")).toEqual([]);
+    expect(parseEntries("\uFEFF \n")).toEqual([]);
   });
 });
 

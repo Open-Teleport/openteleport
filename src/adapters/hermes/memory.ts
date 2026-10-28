@@ -9,7 +9,7 @@ export const ENTRY_DELIMITER = "\n§\n";
  * full delimiter, each entry trimmed and the empty ones left out.
  */
 export function parseEntries(text: string): string[] {
-  const clean = (text.startsWith("﻿") ? text.slice(1) : text).replace(/\r\n/g, "\n");
+  const clean = (text.startsWith("\uFEFF") ? text.slice(1) : text).replace(/\r\n/g, "\n");
   return clean
     .split(ENTRY_DELIMITER)
     .map((entry) => entry.trim())
