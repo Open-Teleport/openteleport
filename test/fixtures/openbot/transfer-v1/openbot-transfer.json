@@ -1,0 +1,79 @@
+{
+  "format": "openbot-instance-transfer",
+  "version": 1,
+  "source": { "appVersion": "1.4.0", "exportedAt": "2026-10-28T10:00:00.000Z" },
+  "agents": [
+    {
+      "key": "ada",
+      "name": "Ada",
+      "title": "Release manager",
+      "description": "Ada keeps releases on track and drafts the release notes.",
+      "avatarSeed": "ada-7f3a",
+      "avatarHue": 210,
+      "avatar": null,
+      "provider": "claude",
+      "model": "claude-opus-5-5",
+      "reasoningEffort": "high",
+      "notifications": true,
+      "skills": [],
+      "files": null,
+      "routines": [
+        {
+          "key": "rtn_quarterly_review",
+          "name": "Quarterly review",
+          "instruction": "Review the quarter's releases and agree on three actions.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": {
+            "kind": "advanced",
+            "months": [1, 4, 7, 10],
+            "days": { "kind": "days-of-week", "days": [1] },
+            "time": { "kind": "at-time", "time": "09:00" }
+          },
+          "limitPolicy": "wait",
+          "missedPolicy": "skip"
+        },
+        {
+          "key": "rtn_inbox_sweep",
+          "name": "Inbox sweep",
+          "instruction": "Triage the bug reports that arrived since the last run.",
+          "active": false,
+          "timezone": "Europe/Warsaw",
+          "schedule": {
+            "kind": "interval",
+            "amount": 30,
+            "unit": "minutes",
+            "anchorAt": "2026-10-28T09:00:00.000Z"
+          },
+          "limitPolicy": "skip",
+          "missedPolicy": "run-once"
+        }
+      ],
+      "oneTimeRoutines": [
+        {
+          "key": "rtn_launch_check",
+          "name": "Launch checklist",
+          "instruction": "Run the launch checklist and report what is still open.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "once", "date": "2026-12-01", "time": "08:00" },
+          "limitPolicy": "wait",
+          "missedPolicy": "run-once"
+        }
+      ],
+      "memories": [
+        { "text": "The user reports in EUR.", "inclusion": "essential" },
+        { "text": "Releases freeze on the last Thursday of the month." }
+      ]
+    }
+  ],
+  "settings": {
+    "mcpServers": [],
+    "customProviders": [],
+    "customAgents": [],
+    "sidebarSections": [],
+    "routineFlows": []
+  },
+  "shared": "shared",
+  "signedIn": []
+}

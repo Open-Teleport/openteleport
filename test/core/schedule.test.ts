@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  OPENBOT_MIN_INTERVAL_MINUTES,
+  type OpenBotSchedule,
   describeSchedule,
   everyToCron,
   everyToMs,
+  fromOpenBotSchedule,
   fromOpenClawJob,
   msToEvery,
   parseCron,
+  toOpenBotSchedule,
+  toOpenBotWireSchedule,
   toOpenClawFlags,
   zonedToInstant,
 } from "../../src/core/schedule.js";
@@ -624,5 +629,431 @@ describe("schedule round-trips", () => {
     expect(flags.slice(0, 2)).toEqual(["--cron", cron.expression]);
     const every: Schedule = { kind: "every", every: "30m" };
     expect(toOpenClawFlags(every, "UTC")).toEqual(["--every", every.every]);
+  });
+});
+
+describe("fromOpenBotSchedule", () => {
+  const WARSAW = "Europe/Warsaw";
+  const cron = (expression: string) => ({ schedule: { kind: "cron", expression } });
+
+  it.each<[string, unknown, unknown]>([
+    ["hourly", { kind: "hourly", minute: 15 }, cron("15 * * * *")],
+    ["hourly at minute 0", { kind: "hourly", minute: 0 }, cron("0 * * * *")],
+    ["daily", { kind: "daily", time: "09:30" }, cron("30 9 * * *")],
+    ["daily at midnight", { kind: "daily", time: "00:00" }, cron("0 0 * * *")],
+    ["weekdays", { kind: "weekdays", time: "08:00" }, cron("0 8 * * 1-5")],
+    ["weekly", { kind: "weekly", weekday: 1, time: "09:00" }, cron("0 9 * * 1")],
+    ["weekly on Sunday", { kind: "weekly", weekday: 0, time: "18:45" }, cron("45 18 * * 0")],
+    ["monthly", { kind: "monthly", day: 1, time: "09:00" }, cron("0 9 1 * *")],
+    ["monthly on the 31st", { kind: "monthly", day: 31, time: "23:59" }, cron("59 23 31 * *")],
+    [
+      "advanced",
+      { kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" },
+      cron("0 9 1,15 1,6 *"),
+    ],
+    [
+      "advanced with one month and one day",
+      { kind: "advanced", months: [12], days: [24], time: "18:30" },
+      cron("30 18 24 12 *"),
+    ],
+    ["custom", { kind: "custom", expression: "*/5 * * * *" }, cron("*/5 * * * *")],
+    ["custom with padding", { kind: "custom", expression: "  0 9 * * 1-5 " }, cron("0 9 * * 1-5")],
+    [
+      "interval in minutes",
+      { kind: "interval", amount: 90, unit: "minutes" },
+      { schedule: { kind: "every", every: "90m" } },
+    ],
+    [
+      "interval in hours",
+      { kind: "interval", amount: 3, unit: "hours" },
+      { schedule: { kind: "every", every: "3h" } },
+    ],
+    [
+      "interval in days",
+      { kind: "interval", amount: 2, unit: "days" },
+      { schedule: { kind: "every", every: "2d" } },
+    ],
+    [
+      "once",
+      { kind: "once", date: "2026-11-01", time: "09:30" },
+      { schedule: { kind: "at", at: "2026-11-01T08:30:00.000Z" } },
+    ],
+  ])("reads %s", (_name, openBot, expected) => {
+    expect(fromOpenBotSchedule(openBot, WARSAW)).toStrictEqual(expected);
+  });
+
+  it("keeps the anchor of an interval beside the schedule", () => {
+    expect(
+      fromOpenBotSchedule(
+        { kind: "interval", amount: 30, unit: "minutes", anchorAt: "2026-10-28T10:00:00.000Z" },
+        WARSAW,
+      ),
+    ).toStrictEqual({
+      schedule: { kind: "every", every: "30m" },
+      extra: { anchorAt: "2026-10-28T10:00:00.000Z" },
+    });
+  });
+
+  it("leaves out an anchor that is not a date", () => {
+    expect(
+      fromOpenBotSchedule(
+        { kind: "interval", amount: 30, unit: "minutes", anchorAt: "soon" },
+        WARSAW,
+      ),
+    ).toStrictEqual({ schedule: { kind: "every", every: "30m" } });
+  });
+
+  it("reads a one-time schedule in the zone of the routine, summer and winter", () => {
+    const once = { kind: "once", date: "2026-07-01", time: "09:30" };
+    expect(fromOpenBotSchedule(once, WARSAW)).toStrictEqual({
+      schedule: { kind: "at", at: "2026-07-01T07:30:00.000Z" },
+    });
+    expect(fromOpenBotSchedule(once, "UTC")).toStrictEqual({
+      schedule: { kind: "at", at: "2026-07-01T09:30:00.000Z" },
+    });
+  });
+
+  // OpenBot's own contract (ipc-routines.ts) stores `advanced` with a day selection and a time
+  // selection, and transfer files carry that form.
+  it.each<[string, unknown, unknown]>([
+    [
+      "days of the month at a time",
+      {
+        kind: "advanced",
+        months: [1, 6],
+        days: { kind: "days-of-month", days: [1, 15] },
+        time: { kind: "at-time", time: "09:00" },
+      },
+      cron("0 9 1,15 1,6 *"),
+    ],
+    [
+      "days of the week at a time",
+      {
+        kind: "advanced",
+        months: [3, 9],
+        days: { kind: "days-of-week", days: [1, 3] },
+        time: { kind: "at-time", time: "07:15" },
+      },
+      cron("15 7 * 3,9 1,3"),
+    ],
+    [
+      "every day at a time",
+      {
+        kind: "advanced",
+        months: [6, 7, 8],
+        days: { kind: "every-day" },
+        time: { kind: "at-time", time: "06:00" },
+      },
+      cron("0 6 * 6,7,8 *"),
+    ],
+  ])("reads the nested form of advanced: %s", (_name, openBot, expected) => {
+    expect(fromOpenBotSchedule(openBot, WARSAW)).toStrictEqual(expected);
+  });
+
+  it("returns null for the nested advanced form that repeats within a day", () => {
+    expect(
+      fromOpenBotSchedule(
+        {
+          kind: "advanced",
+          months: [1],
+          days: { kind: "every-day" },
+          time: { kind: "every", amount: 2, unit: "hours" },
+        },
+        WARSAW,
+      ),
+    ).toBeNull();
+  });
+
+  it.each<[string, unknown]>([
+    ["a string", "daily"],
+    ["null", null],
+    ["undefined", undefined],
+    ["an array", [{ kind: "daily", time: "09:00" }]],
+    ["no kind", { time: "09:00" }],
+    ["an unknown kind", { kind: "yearly", time: "09:00" }],
+    ["a kind with different case", { kind: "Daily", time: "09:00" }],
+    ["hourly with minute 60", { kind: "hourly", minute: 60 }],
+    ["hourly with a fractional minute", { kind: "hourly", minute: 1.5 }],
+    ["hourly with a string minute", { kind: "hourly", minute: "15" }],
+    ["daily with hour 24", { kind: "daily", time: "24:00" }],
+    ["daily with minute 60", { kind: "daily", time: "09:60" }],
+    ["daily with a one digit hour", { kind: "daily", time: "9:00" }],
+    ["daily with seconds", { kind: "daily", time: "09:00:00" }],
+    ["daily with no time", { kind: "daily" }],
+    ["weekly on day 7", { kind: "weekly", weekday: 7, time: "09:00" }],
+    ["weekly on a day name", { kind: "weekly", weekday: "mon", time: "09:00" }],
+    ["monthly on day 0", { kind: "monthly", day: 0, time: "09:00" }],
+    ["monthly on day 32", { kind: "monthly", day: 32, time: "09:00" }],
+    ["an interval of 0", { kind: "interval", amount: 0, unit: "minutes" }],
+    ["an interval of 1.5", { kind: "interval", amount: 1.5, unit: "hours" }],
+    ["an interval over 100000", { kind: "interval", amount: 100_001, unit: "minutes" }],
+    ["an interval in weeks", { kind: "interval", amount: 1, unit: "weeks" }],
+    ["an interval with no unit", { kind: "interval", amount: 5 }],
+    ["advanced with no months", { kind: "advanced", months: [], days: [1], time: "09:00" }],
+    ["advanced with month 13", { kind: "advanced", months: [13], days: [1], time: "09:00" }],
+    ["advanced with no days", { kind: "advanced", months: [1], days: [], time: "09:00" }],
+    ["advanced with day 32", { kind: "advanced", months: [1], days: [32], time: "09:00" }],
+    ["advanced with a bad time", { kind: "advanced", months: [1], days: [1], time: "9" }],
+    [
+      "nested advanced with no days",
+      {
+        kind: "advanced",
+        months: [1],
+        days: { kind: "days-of-week", days: [] },
+        time: { kind: "at-time", time: "09:00" },
+      },
+    ],
+    [
+      "nested advanced with an unknown day selection",
+      {
+        kind: "advanced",
+        months: [1],
+        days: { kind: "last-day" },
+        time: { kind: "at-time", time: "09:00" },
+      },
+    ],
+    ["custom with no expression", { kind: "custom" }],
+    ["custom with an empty expression", { kind: "custom", expression: "" }],
+    ["custom with a numeric expression", { kind: "custom", expression: 5 }],
+    ["custom with a cron the parser refuses", { kind: "custom", expression: "61 * * * *" }],
+    ["custom with a macro", { kind: "custom", expression: "@daily" }],
+    ["once with an impossible date", { kind: "once", date: "2026-02-30", time: "09:00" }],
+    ["once with a malformed date", { kind: "once", date: "01.11.2026", time: "09:00" }],
+    ["once with a bad time", { kind: "once", date: "2026-11-01", time: "9:00" }],
+    ["once with no date", { kind: "once", time: "09:00" }],
+  ])("returns null for %s", (_name, openBot) => {
+    expect(fromOpenBotSchedule(openBot, WARSAW)).toBeNull();
+  });
+
+  it("returns null for a one-time schedule in a zone that does not exist", () => {
+    expect(
+      fromOpenBotSchedule({ kind: "once", date: "2026-11-01", time: "09:00" }, "Mars/Olympus"),
+    ).toBeNull();
+  });
+
+  it("only ever returns a schedule the manifest schema accepts", () => {
+    const inputs: unknown[] = [
+      { kind: "hourly", minute: 5 },
+      { kind: "weekly", weekday: 6, time: "23:59" },
+      { kind: "interval", amount: 1, unit: "days" },
+      { kind: "advanced", months: [2], days: [29], time: "00:00" },
+      { kind: "custom", expression: "0 0 1 jan *" },
+      { kind: "once", date: "2028-02-29", time: "12:00" },
+    ];
+    for (const input of inputs) {
+      const result = fromOpenBotSchedule(input, WARSAW);
+      expect(result).not.toBeNull();
+      expect(ScheduleSchema.safeParse(result?.schedule).success).toBe(true);
+    }
+  });
+});
+
+describe("toOpenBotSchedule", () => {
+  it.each<[string, Schedule, OpenBotSchedule]>([
+    ["hourly", { kind: "cron", expression: "15 * * * *" }, { kind: "hourly", minute: 15 }],
+    ["daily", { kind: "cron", expression: "30 9 * * *" }, { kind: "daily", time: "09:30" }],
+    ["weekdays", { kind: "cron", expression: "0 8 * * 1-5" }, { kind: "weekdays", time: "08:00" }],
+    [
+      "weekdays by name",
+      { kind: "cron", expression: "0 8 * * mon-fri" },
+      { kind: "weekdays", time: "08:00" },
+    ],
+    [
+      "weekly",
+      { kind: "cron", expression: "0 9 * * 1" },
+      { kind: "weekly", weekday: 1, time: "09:00" },
+    ],
+    [
+      "weekly on Sunday as 7",
+      { kind: "cron", expression: "0 9 * * 7" },
+      { kind: "weekly", weekday: 0, time: "09:00" },
+    ],
+    [
+      "weekly by day name",
+      { kind: "cron", expression: "0 9 * * Fri" },
+      { kind: "weekly", weekday: 5, time: "09:00" },
+    ],
+    [
+      "monthly",
+      { kind: "cron", expression: "0 9 1 * *" },
+      { kind: "monthly", day: 1, time: "09:00" },
+    ],
+    [
+      "advanced",
+      { kind: "cron", expression: "0 9 1,15 1,6 *" },
+      { kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" },
+    ],
+    [
+      "advanced with one month and one day",
+      { kind: "cron", expression: "30 18 24 12 *" },
+      { kind: "advanced", months: [12], days: [24], time: "18:30" },
+    ],
+    [
+      "custom for a step",
+      { kind: "cron", expression: "*/5 * * * *" },
+      { kind: "custom", expression: "*/5 * * * *" },
+    ],
+    [
+      "custom for a range of hours",
+      { kind: "cron", expression: "0 9-17 * * *" },
+      { kind: "custom", expression: "0 9-17 * * *" },
+    ],
+    [
+      "custom for a month name",
+      { kind: "cron", expression: "0 9 1 jan *" },
+      { kind: "custom", expression: "0 9 1 jan *" },
+    ],
+    [
+      "custom for a month with every day",
+      { kind: "cron", expression: "0 9 * 6 *" },
+      { kind: "custom", expression: "0 9 * 6 *" },
+    ],
+    [
+      "custom for a list of days in every month",
+      { kind: "cron", expression: "0 9 1,15 * *" },
+      { kind: "custom", expression: "0 9 1,15 * *" },
+    ],
+    [
+      "custom for a day of the month and a day of the week",
+      { kind: "cron", expression: "0 9 1 * 1" },
+      { kind: "custom", expression: "0 9 1 * 1" },
+    ],
+    [
+      "custom for six fields",
+      { kind: "cron", expression: "0 0 9 * * 1-5" },
+      { kind: "custom", expression: "0 0 9 * * 1-5" },
+    ],
+    [
+      "interval in minutes",
+      { kind: "every", every: "90m" },
+      { kind: "interval", amount: 90, unit: "minutes" },
+    ],
+    [
+      "interval in hours",
+      { kind: "every", every: "3h" },
+      { kind: "interval", amount: 3, unit: "hours" },
+    ],
+    [
+      "interval in days",
+      { kind: "every", every: "2d" },
+      { kind: "interval", amount: 2, unit: "days" },
+    ],
+    [
+      "the smallest interval OpenBot takes",
+      { kind: "every", every: "3m" },
+      { kind: "interval", amount: 3, unit: "minutes" },
+    ],
+    [
+      "an interval in the largest unit",
+      { kind: "every", every: "120m" },
+      { kind: "interval", amount: 2, unit: "hours" },
+    ],
+    [
+      "an interval of a whole day in minutes",
+      { kind: "every", every: "1440m" },
+      { kind: "interval", amount: 1, unit: "days" },
+    ],
+    [
+      "an interval of days given in hours",
+      { kind: "every", every: "48h" },
+      { kind: "interval", amount: 2, unit: "days" },
+    ],
+  ])("writes %s", (_name, schedule, expected) => {
+    expect(toOpenBotSchedule(schedule)).toStrictEqual(expected);
+  });
+
+  it.each<[string, Schedule]>([
+    ["a one-off time", { kind: "at", at: "2026-11-01T08:30:00.000Z" }],
+    ["an interval of 2 minutes", { kind: "every", every: "2m" }],
+    ["an interval of 1 minute", { kind: "every", every: "1m" }],
+    ["an interval over what OpenBot takes", { kind: "every", every: "200000m" }],
+    ["a cron the parser refuses", { kind: "cron", expression: "61 * * * *" }],
+    ["a cron with a macro", { kind: "cron", expression: "@daily" }],
+    [
+      "a cron that is too long for OpenBot",
+      { kind: "cron", expression: `0 9 * * ${"1,".repeat(200)}1` },
+    ],
+    ["an interval that is not a duration", { kind: "every", every: "often" }],
+  ])("returns null for %s", (_name, schedule) => {
+    expect(toOpenBotSchedule(schedule)).toBeNull();
+  });
+});
+
+describe("OpenBot schedule round-trips", () => {
+  const imported: OpenBotSchedule[] = [
+    { kind: "hourly", minute: 15 },
+    { kind: "daily", time: "09:00" },
+    { kind: "weekdays", time: "08:30" },
+    { kind: "weekly", weekday: 1, time: "09:00" },
+    { kind: "monthly", day: 28, time: "10:00" },
+    { kind: "interval", amount: 90, unit: "minutes" },
+    { kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" },
+    { kind: "custom", expression: "*/5 * * * *" },
+  ];
+
+  it.each(imported)("gives back %j", (openBot) => {
+    const read = fromOpenBotSchedule(openBot, "Europe/Warsaw");
+    expect(read).not.toBeNull();
+    expect(toOpenBotSchedule((read as { schedule: Schedule }).schedule)).toStrictEqual(openBot);
+  });
+
+  it("gives back an interval without the anchor it was read with", () => {
+    const read = fromOpenBotSchedule(
+      { kind: "interval", amount: 2, unit: "days", anchorAt: "2026-10-28T10:00:00.000Z" },
+      "UTC",
+    );
+    expect(toOpenBotSchedule((read as { schedule: Schedule }).schedule)).toStrictEqual({
+      kind: "interval",
+      amount: 2,
+      unit: "days",
+    });
+  });
+});
+
+describe("toOpenBotWireSchedule", () => {
+  it("writes advanced in the nested form OpenBot reads", () => {
+    expect(
+      toOpenBotWireSchedule({ kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" }),
+    ).toStrictEqual({
+      kind: "advanced",
+      months: [1, 6],
+      days: { kind: "days-of-month", days: [1, 15] },
+      time: { kind: "at-time", time: "09:00" },
+    });
+  });
+
+  it.each<OpenBotSchedule>([
+    { kind: "hourly", minute: 15 },
+    { kind: "daily", time: "09:00" },
+    { kind: "weekdays", time: "08:30" },
+    { kind: "weekly", weekday: 1, time: "09:00" },
+    { kind: "monthly", day: 28, time: "10:00" },
+    { kind: "interval", amount: 90, unit: "minutes" },
+    { kind: "interval", amount: 2, unit: "days", anchorAt: "2026-10-28T10:00:00.000Z" },
+    { kind: "custom", expression: "*/5 * * * *" },
+    { kind: "once", date: "2026-11-01", time: "09:30" },
+  ])("leaves %j as it is", (openBot) => {
+    expect(toOpenBotWireSchedule(openBot)).toStrictEqual(openBot);
+  });
+
+  it("is read back as the same schedule", () => {
+    const plain: OpenBotSchedule = { kind: "advanced", months: [1, 6], days: [1, 15], time: "09:00" };
+
+    expect(fromOpenBotSchedule(toOpenBotWireSchedule(plain), "UTC")).toStrictEqual(
+      fromOpenBotSchedule(plain, "UTC"),
+    );
+  });
+});
+
+describe("OPENBOT_MIN_INTERVAL_MINUTES", () => {
+  it("is the shortest interval toOpenBotSchedule takes", () => {
+    const minutes = (count: number) => toOpenBotSchedule({ kind: "every", every: `${count}m` });
+
+    expect(minutes(OPENBOT_MIN_INTERVAL_MINUTES - 1)).toBeNull();
+    expect(minutes(OPENBOT_MIN_INTERVAL_MINUTES)).toStrictEqual({
+      kind: "interval",
+      amount: OPENBOT_MIN_INTERVAL_MINUTES,
+      unit: "minutes",
+    });
   });
 });
