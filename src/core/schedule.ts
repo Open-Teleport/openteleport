@@ -103,6 +103,29 @@ export function everyToMs(every: string): number {
 }
 
 /**
+ * Converts an interval such as `30m`, `2h` or `3d` to a five field cron expression: a step of 30
+ * on the minute field, a step of 2 on the hour field (at minute 0), a step of 3 on the day of
+ * month field (at midnight). An interval of 1 is the unit itself: `1h` is minute 0 of every
+ * hour. Throws on anything else, as `everyToMs` does. Cron has no "every N after the last run":
+ * an interval that does not divide its unit evenly (`45m`, `5h`, `90m`) fires at fixed positions
+ * of the clock, not strictly N apart, so a caller that needs the interval exact reports the
+ * schedule as approximated.
+ */
+export function everyToCron(every: string): string {
+  everyToMs(every); // throws unless it is a positive whole number followed by m, h or d
+  const count = Number.parseInt(every, 10);
+  const step = count === 1 ? "*" : `*/${count}`;
+  switch (every.slice(-1)) {
+    case "m":
+      return `${step} * * * *`;
+    case "h":
+      return `0 ${step} * * *`;
+    default:
+      return `0 0 ${step} * *`;
+  }
+}
+
+/**
  * Writes a millisecond interval in the largest unit that divides it exactly (days, then hours,
  * then minutes). Anything that is not a whole number of minutes has no schedule form: `null`.
  */
@@ -238,6 +261,93 @@ function normaliseInstant(value: unknown): string | undefined {
   if (!valid) return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+// `YYYY-MM-DDTHH:MM`, seconds optional, and no zone or offset: the time as the clock on the wall
+// of the zone shows it
+const LOCAL_PATTERN = new RegExp(
+  [
+    String.raw`^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})`,
+    String.raw`T(?<hour>\d{2}):(?<minute>\d{2})(?::(?<second>\d{2}))?$`,
+  ].join(""),
+);
+
+/** The wall clock reading read as if it were UTC, in milliseconds since the epoch. */
+function asUtc(year: number, month: number, day: number, h: number, m: number, s: number): number {
+  const date = new Date(0);
+  // Not `Date.UTC`, which would read the years 0 to 99 as 1900 to 1999.
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(h, m, s, 0);
+  return date.getTime();
+}
+
+/**
+ * The instant at which the clocks of `timeZone` show `local` (`YYYY-MM-DDTHH:MM` or with
+ * `:SS`, no offset), written in UTC with a `Z`; `undefined` for a zone that does not exist or a
+ * date that does not (30 February). The clocks' offset from UTC is read for the time taken as
+ * UTC and subtracted, and read and subtracted once more where it changes in between, which is
+ * where the clocks go forward or back. A time the clocks skip (02:30 on the day they go forward)
+ * is not an error: the result is an instant the clocks show shifted by the change (03:30 in
+ * Warsaw). A time they show twice gives the later of the two.
+ */
+export function zonedToInstant(local: string, timeZone: string): string | undefined {
+  const groups = LOCAL_PATTERN.exec(local)?.groups;
+  if (!groups) return undefined;
+  // The group for the seconds is absent when the string has none.
+  const part = (name: string): number => Number(groups[name] ?? 0);
+  const [year, month, day, hour, minute, second] = [
+    part("year"),
+    part("month"),
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second"),
+  ] as const;
+  const valid =
+    year >= 1 &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth(year, month) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59;
+  if (!valid) return undefined;
+
+  let clock: Intl.DateTimeFormat;
+  try {
+    clock = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return undefined; // a RangeError: there is no such zone
+  }
+  /** How far ahead of UTC the clocks of the zone are at `instant`, in milliseconds. */
+  const offsetAt = (instant: number): number => {
+    const parts = clock.formatToParts(new Date(instant));
+    const shown = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((candidate) => candidate.type === type)?.value);
+    const shownAsUtc = asUtc(
+      shown("year"),
+      shown("month"),
+      shown("day"),
+      shown("hour"),
+      shown("minute"),
+      shown("second"),
+    );
+    return shownAsUtc - instant;
+  };
+
+  const wall = asUtc(year, month, day, hour, minute, second);
+  const first = wall - offsetAt(wall);
+  return new Date(wall - offsetAt(first)).toISOString();
 }
 
 /**

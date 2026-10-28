@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   describeSchedule,
+  everyToCron,
   everyToMs,
   fromOpenClawJob,
   msToEvery,
   parseCron,
   toOpenClawFlags,
+  zonedToInstant,
 } from "../../src/core/schedule.js";
 import { type Schedule, ScheduleSchema } from "../../src/core/schema.js";
 
@@ -141,6 +143,58 @@ describe("everyToMs", () => {
   });
 });
 
+describe("everyToCron", () => {
+  it.each([
+    ["30m", "*/30 * * * *"],
+    ["2h", "0 */2 * * *"],
+    ["3d", "0 0 */3 * *"],
+    ["1m", "* * * * *"],
+    ["1h", "0 * * * *"],
+    ["1d", "0 0 * * *"],
+    ["15m", "*/15 * * * *"],
+    ["12h", "0 */12 * * *"],
+    ["7d", "0 0 */7 * *"],
+  ])("converts %s to %j", (every, cron) => {
+    expect(everyToCron(every)).toBe(cron);
+  });
+
+  it.each(["30m", "2h", "3d", "1m", "1h", "1d", "5m", "12h"])(
+    "gives a cron expression parseCron accepts for %s",
+    (every) => {
+      expect(parseCron(everyToCron(every))).toEqual({ ok: true, fields: 5 });
+    },
+  );
+
+  it.each([
+    "",
+    "m",
+    "30",
+    "0m",
+    "05m",
+    "-5m",
+    "1.5h",
+    " 5m",
+    "5m ",
+    "5s",
+    "1w",
+    "30M",
+    "1h30m",
+    "99999999999999999999d",
+  ])("throws for %j, as everyToMs does", (every) => {
+    const messageOf = (run: () => unknown): string => {
+      try {
+        run();
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    };
+
+    expect(messageOf(() => everyToCron(every))).toMatch(/duration/i);
+    expect(messageOf(() => everyToCron(every))).toBe(messageOf(() => everyToMs(every)));
+  });
+});
+
 describe("msToEvery", () => {
   it.each([
     [60_000, "1m"],
@@ -177,6 +231,95 @@ describe("msToEvery", () => {
     expect(msToEvery(everyToMs("120m"))).toBe("2h");
     expect(msToEvery(everyToMs("48h"))).toBe("2d");
     expect(msToEvery(everyToMs("1440m"))).toBe("1d");
+  });
+});
+
+describe("zonedToInstant", () => {
+  /** The time on the clocks of `zone` at `instant`, as `YYYY-MM-DDTHH:MM`. */
+  function onTheWall(instant: string, zone: string): string {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).formatToParts(new Date(instant));
+    const at = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
+    return `${at("year")}-${at("month")}-${at("day")}T${at("hour")}:${at("minute")}`;
+  }
+
+  it.each([
+    ["winter time in Warsaw", "2026-11-01T09:30", "Europe/Warsaw", "2026-11-01T08:30:00.000Z"],
+    ["summer time in Warsaw", "2026-07-01T09:30", "Europe/Warsaw", "2026-07-01T07:30:00.000Z"],
+    ["UTC", "2026-11-01T09:30", "UTC", "2026-11-01T09:30:00.000Z"],
+    ["a zone ahead of UTC without daylight saving", "2026-07-01T09:30", "Asia/Tokyo", "2026-07-01T00:30:00.000Z"],
+    ["a zone with a half hour offset", "2026-07-01T09:30", "Asia/Kolkata", "2026-07-01T04:00:00.000Z"],
+    ["a zone behind UTC in summer", "2026-07-01T09:30", "America/New_York", "2026-07-01T13:30:00.000Z"],
+    ["a zone behind UTC in winter", "2026-11-02T09:30", "America/New_York", "2026-11-02T14:30:00.000Z"],
+    ["a zone whose day starts a day ahead", "2026-12-31T23:59", "Pacific/Kiritimati", "2026-12-31T09:59:00.000Z"],
+    ["seconds", "2026-11-01T09:30:15", "Europe/Warsaw", "2026-11-01T08:30:15.000Z"],
+    ["the day before the clocks go back", "2026-10-24T23:30", "Europe/Warsaw", "2026-10-24T21:30:00.000Z"],
+    ["the first minute after the clocks go forward", "2026-03-29T03:00", "Europe/Warsaw", "2026-03-29T01:00:00.000Z"],
+    ["the last minute before the clocks go forward", "2026-03-29T01:59", "Europe/Warsaw", "2026-03-29T00:59:00.000Z"],
+    ["a leap day", "2028-02-29T10:00", "UTC", "2028-02-29T10:00:00.000Z"],
+    ["midnight", "2026-07-01T00:00", "Europe/Warsaw", "2026-06-30T22:00:00.000Z"],
+  ])("reads %s", (_what, local, zone, instant) => {
+    expect(zonedToInstant(local, zone)).toBe(instant);
+  });
+
+  it("gives an instant for a time that does not exist when the clocks go forward", () => {
+    const instant = zonedToInstant("2026-03-29T02:30", "Europe/Warsaw");
+
+    expect(instant).toBeDefined();
+    expect(["2026-03-29T01:30", "2026-03-29T03:30"]).toContain(
+      onTheWall(instant ?? "", "Europe/Warsaw"),
+    );
+  });
+
+  it("gives one of the two instants for a time that happens twice when the clocks go back", () => {
+    const instant = zonedToInstant("2026-10-25T02:30", "Europe/Warsaw");
+
+    expect(["2026-10-25T00:30:00.000Z", "2026-10-25T01:30:00.000Z"]).toContain(instant);
+    expect(onTheWall(instant ?? "", "Europe/Warsaw")).toBe("2026-10-25T02:30");
+  });
+
+  it("reads back to the time it was given, wherever the zone has the time", () => {
+    for (const zone of ["Europe/Warsaw", "America/New_York", "Asia/Kolkata", "Australia/Lord_Howe"]) {
+      for (const local of ["2026-01-15T08:00", "2026-07-15T08:00", "2026-12-31T23:59"]) {
+        expect(onTheWall(zonedToInstant(local, zone) ?? "", zone)).toBe(local);
+      }
+    }
+  });
+
+  it("is undefined for a zone that does not exist", () => {
+    expect(zonedToInstant("2026-11-01T09:30", "Mars/Olympus")).toBeUndefined();
+    expect(zonedToInstant("2026-11-01T09:30", "")).toBeUndefined();
+  });
+
+  it.each([
+    ["30 February", "2026-02-30T09:30"],
+    ["29 February of a year that is not a leap year", "2026-02-29T09:30"],
+    ["29 February of a century that is not a leap year", "2100-02-29T09:30"],
+    ["month 13", "2026-13-01T09:30"],
+    ["month 0", "2026-00-10T09:30"],
+    ["day 0", "2026-11-00T09:30"],
+    ["31 November", "2026-11-31T09:30"],
+    ["hour 24", "2026-11-01T24:00"],
+    ["minute 60", "2026-11-01T09:60"],
+    ["second 60", "2026-11-01T09:30:60"],
+    ["a date without a time", "2026-11-01"],
+    ["a time with a Z", "2026-11-01T09:30Z"],
+    ["a time with an offset", "2026-11-01T09:30+01:00"],
+    ["fractions of a second", "2026-11-01T09:30:00.5"],
+    ["a space for the T", "2026-11-01 09:30"],
+    ["a two digit year", "26-11-01T09:30"],
+    ["nothing", ""],
+    ["words", "tomorrow morning"],
+  ])("is undefined for %s", (_what, local) => {
+    expect(zonedToInstant(local, "UTC")).toBeUndefined();
+    expect(zonedToInstant(local, "Europe/Warsaw")).toBeUndefined();
   });
 });
 
