@@ -112,7 +112,13 @@ const FIELDS: readonly Field[] = [
   {
     label: "memory.facts",
     capability: "facts",
-    describe: (bundle) => counted(bundle.facts.length, "fact"),
+    // A fact has no name: the target names the one it skipped by its place, `fact:<n>` from 1.
+    ...listField({
+      prefix: "fact",
+      noun: "fact",
+      names: (bundle) => bundle.facts.map((_fact, index) => String(index + 1)),
+      skippedOneByOne: false,
+    }),
     clear: (bundle) => ({ ...bundle, facts: [] }),
   },
   {

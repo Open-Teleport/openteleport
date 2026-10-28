@@ -34,7 +34,9 @@ export type WriteResult = {
    * Only what the adapter itself approximated, skipped or wants to warn about. What the engine
    * stripped before `write` (fields the capabilities mark `false`, routines with a schedule kind
    * not in `schedules`, `files` without `includeFiles`) is already in the report and is never
-   * reported again here.
+   * reported again here. A skipped item names a field of the report (`memory.facts`) or one part
+   * of it as `<prefix>:<name>` (`skill:web-brief`, `routine:Daily`, `note:diary`, and `fact:<n>`
+   * for the n-th fact, counted from 1); the engine then does not list what was skipped as moved.
    */
   items: { approximated: Item[]; skipped: Item[]; warnings: string[] };
 };
