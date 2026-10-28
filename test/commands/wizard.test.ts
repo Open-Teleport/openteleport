@@ -341,11 +341,58 @@ describe("runWizard", () => {
       expect(deps.move).not.toHaveBeenCalled();
     });
 
-    it("lets a failure of move or export through", async () => {
+    it("uses the agent that was picked, not the first one", async () => {
+      const builders = app("alpha", { ada: "Ada", bob: "Bob" });
+      const { prompter } = fakePrompter([ALPHA, "Bob", BETA, true]);
+      const deps = depsFor([builders, beta]);
+      await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
+
+      expect(deps.move).toHaveBeenCalledTimes(1);
+      expect(deps.move.mock.calls[0]?.[0]).toEqual({ from: "alpha", to: "beta", agent: "bob" });
+    });
+
+    it("uses the source and the target that were picked, and lists the agents of that source", async () => {
+      const zed = app("beta", { zed: "Zed" });
+      const gamma = app("gamma", {});
+      const listAlpha = vi.spyOn(alpha, "list");
+      const listZed = vi.spyOn(zed, "list");
+      const { prompter, calls } = fakePrompter([BETA, "In-memory gamma", true]);
+      const deps = depsFor([alpha, zed, gamma]);
+      await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
+
+      expect(listZed).toHaveBeenCalled();
+      expect(listAlpha).not.toHaveBeenCalled();
+      expect(texts(calls, "note")[0]).toBe("Agent: Zed");
+      expect(deps.move.mock.calls[0]?.[0]).toEqual({ from: "beta", to: "gamma", agent: "zed" });
+    });
+
+    it("exports the agent that was picked when there are several", async () => {
+      const builders = app("alpha", { ada: "Ada", bob: "Bob Builder" });
+      const { prompter } = fakePrompter([ALPHA, "Bob Builder", JETPACK, true]);
+      const deps = depsFor([builders, beta]);
+      await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
+
+      expect(deps.exportTo.mock.calls[0]?.[0]).toEqual({
+        from: "alpha",
+        agent: "bob",
+        out: "bob-builder.jetpack",
+      });
+    });
+
+    it("lets a failure of move through", async () => {
       const { prompter } = fakePrompter([ALPHA, BETA, true]);
       const deps = depsFor([alpha, beta]);
       deps.move.mockRejectedValue(new Error("Found 1 possible secret"));
       await expect(runWizard(prompter, {}, deps)).rejects.toThrow("Found 1 possible secret");
+      expect(deps.exportTo).not.toHaveBeenCalled();
+    });
+
+    it("lets a failure of export through", async () => {
+      const { prompter } = fakePrompter([ALPHA, JETPACK, true]);
+      const deps = depsFor([alpha, beta]);
+      deps.exportTo.mockRejectedValue(new Error("Found 2 possible secrets"));
+      await expect(runWizard(prompter, {}, deps)).rejects.toThrow("Found 2 possible secrets");
+      expect(deps.move).not.toHaveBeenCalled();
     });
   });
 

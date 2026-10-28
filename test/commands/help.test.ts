@@ -63,7 +63,9 @@ describe("--help", () => {
 
   it("points at --help-all, and leaves out the rest", async () => {
     const { stdout } = await run(box, ["--help"]);
-    expect(stdout).toContain("More: `openteleport --help-all` lists every command and flag.");
+    expect(stdout.trimEnd().endsWith(
+      "More: `openteleport --help-all` lists every command and flag.",
+    )).toBe(true);
     for (const name of [...ADVANCED_FLAGS, ...ADVANCED_COMMANDS, "Environment:", "OPENTELEPORT_"]) {
       expect(stdout, name).not.toContain(name);
     }
