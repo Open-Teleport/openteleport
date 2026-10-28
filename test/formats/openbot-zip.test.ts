@@ -188,9 +188,12 @@ const withId = (bundle: Bundle): Bundle => ({
 
 const daily: Schedule = { kind: "cron", expression: "0 9 * * *" };
 
-const skillOf = (name: string, extra: FileEntry[] = []) => ({
+const skillMd = (name: string): string =>
+  `---\nname: ${name}\ndescription: Does ${name}.\n---\n\n# ${name}\n`;
+
+const skillOf = (name: string, extra: FileEntry[] = [], markdown = skillMd(name)) => ({
   name,
-  files: [{ path: "SKILL.md", bytes: strToU8(`# ${name}\n`) }, ...extra],
+  files: [{ path: "SKILL.md", bytes: strToU8(markdown) }, ...extra],
 });
 
 type Written = {
@@ -1377,6 +1380,41 @@ describe("writeOpenBotImportZip", () => {
       expect(written.agents[0]?.skills).toEqual(["agents/ada/skills/twice"]);
       expect(written.items.skipped).toEqual([
         { field: "skill:twice", detail: "another skill of this name is already written" },
+      ]);
+    });
+
+    it("leaves out a skill whose SKILL.md OpenBot could not read, so that it does not refuse the agent", () => {
+      const needs = "needs a name of at most 80 characters and a description of at most 1024";
+      const written = write([
+        bundleOf({
+          skills: [
+            skillOf("plain", [], "# Plain\n\nNo frontmatter.\n"),
+            skillOf("no-description", [], "---\nname: no-description\n---\n# x\n"),
+            skillOf("no-name", [], "---\ndescription: Has none.\n---\n# x\n"),
+            skillOf("long-name", [], `---\nname: ${"n".repeat(81)}\ndescription: d\n---\n`),
+            skillOf("long-description", [], `---\nname: x\ndescription: ${"d".repeat(1025)}\n---\n`),
+            skillOf("not-yaml", [], "---\nname: [unclosed\ndescription: d\n---\n"),
+            skillOf("not-a-map", [], "---\n- one\n- two\n---\n"),
+            { name: "binary", files: [{ path: "SKILL.md", bytes: new Uint8Array([0xff, 0xfe]) }] },
+            skillOf("crlf", [], "---\r\nname: crlf\r\ndescription: Works.\r\n---\r\n# x\r\n"),
+            skillOf("limits", [], `---\nname: ${"n".repeat(80)}\ndescription: ${"d".repeat(1024)}\n---\n`),
+          ],
+        }),
+      ]);
+
+      expect(written.agents[0]?.skills).toEqual([
+        "agents/ada/skills/crlf",
+        "agents/ada/skills/limits",
+      ]);
+      expect(written.items.skipped).toEqual([
+        { field: "skill:plain", detail: "its SKILL.md has no frontmatter, which OpenBot needs" },
+        { field: "skill:no-description", detail: `the frontmatter of its SKILL.md ${needs}` },
+        { field: "skill:no-name", detail: `the frontmatter of its SKILL.md ${needs}` },
+        { field: "skill:long-name", detail: `the frontmatter of its SKILL.md ${needs}` },
+        { field: "skill:long-description", detail: `the frontmatter of its SKILL.md ${needs}` },
+        { field: "skill:not-yaml", detail: "the frontmatter of its SKILL.md is not valid YAML" },
+        { field: "skill:not-a-map", detail: `the frontmatter of its SKILL.md ${needs}` },
+        { field: "skill:binary", detail: "its SKILL.md is not valid UTF-8" },
       ]);
     });
   });

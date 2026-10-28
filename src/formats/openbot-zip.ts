@@ -12,6 +12,7 @@
 // the limits are refused before anything is inflated.
 import { stat } from "node:fs/promises";
 import { zipSync } from "fflate";
+import { parse as parseYaml } from "yaml";
 import { isSafeName } from "../adapters/fs.js";
 import type { WriteResult } from "../adapters/types.js";
 import {
@@ -73,6 +74,10 @@ const AGENT_ENTRY = /^agents\/([^/]+)\/(.+)$/;
 const FILES_PREFIX = "files/";
 const INSTRUCTIONS_FILE = "INSTRUCTIONS.md";
 const SKILL_FILE = "SKILL.md";
+const MAX_SKILL_NAME_CHARS = 80;
+const MAX_SKILL_DESCRIPTION_CHARS = 1024;
+// The frontmatter OpenBot looks for at the top of a SKILL.md.
+const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u;
 const ROUTINE_LIMIT_POLICIES = ["wait", "skip"];
 const ROUTINE_MISSED_POLICIES = ["skip", "run-once"];
 const MEMORY_INCLUSIONS = ["essential", "searchable"] as const;
@@ -690,18 +695,56 @@ function descriptionOf(text: string): string {
   return (end > 0 ? head.slice(0, end) : head).trimEnd();
 }
 
+/**
+ * OpenBot reads the name and the description of a skill from the frontmatter of its SKILL.md, and
+ * refuses the whole agent when a skill has none, so a skill without them is left out instead.
+ */
+function frontmatterProblem(main: FileEntry): string | undefined {
+  let text: string;
+  try {
+    text = utf8.decode(main.bytes);
+  } catch {
+    return `its ${SKILL_FILE} is not valid UTF-8`;
+  }
+  const match = FRONTMATTER.exec(text);
+  if (match === null) return `its ${SKILL_FILE} has no frontmatter, which OpenBot needs`;
+  let metadata: unknown;
+  try {
+    metadata = parseYaml(match[1] ?? "");
+  } catch {
+    return `the frontmatter of its ${SKILL_FILE} is not valid YAML`;
+  }
+  const name = isRecord(metadata) ? nonBlank(metadata.name) : undefined;
+  const description = isRecord(metadata) ? nonBlank(metadata.description) : undefined;
+  if (
+    name === undefined ||
+    name.length > MAX_SKILL_NAME_CHARS ||
+    description === undefined ||
+    description.length > MAX_SKILL_DESCRIPTION_CHARS
+  ) {
+    return (
+      `the frontmatter of its ${SKILL_FILE} needs a name of at most ${MAX_SKILL_NAME_CHARS} ` +
+      `characters and a description of at most ${MAX_SKILL_DESCRIPTION_CHARS}`
+    );
+  }
+  return undefined;
+}
+
 function skillProblem(skill: Skill, taken: ReadonlySet<string>, kept: number): string | undefined {
   if (kept >= MAX_SKILLS) return `OpenBot takes at most ${MAX_SKILLS} skills per agent`;
   if (!isSafeName(skill.name) || isForbiddenPath(skill.name)) {
     return "its name is not safe to write";
   }
   if (taken.has(skill.name)) return "another skill of this name is already written";
-  if (!skill.files.some(({ path }) => path === SKILL_FILE)) return `it has no ${SKILL_FILE}`;
+  const main = skill.files.find(({ path }) => path === SKILL_FILE);
+  if (main === undefined) return `it has no ${SKILL_FILE}`;
   // OpenBot refuses the whole archive for such a path, so the skill does not go.
   const refused = skill.files.find(
     ({ path }) => !isSafeArchivePath(path) || isForbiddenPath(path),
   );
   if (refused !== undefined) return `OpenBot refuses the path ${refused.path}`;
+  const frontmatter = frontmatterProblem(main);
+  if (frontmatter !== undefined) return frontmatter;
   if (skill.files.length > MAX_SKILL_FILES) {
     return `OpenBot takes at most ${MAX_SKILL_FILES} files in a skill`;
   }
