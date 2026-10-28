@@ -8,13 +8,13 @@ import { dirname, join, resolve, sep } from "node:path";
 import type { Item } from "../../core/report.js";
 import { describeSchedule } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
-import { slugify } from "../../core/text.js";
+import { oneLine, slugify } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
 import { MARKER_FILE, writeMarker } from "../marker.js";
 import { claimFolder } from "../names.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type Shell, cronAddCommand, shellQuote } from "./crons.js";
 import { renderMemFs } from "./memfs.js";
-import { isRecord, oneLine, text } from "./util.js";
 
 const FOLDER_SUFFIX = "-letta-memory";
 const MEMORY_DIR = "memory";
@@ -32,7 +32,6 @@ const UNVERIFIED_WARNING =
   "plain memory folder is assumed to work (unverified)";
 
 type Items = WriteResult["items"];
-
 
 /**
  * The file stem of each routine's prompt in `routines/`, in the order of `routines`: the name as
@@ -61,7 +60,7 @@ function modelHandle(models: readonly ModelPref[], approximated: Item[]): string
   const named = (pref: ModelPref): boolean =>
     pref.provider !== undefined || pref.model !== undefined;
   const chosen = models.find(
-    (pref) => text(pref.provider) !== undefined && text(pref.model) !== undefined,
+    (pref) => nonBlank(pref.provider) !== undefined && nonBlank(pref.model) !== undefined,
   );
   if (chosen === undefined) {
     if (models.some(named)) {
@@ -72,8 +71,8 @@ function modelHandle(models: readonly ModelPref[], approximated: Item[]): string
     }
     return undefined;
   }
-  const provider = text(chosen.provider) as string;
-  const model = text(chosen.model) as string;
+  const provider = nonBlank(chosen.provider) as string;
+  const model = nonBlank(chosen.model) as string;
   const handle = model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
   const others = models.filter((pref) => pref !== chosen && named(pref)).length;
   approximated.push({
@@ -116,7 +115,7 @@ function descriptionOf(bundle: Bundle, routine: Routine): string | undefined {
   const vendor = bundle.manifest["x-letta"];
   const routines = isRecord(vendor) ? vendor.routines : undefined;
   const extra = isRecord(routines) ? routines[routine.name] : undefined;
-  return isRecord(extra) ? text(extra.description) : undefined;
+  return isRecord(extra) ? nonBlank(extra.description) : undefined;
 }
 
 /** `lines` as comments. A line break inside a line ends the comment too, so each part gets `# `. */
@@ -334,7 +333,7 @@ export async function writeLettaAgent(
     });
   }
   items.approximated.push(...routineApproximations(bundle.routines));
-  if (text(manifest.title) !== undefined && text(manifest.description) !== undefined) {
+  if (nonBlank(manifest.title) !== undefined && nonBlank(manifest.description) !== undefined) {
     items.skipped.push({
       field: "description",
       detail: "Letta has no field for it beside the title, which is used",

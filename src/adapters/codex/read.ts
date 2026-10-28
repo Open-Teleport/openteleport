@@ -12,8 +12,9 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { byCodeUnit, splitInstructions } from "../../core/text.js";
-import { entriesOf, lstatIfAny } from "../fs.js";
+import { byCodeUnit, splitInstructions, truncate, withoutMark } from "../../core/text.js";
+import { isRecord } from "../../core/values.js";
+import { entriesOf, isNotFound, lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
 import { readSkillFolders } from "../skill-files.js";
 import type { Adapter, AgentRef, Ctx } from "../types.js";
@@ -24,9 +25,7 @@ import {
   IDS_FILE,
   agentsDir,
   codexHome,
-  isRecord,
   legacySkillsDir,
-  truncate,
   userSkillsDir,
 } from "./paths.js";
 
@@ -58,10 +57,6 @@ const isStrings = (value: unknown): value is string[] =>
 /** The text with Windows line endings turned into line feeds. */
 const lf = (text: string): string => text.replace(/\r\n/g, "\n");
 
-const isMissing = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException).code === "ENOENT" ||
-  (error as NodeJS.ErrnoException).code === "ENOTDIR";
-
 const errorLine = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
 
@@ -83,7 +78,7 @@ async function readText(path: string, label: string): Promise<string | undefined
     if (!info.isFile()) return undefined;
     size = info.size;
   } catch (error) {
-    if (isMissing(error)) return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
   if (size > MAX_TEXT_ENTRY_BYTES) {
@@ -93,7 +88,7 @@ async function readText(path: string, label: string): Promise<string | undefined
   }
   const text = await readFile(path, "utf8");
   // Some Windows editors start a UTF-8 file with a byte order mark, which would hide `# Persona`.
-  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  return withoutMark(text);
 }
 
 // -- Detection -----------------------------------------------------------------------------------

@@ -1,16 +1,14 @@
 // The YAML frontmatter at the top of a Markdown file (`---` lines around key: value pairs): a
 // Claude Code subagent, a Letta memory file, a skill's SKILL.md.
 import { parse } from "yaml";
+import { withoutMark } from "./text.js";
 
 // The opening fence must be the first line; the closing one is the next line that is only `---`.
 const FRONTMATTER = /^---[ \t]*\n(?:([\s\S]*?)\n)?---[ \t]*(?:\n|$)/;
 
-const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
-
 /** The text with its byte order mark dropped and its line endings made `\n`. */
 function normalized(text: string): string {
-  const unmarked = text.startsWith(BYTE_ORDER_MARK) ? text.slice(1) : text;
-  return unmarked.replace(/\r\n?/g, "\n");
+  return withoutMark(text).replace(/\r\n?/g, "\n");
 }
 
 /** What is wrong with a frontmatter block: it is not YAML (`yaml`) or not a mapping (`shape`). */

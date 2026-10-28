@@ -5,6 +5,7 @@ import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { isRecord, nonBlank } from "../../core/values.js";
 import { DB_FILE } from "./paths.js";
 
 type Sqlite = typeof import("node:sqlite");
@@ -53,16 +54,6 @@ const REQUIRED_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   projection_agent_routines: ["routine_id", "agent_id", "name", "instruction", "active", "timezone"],
   projection_routine_triggers: ["routine_id", "schedule_json"],
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-blank string, or `undefined`. */
-function text(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
 
 // -- Loading the module -----------------------------------------------------------------------
 
@@ -318,19 +309,19 @@ export function readDbAgents(db: DatabaseSync): OpenBotDbAgent[] {
     const json = parseObject(row.agent_json);
     const agent: OpenBotDbAgent = {
       id: row.agent_id,
-      name: text(json.name) ?? row.agent_id,
+      name: nonBlank(json.name) ?? row.agent_id,
       memories: memories.get(row.agent_id) ?? [],
       routines: routines.get(row.agent_id) ?? [],
     };
-    keep(agent, "title", text(json.title));
+    keep(agent, "title", nonBlank(json.title));
     keep(agent, "description", typeof json.description === "string" ? json.description : undefined);
-    keep(agent, "provider", text(json.provider));
-    keep(agent, "model", text(json.model) ?? text(row.model));
-    keep(agent, "reasoningEffort", text(json.reasoningEffort));
+    keep(agent, "provider", nonBlank(json.provider));
+    keep(agent, "model", nonBlank(json.model) ?? nonBlank(row.model));
+    keep(agent, "reasoningEffort", nonBlank(json.reasoningEffort));
     keep(agent, "avatarSeed", json.avatarSeed);
     keep(agent, "avatarHue", json.avatarHue);
-    keep(agent, "avatar", text(json.avatar) ?? text(json.avatarUrl));
-    keep(agent, "workspacePath", text(json.workspacePath));
+    keep(agent, "avatar", nonBlank(json.avatar) ?? nonBlank(json.avatarUrl));
+    keep(agent, "workspacePath", nonBlank(json.workspacePath));
     keep(agent, "notifications", json.notifications);
     agents.push(agent);
   }

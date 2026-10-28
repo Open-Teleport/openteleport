@@ -16,7 +16,6 @@ export type AgentFile = {
 
 const KNOWN_KEYS = new Set(["name", "description", "tools", "model"]);
 
-
 /** A scalar as text; anything else, and an empty string, is absent. */
 function scalar(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {

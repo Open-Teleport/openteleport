@@ -5,15 +5,16 @@
 // records the id of the agent and what was written, so that moving the agent again updates the
 // profile in place and leaves what Hermes and the user added since.
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, posix } from "node:path";
 import { stringify } from "yaml";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
-import { mergeInstructions, slugify } from "../../core/text.js";
-import { freeSibling, isFree, isSafeName, lstatIfAny, replaceFile } from "../fs.js";
+import { byCodeUnit, mergeInstructions, slugify } from "../../core/text.js";
+import { isRecord } from "../../core/values.js";
+import { freeSibling, isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
@@ -86,14 +87,8 @@ const HERMES_RESERVED_PROFILES: ReadonlySet<string> = new Set([
 
 const RESERVED_SUFFIX = "-agent";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const nonBlank = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value.trim();
-
-// Plain code-unit order, so that the result does not depend on the locale.
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The number of characters as Python's `len` counts them, which is how Hermes keeps its limit. */
 const charCount = (value: string): number => Array.from(value).length;
@@ -559,15 +554,6 @@ async function writeProfileSkills(
 
 // -- Memory ------------------------------------------------------------------------------------
 
-async function readText(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
 /**
  * Writes the facts as entries of `memories/MEMORY.md`. The entries this adapter wrote last time
  * (`recorded`) are taken out first; entries that are not ours stay, and the new ones come after
@@ -592,7 +578,7 @@ async function writeMemory(
     return [...recorded];
   }
 
-  const current = await readText(join(dir, ...rel.split("/")));
+  const current = await readTextIfAny(join(dir, ...rel.split("/")));
   const existing = parseEntries(current ?? "");
   const kept = [...existing];
   for (const entry of recorded) {

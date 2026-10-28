@@ -44,12 +44,3 @@ export function agentsDir(home: string): string {
 
 /** The extension of an agent file; Codex reads no other file from the agents folder. */
 export const AGENT_EXTENSION = ".toml";
-
-// Small helpers that `read.ts` and `write.ts` share, so that each is defined once.
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-export const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;

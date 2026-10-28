@@ -17,9 +17,11 @@ import {
   entriesOf,
   freeSibling,
   isFree,
+  isNotFound,
   isSafeName,
   lstatIfAny,
   numberedSiblings,
+  readTextIfAny,
   replaceFile,
 } from "../../src/adapters/fs.js";
 
@@ -323,5 +325,40 @@ describe("numberedSiblings", () => {
 
   it("is empty when the folder is not there", async () => {
     expect(await numberedSiblings(join(root, "nothing", "ada"))).toEqual([]);
+  });
+});
+
+describe("isNotFound", () => {
+  it.each(["ENOENT", "ENOTDIR"])("is true for %s", (code) => {
+    expect(isNotFound(Object.assign(new Error(code), { code }))).toBe(true);
+  });
+
+  it.each(["EACCES", "EIO", "EISDIR", "ELOOP"])("is false for %s", (code) => {
+    expect(isNotFound(Object.assign(new Error(code), { code }))).toBe(false);
+  });
+
+  it("is false for an error with no code", () => {
+    expect(isNotFound(new Error("no code"))).toBe(false);
+  });
+});
+
+describe("readTextIfAny", () => {
+  it("reads the text of a file", async () => {
+    await writeFile(join(root, "note.md"), "naïve\n");
+
+    expect(await readTextIfAny(join(root, "note.md"))).toBe("naïve\n");
+  });
+
+  it("is undefined for a file that is not there, or one with a file on the way", async () => {
+    await writeFile(join(root, "a-file"), "x");
+
+    expect(await readTextIfAny(join(root, "nothing"))).toBeUndefined();
+    expect(await readTextIfAny(join(root, "a-file", "inside"))).toBeUndefined();
+  });
+
+  it("throws any other error, as for a folder where the file should be", async () => {
+    await mkdir(join(root, "a-folder"));
+
+    await expect(readTextIfAny(join(root, "a-folder"))).rejects.toMatchObject({ code: "EISDIR" });
   });
 });

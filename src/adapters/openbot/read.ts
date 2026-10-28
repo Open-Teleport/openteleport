@@ -12,6 +12,7 @@ import {
   isSafeArchivePath,
 } from "../../core/paths.js";
 import type { Bundle, FileEntry, Manifest, Note, Routine } from "../../core/schema.js";
+import { byCodeUnit, oneLine, plural, truncate } from "../../core/text.js";
 import { openBotModelPref, readOpenBotZip, toBundleRoutine } from "../../formats/openbot-zip.js";
 import { lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
@@ -37,18 +38,6 @@ const SKILLS_WARNING =
   "skills are not readable from the OpenBot database; export from the app (a transfer zip) carries them";
 
 type Json = Record<string, unknown>;
-
-/** One line of text: every run of whitespace and control characters becomes one space. */
-const oneLine = (value: string): string => value.replace(/[\p{Cc}\s]+/gu, " ").trim();
-
-/** Cuts `value` to `max` characters, the last one an ellipsis. */
-const truncate = (value: string, max: number): string =>
-  value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-const plural = (count: number, one: string, many: string): string =>
-  count === 1 ? `1 ${one}` : `${count} ${many}`;
 
 // -- Finding the source -----------------------------------------------------------------------
 

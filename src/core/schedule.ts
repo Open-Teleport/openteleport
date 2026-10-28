@@ -1,4 +1,5 @@
 import type { Schedule } from "./schema.js";
+import { isRecord, nonBlank } from "./values.js";
 
 type FieldSpec = {
   label: string;
@@ -216,16 +217,6 @@ export function toOpenClawFlags(s: Schedule, tz: string): string[] {
     case "at":
       return ["--at", s.at, "--tz", tz];
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function nonBlank(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
 }
 
 // date, then time with optional seconds and fraction, then a mandatory `Z` or `+hh:mm` offset

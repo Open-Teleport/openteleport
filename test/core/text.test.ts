@@ -3,9 +3,13 @@ import {
   byCodeUnit,
   factsToProse,
   mergeInstructions,
+  oneLine,
+  plural,
   proseToFacts,
   slugify,
   splitInstructions,
+  truncate,
+  withoutMark,
 } from "../../src/core/text.js";
 
 describe("mergeInstructions", () => {
@@ -277,5 +281,53 @@ describe("slugify", () => {
 
   it("gives the fallback, not the suffix, for nothing usable", () => {
     expect(slugify("", { fallback: "agent", deviceSuffix: "-r" })).toBe("agent");
+  });
+});
+
+describe("truncate", () => {
+  it("leaves a text of at most max characters alone", () => {
+    expect(truncate("Ada", 3)).toBe("Ada");
+    expect(truncate("", 1)).toBe("");
+  });
+
+  it("cuts to max characters, the last one an ellipsis", () => {
+    expect(truncate("Reviews pull requests", 10)).toBe("Reviews p\u2026");
+    expect(truncate("Reviews pull requests", 10)).toHaveLength(10);
+  });
+});
+
+describe("oneLine", () => {
+  it("turns every run of whitespace and control characters into one space", () => {
+    expect(oneLine("  Ada\r\n\tLovelace \u0007 wrote\n\nnotes ")).toBe("Ada Lovelace wrote notes");
+  });
+
+  it("is empty for a text with nothing in it", () => {
+    expect(oneLine(" \n\t ")).toBe("");
+  });
+});
+
+describe("plural", () => {
+  it("counts in the singular for 1 and the plural for anything else", () => {
+    expect(plural(1, "skill")).toBe("1 skill");
+    expect(plural(0, "skill")).toBe("0 skills");
+    expect(plural(3, "skill")).toBe("3 skills");
+  });
+
+  it("takes the plural it is given when the word with an s is not it", () => {
+    expect(plural(1, "memory entry", "memory entries")).toBe("1 memory entry");
+    expect(plural(2, "memory entry", "memory entries")).toBe("2 memory entries");
+  });
+});
+
+describe("withoutMark", () => {
+  it("drops one byte order mark at the start", () => {
+    expect(withoutMark("\uFEFF# Persona")).toBe("# Persona");
+    expect(withoutMark("\uFEFF\uFEFFx")).toBe("\uFEFFx");
+  });
+
+  it("leaves a text without one, or with one inside, alone", () => {
+    expect(withoutMark("# Persona")).toBe("# Persona");
+    expect(withoutMark("a\uFEFFb")).toBe("a\uFEFFb");
+    expect(withoutMark("")).toBe("");
   });
 });

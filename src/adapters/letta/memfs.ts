@@ -9,10 +9,9 @@ import { splitFrontmatter } from "../../core/frontmatter.js";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import type { Bundle, FileEntry, Note, Skill } from "../../core/schema.js";
-import { factsToProse } from "../../core/text.js";
-import { isSafeName } from "../fs.js";
+import { factsToProse, oneLine, truncate, withoutMark } from "../../core/text.js";
+import { entriesOf, isSafeName } from "../fs.js";
 import { EXPORT_MESSAGES, type SkillMessages, readSkillFolders } from "../skill-files.js";
-import { entriesOf, oneLine, truncate, withoutMark } from "./util.js";
 
 /** The files of the memory root that mean something of their own; any other `*.md` is a note. */
 export const RESERVED_ROOT = ["MEMORY.md", "persona.md", "human.md", "instructions.md"] as const;

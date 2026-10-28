@@ -45,7 +45,8 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../core/schema.js";
-import { slugify } from "../core/text.js";
+import { plural, slugify } from "../core/text.js";
+import { isRecord, nonBlank } from "../core/values.js";
 import { type ZipPolicy, readZipEntries } from "../core/zip.js";
 
 export const OPENBOT_IMPORT_MANIFEST = "openbot-import.json";
@@ -103,18 +104,8 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 type Json = Record<string, unknown>;
 
-function isRecord(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-const nonBlank = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
-
 const ulidOrEmpty = (value: unknown): string =>
   typeof value === "string" && ULID_PATTERN.test(value) ? value : "";
-
-const plural = (count: number, one: string, many: string): string =>
-  count === 1 ? `1 ${one}` : `${count} ${many}`;
 
 // -- Model -------------------------------------------------------------------------------------
 

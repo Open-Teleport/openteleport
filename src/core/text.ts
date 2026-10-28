@@ -3,6 +3,23 @@ import { isReservedDeviceName } from "./paths.js";
 /** Plain code-unit order, so that a sorted list does not depend on the locale. */
 export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Cuts `text` to `max` characters, the last one an ellipsis. */
+export const truncate = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+/** One line of text: every run of whitespace and control characters becomes one space. */
+export const oneLine = (value: string): string => value.replace(/[\p{Cc}\s]+/gu, " ").trim();
+
+/** `1 skill`, `3 skills`; `many` is the plural when it is not the word with an `s`. */
+export const plural = (count: number, one: string, many = `${one}s`): string =>
+  `${count} ${count === 1 ? one : many}`;
+
+const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
+
+/** `value` without the byte order mark some editors on Windows put at the start of a file. */
+export const withoutMark = (value: string): string =>
+  value.startsWith(BYTE_ORDER_MARK) ? value.slice(1) : value;
+
 /** The longest slug an adapter makes unless it says otherwise (what Hermes accepts as an id). */
 const DEFAULT_SLUG_CHARS = 64;
 

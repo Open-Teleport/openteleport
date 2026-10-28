@@ -9,7 +9,7 @@ import {
   type Note,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { byCodeUnit, splitInstructions } from "../../core/text.js";
+import { byCodeUnit, splitInstructions, truncate } from "../../core/text.js";
 import { entriesOf } from "../fs.js";
 import { readIds } from "../marker.js";
 import { readSkillFolders } from "../skill-files.js";
@@ -38,10 +38,6 @@ const CAPABILITY_PREFIXES: readonly { capability: Capability; prefixes: readonly
   },
   { capability: "network", prefixes: ["WebFetch", "WebSearch"] },
 ];
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
 /** The stems of the `*.md` files in `dir`, sorted. */
 async function markdownStems(dir: string): Promise<string[]> {

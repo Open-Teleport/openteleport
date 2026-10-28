@@ -14,8 +14,9 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { byCodeUnit, splitInstructions } from "../../core/text.js";
-import { entriesOf, lstatIfAny } from "../fs.js";
+import { byCodeUnit, plural, splitInstructions, truncate, withoutMark } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { entriesOf, isNotFound, lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
 import { claimSkillName, findSkillFolders, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
@@ -44,33 +45,17 @@ const LISTED_NAMES = 10;
 
 const MEBIBYTE = 1024 * 1024;
 
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-
-const isMissing = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException).code === "ENOENT" ||
-  (error as NodeJS.ErrnoException).code === "ENOTDIR";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const plural = (n: number, noun: string, many = `${noun}s`): string =>
-  `${n} ${n === 1 ? noun : many}`;
-
 const named = (names: readonly string[]): string =>
   names.length <= LISTED_NAMES
     ? names.join(", ")
     : `${names.slice(0, LISTED_NAMES).join(", ")} and ${names.length - LISTED_NAMES} more`;
-
 
 /** Whether `path` is a directory, a link to one included. */
 async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
   } catch (error) {
-    if (isMissing(error)) return false;
+    if (isNotFound(error)) return false;
     throw error;
   }
 }
@@ -89,7 +74,7 @@ async function readText(
   try {
     info = await stat(path);
   } catch (error) {
-    if (isMissing(error)) return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
   if (!info.isFile()) return undefined;
@@ -98,7 +83,7 @@ async function readText(
     return undefined;
   }
   const text = await readFile(path, "utf8");
-  return text.startsWith("\uFEFF") ? text.slice(1) : text;
+  return withoutMark(text);
 }
 
 // -- Profiles ----------------------------------------------------------------------------------
@@ -130,7 +115,7 @@ async function readProfileMeta(dir: string): Promise<{ meta: ProfileMeta } | { e
   try {
     source = await readFile(file, "utf8");
   } catch (error) {
-    return isMissing(error)
+    return isNotFound(error)
       ? { meta: {} }
       : { error: `${file} could not be read (${(error as Error).message})` };
   }
@@ -140,11 +125,9 @@ async function readProfileMeta(dir: string): Promise<{ meta: ProfileMeta } | { e
   } catch (error) {
     return { error: (error as Error).message };
   }
-  const text = (value: unknown): string | undefined =>
-    typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
   const meta: ProfileMeta = {};
-  const displayName = isRecord(data) ? text(data.display_name) : undefined;
-  const description = isRecord(data) ? text(data.description) : undefined;
+  const displayName = isRecord(data) ? nonBlank(data.display_name) : undefined;
+  const description = isRecord(data) ? nonBlank(data.description) : undefined;
   if (displayName !== undefined) meta.displayName = displayName;
   if (description !== undefined) meta.description = description;
   return { meta };

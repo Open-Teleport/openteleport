@@ -5,6 +5,8 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describeSchedule, everyToMs, msToEvery, zonedToInstant } from "../../core/schedule.js";
 import type { Routine, Schedule } from "../../core/schema.js";
+import { withoutMark } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
 import { backUp, lstatIfAny, replaceFile } from "../fs.js";
 
 /** A job record as far as the adapter needs it; everything else in it is kept as it is. */
@@ -15,17 +17,11 @@ export type HermesJob = Record<string, unknown> & {
   schedule: unknown;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const isJob = (value: unknown): value is HermesJob =>
   isRecord(value) &&
   typeof value.id === "string" &&
   typeof value.name === "string" &&
   typeof value.prompt === "string";
-
-const nonBlank = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
 /** A time the way Python's `datetime.isoformat()` writes a UTC one, which Hermes reads back. */
 const iso = (date: Date): string => date.toISOString().replace("Z", "+00:00");
@@ -60,7 +56,7 @@ export async function readJobsFile(file: string): Promise<JobsFile | { error: st
   }
   let data: unknown;
   try {
-    data = JSON.parse(source.startsWith("\uFEFF") ? source.slice(1) : source);
+    data = JSON.parse(withoutMark(source));
   } catch (error) {
     return { error: `${file} is not valid JSON: ${(error as Error).message}` };
   }
@@ -82,7 +78,6 @@ export async function readJobsFile(file: string): Promise<JobsFile | { error: st
     ignored: entries.filter((entry) => !isJob(entry)),
   };
 }
-
 
 /**
  * Writes `{ ...rest, jobs, updated_at }` to `file` in one step through a temporary sibling, so

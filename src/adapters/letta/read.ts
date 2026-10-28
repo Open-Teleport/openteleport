@@ -2,12 +2,13 @@ import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MAX_FACT_CHARS } from "../../core/paths.js";
 import type { Bundle, Manifest, ModelPref, Note, Routine } from "../../core/schema.js";
-import { lstatIfAny } from "../fs.js";
+import { oneLine, truncate, withoutMark } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { entriesOf, lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { readCrons, taskToRoutine, taskWarnings } from "./crons.js";
 import { type MemFs, REFERENCE_PREFIX, readMemFs, readPersona } from "./memfs.js";
 import { CRONS_FILE, cloudAgentsDir, lettaDir, localBackendDir } from "./paths.js";
-import { entriesOf, isRecord, oneLine, text, truncate, withoutMark } from "./util.js";
 
 const APP = "letta";
 const MAX_NAME_CHARS = 80;
@@ -43,7 +44,7 @@ async function localAgents(backend: string): Promise<Located[]> {
       const record: unknown = JSON.parse(withoutMark(await readFile(file, "utf8")));
       if (!isRecord(record)) throw new Error("not a JSON object");
       located.record = record;
-      located.id = text(record.id) ?? stem;
+      located.id = nonBlank(record.id) ?? stem;
     } catch (error) {
       located.problem = `${file}: ${(error as Error).message}`;
     }
@@ -102,9 +103,9 @@ function identityOf(
   located: Located,
   persona: { description?: string },
 ): { name: string; description?: string } {
-  const description = text(located.record?.description) ?? persona.description;
+  const description = nonBlank(located.record?.description) ?? persona.description;
   return {
-    name: text(located.record?.name) ?? located.id,
+    name: nonBlank(located.record?.name) ?? located.id,
     ...(description === undefined ? {} : { description }),
   };
 }
@@ -168,7 +169,7 @@ function splitHuman(human: string): { facts: string[]; rest: string; tooLong: nu
 }
 
 function modelsOf(model: unknown): ModelPref[] {
-  const handle = text(model);
+  const handle = nonBlank(model);
   if (handle === undefined) return [];
   // A handle is `provider/model`; the whole handle is what a Letta agent is created with.
   const slash = handle.indexOf("/");

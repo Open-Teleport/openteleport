@@ -11,6 +11,7 @@ import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
 import { factsToProse, slugify } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
 import { backUp, lstatIfAny, replaceFile } from "../fs.js";
 import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
@@ -53,16 +54,6 @@ const ACP_AGENTS: ReadonlyMap<string, string> = new Map([
 ]);
 
 type Items = WriteResult["items"];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-empty string, or `undefined`. */
-function label(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
 
 /** One line of text: every run of whitespace, line breaks included, becomes one space. */
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
@@ -118,7 +109,7 @@ function existingWorkspace(
 ): string {
   const entries = cfg.agents?.entries;
   const entry = isRecord(entries) && Object.hasOwn(entries, id) ? entries[id] : undefined;
-  if (isRecord(entry) && label(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
+  if (isRecord(entry) && nonBlank(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
   const listed = rows.find((row) => row.id === id)?.workspace;
   return listed !== undefined && isAbsolute(listed) ? listed : paths.workspaceFor(id, cfg);
 }
@@ -258,7 +249,7 @@ function memoryText(bundle: Bundle): string | undefined {
 function emojiOf(manifest: Bundle["manifest"]): string | undefined {
   const vendor = manifest["x-openclaw"];
   const identity = isRecord(vendor) ? vendor.identity : undefined;
-  return isRecord(identity) ? label(identity.emoji) : undefined;
+  return isRecord(identity) ? nonBlank(identity.emoji) : undefined;
 }
 
 type Identity = { name: string; theme?: string; emoji: string; avatar?: string };
@@ -320,7 +311,7 @@ async function writeWorkspace(workspace: string, bundle: Bundle, items: Items): 
     name: oneLine(bundle.manifest.name),
     emoji: oneLine(emojiOf(bundle.manifest) ?? DEFAULT_EMOJI),
   };
-  const theme = label(bundle.manifest.title);
+  const theme = nonBlank(bundle.manifest.title);
   if (theme !== undefined) identity.theme = oneLine(theme);
   if (bundle.avatar !== undefined) {
     const rel = `avatars/${bundle.avatar.name}`;
@@ -440,10 +431,10 @@ function modelConfig(models: ModelPref[], approximated: Item[]): [string, unknow
   const named = (pref: ModelPref): boolean =>
     pref.provider !== undefined || pref.model !== undefined;
   const chosen = models.find(
-    (pref) => label(pref.provider) !== undefined && label(pref.model) !== undefined,
+    (pref) => nonBlank(pref.provider) !== undefined && nonBlank(pref.model) !== undefined,
   );
   if (chosen !== undefined) {
-    const ref = `${label(chosen.provider)}/${label(chosen.model)}`;
+    const ref = `${nonBlank(chosen.provider)}/${nonBlank(chosen.model)}`;
     values.push(["model", ref]);
     const others = models.filter((pref) => pref !== chosen && named(pref)).length;
     if (others > 0) {
@@ -459,7 +450,7 @@ function modelConfig(models: ModelPref[], approximated: Item[]): [string, unknow
     });
   }
 
-  const runtime = label(models[0]?.runtime);
+  const runtime = nonBlank(models[0]?.runtime);
   if (runtime !== undefined) {
     const agent = ACP_AGENTS.get(runtime);
     if (agent !== undefined) {
@@ -612,7 +603,7 @@ export async function writeOpenClawAgent(
   if (bundle.manifest.capabilities.length > 0) {
     items.approximated.push({ field: "capabilities", detail: CAPABILITIES_DETAIL });
   }
-  if (label(bundle.manifest.description) !== undefined) {
+  if (nonBlank(bundle.manifest.description) !== undefined) {
     items.skipped.push({ field: "description", detail: "OpenClaw has no field for it" });
   }
 

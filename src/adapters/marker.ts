@@ -2,20 +2,13 @@
 // them in place: the marker file of an agent folder, and the map of ids kept beside a project.
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { lstatIfAny, replaceFile } from "./fs.js";
+import { isRecord } from "../core/values.js";
+import { isNotFound, lstatIfAny, replaceFile } from "./fs.js";
 
 /** Left in a folder an adapter wrote, with the manifest id of the agent it wrote there. */
 export const MARKER_FILE = ".openteleport.json";
 
 export type Marker = { id: string; movedAt: string } & Record<string, unknown>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const isNotFound = (error: unknown): boolean => {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
 
 /**
  * The marker in `dir`. It is `undefined` when there is none (no file, or nothing on the way to

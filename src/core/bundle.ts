@@ -573,7 +573,6 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
   return bundle;
 }
 
-
 /** What an export puts at the top of a directory besides `jetpack.json` and the avatar. */
 const LAYOUT_NAMES: ReadonlySet<string> = new Set([
   INSTRUCTIONS_PATH,

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { isTimeZone } from "../../core/schema.js";
+import { isRecord, nonBlank as text } from "../../core/values.js";
 import { isSafeName, lstatIfAny } from "../fs.js";
 import type { Ctx } from "../types.js";
 
@@ -94,12 +95,6 @@ export type HermesConfig = {
   memory?: { memory_char_limit?: number; user_char_limit?: number };
   agent?: { system_prompt?: string };
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const text = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
 const count = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;

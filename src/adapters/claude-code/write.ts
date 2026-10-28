@@ -1,9 +1,9 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
 import type { Bundle, Manifest } from "../../core/schema.js";
-import { factsToProse, mergeInstructions, slugify } from "../../core/text.js";
-import { isSafeName, lstatIfAny } from "../fs.js";
+import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
+import { isSafeName, lstatIfAny, readTextIfAny } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { freeName, recordedCopy } from "../names.js";
 import { writeSkills } from "../skills.js";
@@ -31,11 +31,6 @@ export function agentSlug(name: string): string {
   return slugify(name, { fallback: "agent", deviceSuffix: "-agent" });
 }
 
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-
 /** The first sentence of the instructions' prose, headings and list markers left out. */
 function firstSentence(instructions: string): string {
   const prose = instructions
@@ -55,7 +50,6 @@ function toolsOf(manifest: Manifest): string[] | undefined {
   if (!Array.isArray(tools) || tools.length === 0) return undefined;
   return tools.every((tool) => typeof tool === "string") ? [...tools] : undefined;
 }
-
 
 /**
  * The stem of the agent file to write. A free `<slug>.md` is taken. When it is taken, `copy`
@@ -163,15 +157,6 @@ function factsIn(memory: string): Set<string> {
   return facts;
 }
 
-async function readText(path: string): Promise<string> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw error;
-  }
-}
-
 /** A skipped item for a memory file that is a link: it is never written through. */
 const linkedMemory = (field: string, path: string): Item => ({
   field,
@@ -223,7 +208,7 @@ async function appendMemory(
     }
     return;
   }
-  const existing = await readText(path);
+  const existing = (await readTextIfAny(path)) ?? "";
   const known = factsIn(existing);
   const fresh: string[] = [];
   for (const bullet of [...facts.map((fact) => factsToProse([fact]).slice(2)), ...links]) {

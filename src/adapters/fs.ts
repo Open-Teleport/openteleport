@@ -1,10 +1,26 @@
 // Small file system checks every file-based adapter needs.
 import { type Dirent, type Stats, constants } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { ulid } from "ulid";
 import { isSafeArchivePath } from "../core/paths.js";
 import { byCodeUnit } from "../core/text.js";
+
+/** Whether `error` says the path is not there, or that a file is on the way to it. */
+export function isNotFound(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
 
 /**
  * `lstat`, or `undefined` when nothing is there (the path is missing, or something on the way to
@@ -15,8 +31,20 @@ export async function lstatIfAny(path: string): Promise<Stats | undefined> {
   try {
     return await lstat(path);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The text of the file at `path`, or `undefined` when nothing is there (see `isNotFound`). Any
+ * other error, such as a refused permission, is thrown.
+ */
+export async function readTextIfAny(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
     throw error;
   }
 }
@@ -65,8 +93,7 @@ export async function entriesOf(dir: string): Promise<Dirent[]> {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries.sort((a, b) => byCodeUnit(a.name, b.name));
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    if (isNotFound(error)) return [];
     throw error;
   }
 }

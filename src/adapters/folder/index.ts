@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
 import type { Bundle } from "../../core/schema.js";
 import { byCodeUnit, slugify } from "../../core/text.js";
-import { freeSibling, isFree, lstatIfAny, numberedSiblings } from "../fs.js";
+import { freeSibling, isFree, isNotFound, lstatIfAny, numberedSiblings } from "../fs.js";
 import type {
   Adapter,
   AdapterCapabilities,
@@ -40,16 +40,12 @@ const CAPABILITIES: AdapterCapabilities = {
 
 // -- Disk helpers ---------------------------------------------------------------------------
 
-const isMissing = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException).code === "ENOENT" ||
-  (error as NodeJS.ErrnoException).code === "ENOTDIR";
-
 /** What `stat` says about a path, or `undefined` when nothing is there. Follows symbolic links. */
 async function statOrUndefined(path: string): Promise<Stats | undefined> {
   try {
     return await stat(path);
   } catch (error) {
-    if (isMissing(error)) return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
 }
@@ -63,7 +59,7 @@ async function namesIn(folder: string): Promise<string[]> {
   try {
     return await readdir(folder);
   } catch (error) {
-    if (isMissing(error)) return [];
+    if (isNotFound(error)) return [];
     throw error;
   }
 }
@@ -75,7 +71,6 @@ const baseDir = (ctx: Ctx): string => resolve(ctx.cwd, ctx.sourceDir ?? ctx.targ
 
 /** Folders that hold other things than agents are not searched. */
 const isSearched = (name: string): boolean => name !== "node_modules" && !name.startsWith(".");
-
 
 /** The immediate subfolders of `dir` that hold an `AGENTS.md`, sorted by name. */
 async function agentFolders(dir: string): Promise<string[]> {
@@ -161,7 +156,7 @@ async function canonical(path: string): Promise<string> {
   try {
     return await realpath(absolute);
   } catch (error) {
-    if (!isMissing(error)) throw error;
+    if (!isNotFound(error)) throw error;
     const parent = dirname(absolute);
     if (parent === absolute) return absolute;
     return join(await canonical(parent), basename(absolute));
@@ -186,7 +181,6 @@ async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
   if (isWithin(target, home)) refuse("it is the home folder or contains it");
   if (isWithin(target, cwd)) refuse("it is the working folder or contains it");
 }
-
 
 /**
  * The first `<wanted>-N` folder that already holds the agent with `id`, as an earlier move may

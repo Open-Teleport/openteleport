@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "smol-toml";
 import type { Bundle, ModelPref } from "../../core/schema.js";
-import { factsToProse, mergeInstructions, slugify } from "../../core/text.js";
+import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
+import { isRecord } from "../../core/values.js";
 import { lstatIfAny, replaceFile } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { freeName, recordedCopy } from "../names.js";
@@ -16,8 +17,6 @@ import {
   IDS_FILE,
   agentsDir,
   codexHome,
-  isRecord,
-  truncate,
   userSkillsDir,
 } from "./paths.js";
 import { type CodexAgentFile, parseAgentToml } from "./read.js";
@@ -68,7 +67,6 @@ export function renderAgentToml(agent: CodexAgentFile, rest: Record<string, unkn
 }
 
 // -- Where the agent goes ------------------------------------------------------------------------
-
 
 /**
  * The stem of the agent file to write. A free `<slug>.toml` is taken. When it is taken, `copy`
@@ -258,7 +256,6 @@ function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown
   }
   return renderAgentToml(agent, rest);
 }
-
 
 /**
  * Writes a Bundle as a custom agent of the Codex home (`ctx.targetDir`, `CODEX_HOME` or

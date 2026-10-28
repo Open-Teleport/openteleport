@@ -15,7 +15,8 @@ import {
   ULID_PATTERN,
 } from "../../core/schema.js";
 import { byCodeUnit } from "../../core/text.js";
-import { entriesOf, lstatIfAny } from "../fs.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { entriesOf, isNotFound, lstatIfAny, readTextIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
 import { type SkillMessages, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
@@ -49,23 +50,8 @@ const MAX_TITLE_CHARS = 120;
 const AVATAR_EXTENSIONS: ReadonlySet<string> = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SCHEDULE_KINDS: ReadonlySet<string> = new Set(["cron", "every", "at"]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-empty string, or `undefined`. */
-function label(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
 const errorLine = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
-
-const isNotFound = (error: unknown): boolean => {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
 
 /** Whether `path` is `root` itself or below it; both absolute. */
 function isWithin(root: string, path: string): boolean {
@@ -76,15 +62,6 @@ function isWithin(root: string, path: string): boolean {
 /** Views a Node buffer as a plain `Uint8Array` without copying it. */
 const toBytes = (buffer: Buffer): Uint8Array =>
   new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-
-async function readText(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  }
-}
 
 async function isDirectory(path: string): Promise<boolean> {
   try {
@@ -120,7 +97,7 @@ function parseIdentityFile(text: string): OpenClawIdentity {
   for (const line of text.split(/\r?\n/)) {
     const match = IDENTITY_LINE.exec(line);
     const key = match?.[1] === undefined ? undefined : IDENTITY_KEYS.get(match[1].toLowerCase());
-    const value = label(match?.[2]);
+    const value = nonBlank(match?.[2]);
     if (key !== undefined && value !== undefined && !PLACEHOLDER.test(value)) {
       identity[key] ??= value;
     }
@@ -136,7 +113,7 @@ function mergeIdentity(
   const config = isRecord(fromConfig) ? fromConfig : {};
   const merged: OpenClawIdentity = {};
   for (const key of ["name", "theme", "emoji", "avatar"] as const) {
-    const value = label(config[key]) ?? fromFile[key];
+    const value = nonBlank(config[key]) ?? fromFile[key];
     if (value !== undefined) merged[key] = value;
   }
   return Object.keys(merged).length > 0 ? merged : undefined;
@@ -156,7 +133,7 @@ async function readProfile(
 ): Promise<Profile> {
   const entry = entryOf(cfg, agentId);
   const workspace = paths.workspaceFor(agentId, cfg);
-  const file = await readText(join(workspace, "IDENTITY.md"));
+  const file = await readTextIfAny(join(workspace, "IDENTITY.md"));
   const identity = mergeIdentity(entry.identity, file === undefined ? {} : parseIdentityFile(file));
   return {
     workspace,
@@ -167,7 +144,7 @@ async function readProfile(
 }
 
 const agentName = (agentId: string, { entry, identity }: Profile): string =>
-  identity?.name ?? label(entry.name) ?? agentId;
+  identity?.name ?? nonBlank(entry.name) ?? agentId;
 
 /** Cuts `value` to `max` UTF-16 units, never through a surrogate pair, and says so. */
 function clip(value: string, max: number, field: string, warnings: string[]): string {
@@ -181,7 +158,7 @@ function clip(value: string, max: number, field: string, warnings: string[]): st
 // -- Models ------------------------------------------------------------------------------------
 
 function modelPref(ref: unknown): ModelPref | undefined {
-  const text = label(ref);
+  const text = nonBlank(ref);
   if (text === undefined) return undefined;
   const slash = text.indexOf("/");
   if (slash <= 0 || slash === text.length - 1) return { model: text };
@@ -196,7 +173,7 @@ function modelsFor(entry: OpenClawAgentEntry): ModelPref[] {
     : [model];
   const models = refs.flatMap((ref) => modelPref(ref) ?? []);
   const runtime: unknown = entry.runtime;
-  const acp = isRecord(runtime) && isRecord(runtime.acp) ? label(runtime.acp.agent) : undefined;
+  const acp = isRecord(runtime) && isRecord(runtime.acp) ? nonBlank(runtime.acp.agent) : undefined;
   if (acp === undefined) return models;
   const [first, ...rest] = models;
   return [{ runtime: acp, ...first }, ...rest];
@@ -215,7 +192,7 @@ async function readMemory(
   const facts: string[] = [];
   const prose: string[] = [];
   const warnings: string[] = [];
-  const memory = (await readText(join(workspace, "MEMORY.md"))) ?? "";
+  const memory = (await readTextIfAny(join(workspace, "MEMORY.md"))) ?? "";
   memory.split(/\r?\n/).forEach((line, index) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
@@ -238,7 +215,7 @@ async function readMemory(
 
   const notes: Note[] = [];
   if (prose.length > 0) notes.push({ name: MEMORY_PROSE_NOTE, text: prose.join("\n") });
-  const user = await readText(join(workspace, "USER.md"));
+  const user = await readTextIfAny(join(workspace, "USER.md"));
   if (user !== undefined) notes.push({ name: USER_NOTE, text: user });
 
   const memoryDir = join(workspace, "memory");
@@ -274,7 +251,7 @@ const SKILL_MESSAGES: SkillMessages = {
 /** The `name` in a SKILL.md frontmatter block, if there is one. */
 function frontmatterName(bytes: Uint8Array): string | undefined {
   try {
-    return label(splitFrontmatter(new TextDecoder().decode(bytes)).data.name);
+    return nonBlank(splitFrontmatter(new TextDecoder().decode(bytes)).data.name);
   } catch {
     return undefined;
   }
@@ -290,7 +267,7 @@ async function readSkills(
   allowlist: unknown,
 ): Promise<{ skills: Skill[]; warnings: string[] }> {
   const allowed = Array.isArray(allowlist)
-    ? new Set(allowlist.flatMap((name) => label(name) ?? []))
+    ? new Set(allowlist.flatMap((name) => nonBlank(name) ?? []))
     : undefined;
   const skills: Skill[] = [];
   const warnings: string[] = [];
@@ -340,7 +317,7 @@ const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZ
 /** A routine with, optionally, a note about it; or the warning that says why the job is skipped. */
 function toRoutine(job: JobRow): { routine: Routine; note?: string } | { warning: string } {
   const skipped = (reason: string) => ({ warning: `automation '${job.name}' skipped: ${reason}` });
-  const kind = isRecord(job.schedule) ? label(job.schedule.kind) : undefined;
+  const kind = isRecord(job.schedule) ? nonBlank(job.schedule.kind) : undefined;
   if (kind === undefined) return skipped("it has no schedule kind");
   if (!SCHEDULE_KINDS.has(kind)) return skipped(`unsupported schedule kind '${kind}'`);
   const converted = fromOpenClawJob(job);
@@ -468,9 +445,9 @@ export async function readOpenClawAgent(
   const { entry, identity } = profile;
 
   const missing: string[] = [];
-  const instructions = await readText(join(workspace, "AGENTS.md"));
+  const instructions = await readTextIfAny(join(workspace, "AGENTS.md"));
   if (instructions === undefined) missing.push("AGENTS.md not found");
-  const persona = await readText(join(workspace, "SOUL.md"));
+  const persona = await readTextIfAny(join(workspace, "SOUL.md"));
   if (persona === undefined) missing.push("SOUL.md not found");
   if (!profile.hasIdentityFile) missing.push("IDENTITY.md not found");
 

@@ -3,7 +3,7 @@
 // nothing but memory (spec, section 7.2), so the Bot itself is made in the app, by hand, from
 // what is pasted into its chat.
 import { mkdir, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { describeSchedule, everyToMs } from "../../core/schedule.js";
@@ -36,7 +36,6 @@ const MEMORY_WARNING =
 type Items = WriteResult["items"];
 
 const encoder = new TextEncoder();
-
 
 /** `value` on one line: each line break, with the blanks around it, becomes one space. */
 const oneLine = (value: string): string =>
@@ -190,7 +189,6 @@ function fitRoutines(routines: readonly Routine[], skipped: Item[]): Routine[] {
 }
 
 // -- Writing ----------------------------------------------------------------------------------
-
 
 function approximations(bundle: Bundle, pack: readonly FileEntry[]): Item[] {
   const items: Item[] = [];

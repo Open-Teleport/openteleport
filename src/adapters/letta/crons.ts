@@ -3,7 +3,8 @@
 import { readFile } from "node:fs/promises";
 import { everyToCron, parseCron } from "../../core/schedule.js";
 import { type Routine, RoutineSchema, ScheduleSchema, isTimeZone } from "../../core/schema.js";
-import { isRecord, oneLine, text, withoutMark } from "./util.js";
+import { oneLine, withoutMark } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
 
 /** One entry of `tasks[]` in `crons.json`; the fields Letta keeps beyond these stay in it. */
 export type LettaCronTask = Record<string, unknown> & {
@@ -90,8 +91,8 @@ function convert(task: LettaCronTask): Converted | { skip: string } {
   if (task.prompt.trim() === "") return { skip: "it has no prompt" };
 
   // A recurring task is read by its cron expression, a one-off by the time it was set for.
-  const cron = text(task.cron);
-  const when = text(task.scheduled_for);
+  const cron = nonBlank(task.cron);
+  const when = nonBlank(task.scheduled_for);
   let schedule: unknown;
   if (cron !== undefined && task.recurring !== false) {
     const checkedCron = parseCron(cron);
@@ -107,7 +108,7 @@ function convert(task: LettaCronTask): Converted | { skip: string } {
   const parsed = ScheduleSchema.safeParse(schedule);
   if (!parsed.success) return { skip: "its scheduled_for time is not an ISO 8601 instant" };
 
-  const zone = text(task.timezone);
+  const zone = nonBlank(task.timezone);
   const validZone = zone !== undefined && isTimeZone(zone);
   const routine: Routine = {
     name,
@@ -120,8 +121,8 @@ function convert(task: LettaCronTask): Converted | { skip: string } {
   const checked = RoutineSchema.safeParse(routine);
   if (!checked.success) return { skip: "it does not make a valid routine" };
 
-  const description = text(task.description);
-  const conversation = text(task.conversation_id);
+  const description = nonBlank(task.description);
+  const conversation = nonBlank(task.conversation_id);
   return {
     routine: checked.data,
     extra: {
