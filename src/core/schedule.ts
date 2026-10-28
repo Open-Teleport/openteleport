@@ -107,9 +107,13 @@ export function everyToMs(every: string): number {
  * on the minute field, a step of 2 on the hour field (at minute 0), a step of 3 on the day of
  * month field (at midnight). An interval of 1 is the unit itself: `1h` is minute 0 of every
  * hour. Throws on anything else, as `everyToMs` does. Cron has no "every N after the last run":
- * an interval that does not divide its unit evenly (`45m`, `5h`, `90m`) fires at fixed positions
- * of the clock, not strictly N apart, so a caller that needs the interval exact reports the
- * schedule as approximated.
+ * an interval that does not divide its unit evenly (`45m`, `5h`) fires at fixed positions of the
+ * clock, not strictly N apart. Two cases are worse than that. A step that reaches past the field
+ * fires once per round of the next unit: `90m` and `120m` (a step of 90 or 120 on the minute
+ * field) fire at minute 0 only, so every hour, not every hour and a half or two hours. And a step
+ * on the day of month field starts again with every month (a step of 3 fires on days 1, 4, 7...
+ * up to 31, then on day 1 of the next month), so `3d` is not strictly periodic either. A caller
+ * that needs the interval exact reports the schedule as approximated.
  */
 export function everyToCron(every: string): string {
   everyToMs(every); // throws unless it is a positive whole number followed by m, h or d
