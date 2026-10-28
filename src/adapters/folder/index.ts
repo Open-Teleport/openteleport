@@ -1,7 +1,7 @@
 // The universal adapter: an agent that lives in a plain folder, in the same layout a `.jetpack`
 // archive uses (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/`, ...). It reads any folder with an
 // `AGENTS.md`, with or without a `jetpack.json`, and writes the full layout, `jetpack.json` too.
-import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
@@ -49,6 +49,16 @@ const isMissing = (error: unknown): boolean =>
 async function statOrUndefined(path: string): Promise<Stats | undefined> {
   try {
     return await stat(path);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw error;
+  }
+}
+
+/** What is at `path` itself, a link never followed; `undefined` when nothing is there. */
+async function lstatOrUndefined(path: string): Promise<Stats | undefined> {
+  try {
+    return await lstat(path);
   } catch (error) {
     if (isMissing(error)) return undefined;
     throw error;
@@ -200,9 +210,12 @@ async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
   if (isWithin(target, cwd)) refuse("it is the working folder or contains it");
 }
 
-/** Free means nothing is there, or there is an empty folder to write into. */
+/**
+ * Free means nothing is there, or there is an empty folder to write into. A link (symbolic link
+ * or junction) is never free, wherever it leads: nothing is written through one.
+ */
 async function isFree(path: string): Promise<boolean> {
-  const info = await statOrUndefined(path);
+  const info = await lstatOrUndefined(path);
   if (info === undefined) return true;
   return info.isDirectory() && (await namesIn(path)).length === 0;
 }
@@ -225,6 +238,18 @@ async function numberedSiblings(wanted: string): Promise<string[]> {
     .filter(({ n }) => n >= 2)
     .sort((a, b) => a.n - b.n)
     .map(({ name }) => join(parent, name));
+}
+
+/**
+ * The first `<wanted>-N` folder that already holds the agent with `id`, as an earlier move may
+ * have left it. Only real folders count: a link is never read through.
+ */
+async function sameAgentSibling(wanted: string, id: string): Promise<string | undefined> {
+  for (const sibling of await numberedSiblings(wanted)) {
+    const info = await lstatOrUndefined(sibling);
+    if (info?.isDirectory() && (await manifestId(sibling)) === id) return sibling;
+  }
+  return undefined;
 }
 
 /** The `id` in the `jetpack.json` of `folder`; `undefined` when none can be read. */
@@ -251,7 +276,9 @@ async function manifestId(folder: string): Promise<string | undefined> {
  * `update` writes in place only over this very agent, the one with the Bundle's id, whether it
  * is in `wanted` or in a `-N` folder an earlier move gave it. Another agent of the same name
  * keeps its folder, and this one goes to the first free `-2`, `-3`..., with a warning that says
- * why. Nothing is removed before the Bundle is known to be writable.
+ * why. A link is never read or written through: as `wanted` it sends `update` elsewhere with a
+ * warning and makes `replace` refuse; as a `-N` it is taken. Nothing is removed before the
+ * Bundle is known to be writable.
  */
 async function claimTarget(
   ctx: Ctx,
@@ -262,7 +289,19 @@ async function claimTarget(
   if (await isFree(wanted)) return { target: wanted };
   if (onConflict === "copy") return { target: await freeSibling(wanted) };
 
-  const info = await statOrUndefined(wanted);
+  const info = await lstatOrUndefined(wanted);
+  if (info?.isSymbolicLink()) {
+    // A link leads somewhere else: what it holds is never read, and nothing is written through it.
+    if (onConflict === "replace") {
+      await assertRemovable(ctx, wanted); // a link to home or the working folder says so
+      throw new Error(
+        `Refusing to replace ${wanted}: it is a symbolic link. Delete it yourself if you mean it.`,
+      );
+    }
+    const target =
+      (await sameAgentSibling(wanted, bundle.manifest.id)) ?? (await freeSibling(wanted));
+    return { target, warning: `'${wanted}' is a symlink; not written through` };
+  }
   if (!info?.isDirectory()) throw new Error(`${wanted} exists and is not a folder`);
 
   // Replacing removes the folder whole, so `replace` needs the same proof as `update` that the
@@ -284,12 +323,8 @@ async function claimTarget(
   const id = await manifestId(wanted);
   if (id === bundle.manifest.id) return { target: wanted };
   // An earlier move may already have given this agent a `-N` folder of its own: update that one.
-  for (const sibling of await numberedSiblings(wanted)) {
-    const info = await statOrUndefined(sibling);
-    if (info?.isDirectory() && (await manifestId(sibling)) === bundle.manifest.id) {
-      return { target: sibling };
-    }
-  }
+  const own = await sameAgentSibling(wanted, bundle.manifest.id);
+  if (own !== undefined) return { target: own };
   const target = await freeSibling(wanted);
   const whose = id === undefined ? "no readable id" : `id ${id}`;
   return {

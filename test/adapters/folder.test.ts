@@ -1,5 +1,15 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, parse, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -616,6 +626,101 @@ describe("folder adapter: write", () => {
 
       expect(again.targetAgentId).toBe(join(ctx.cwd, "ada-3"));
       expect((await readdir(ctx.cwd)).sort()).toEqual(["ada", "ada-3"]);
+    });
+
+    it("update counts a -N copy with a corrupt jetpack.json as a different agent", async () => {
+      const source = await ada();
+      const other: Bundle = { ...source, manifest: { ...source.manifest, id: OTHER_ID } };
+      await folderAdapter.write(ctx, source, WRITE);
+      await folderAdapter.write(ctx, other, WRITE); // ada-2
+      await put(join(ctx.cwd, "ada-2", "jetpack.json"), "{ not json\n");
+
+      const again = await folderAdapter.write(ctx, other, WRITE);
+
+      const [taken, copy] = [join(ctx.cwd, "ada"), join(ctx.cwd, "ada-3")];
+      expect(again.targetAgentId).toBe(copy);
+      expect(again.items.warnings[0]).toBe(
+        `${taken} already holds a different agent (id ${ADA_ID}); written as ${copy}`,
+      );
+      expect(await text(join(ctx.cwd, "ada-2", "jetpack.json"))).toBe("{ not json\n");
+    });
+
+    describe.skipIf(!LINKS_WORK)("links in the way", () => {
+      /** An export of `bundle` in a folder outside the working folder, and its AGENTS.md. */
+      async function outsideExport(bundle: Bundle): Promise<{ dir: string; agents: string }> {
+        const dir = join(root, "outside");
+        await folderAdapter.write({ ...ctx, targetDir: dir }, bundle, WRITE);
+        return { dir, agents: await text(join(dir, "AGENTS.md")) };
+      }
+      const edited = (bundle: Bundle): Bundle => ({ ...bundle, instructions: "Edited.\n" });
+
+      it("update never reads or writes through a linked -N copy of this agent", async () => {
+        const source = await ada();
+        const other: Bundle = { ...source, manifest: { ...source.manifest, id: OTHER_ID } };
+        await folderAdapter.write(ctx, source, WRITE); // ada holds another agent
+        const outside = await outsideExport(other);
+        await symlink(outside.dir, join(ctx.cwd, "ada-2"), "junction");
+
+        const result = await folderAdapter.write(ctx, edited(other), WRITE);
+
+        expect(result.targetAgentId).toBe(join(ctx.cwd, "ada-3"));
+        expect(await text(join(outside.dir, "AGENTS.md"))).toBe(outside.agents);
+        expect(await text(join(ctx.cwd, "ada-3", "AGENTS.md"))).toBe("Edited.\n");
+      });
+
+      it("update never writes through a linked base folder, and says so", async () => {
+        const source = await ada();
+        const outside = await outsideExport(source);
+        const base = join(ctx.cwd, "ada");
+        await symlink(outside.dir, base, "junction");
+
+        const result = await folderAdapter.write(ctx, edited(source), WRITE);
+
+        expect(result.targetAgentId).toBe(join(ctx.cwd, "ada-2"));
+        expect(result.items.warnings[0]).toBe(`'${base}' is a symlink; not written through`);
+        expect(await text(join(outside.dir, "AGENTS.md"))).toBe(outside.agents);
+        expect((await lstat(base)).isSymbolicLink()).toBe(true);
+      });
+
+      it("update behind a linked base still finds this agent's own -N copy", async () => {
+        const source = await ada();
+        const outside = await outsideExport(source);
+        await symlink(outside.dir, join(ctx.cwd, "ada"), "junction");
+        await folderAdapter.write(ctx, source, WRITE); // ada-2
+
+        const again = await folderAdapter.write(ctx, edited(source), WRITE);
+
+        expect(again.targetAgentId).toBe(join(ctx.cwd, "ada-2"));
+        expect(await text(join(ctx.cwd, "ada-2", "AGENTS.md"))).toBe("Edited.\n");
+        expect(await text(join(outside.dir, "AGENTS.md"))).toBe(outside.agents);
+      });
+
+      it("replace refuses a linked base folder and leaves it alone", async () => {
+        const source = await ada();
+        const outside = await outsideExport(source);
+        const base = join(ctx.cwd, "ada");
+        await symlink(outside.dir, base, "junction");
+
+        await expect(
+          folderAdapter.write(ctx, edited(source), { ...WRITE, onConflict: "replace" }),
+        ).rejects.toThrow(`Refusing to replace ${base}: it is a symbolic link.`);
+        expect(await text(join(outside.dir, "AGENTS.md"))).toBe(outside.agents);
+        expect((await lstat(base)).isSymbolicLink()).toBe(true);
+      });
+
+      it("copy goes around a linked base folder", async () => {
+        const source = await ada();
+        const outside = await outsideExport(source);
+        await symlink(outside.dir, join(ctx.cwd, "ada"), "junction");
+
+        const result = await folderAdapter.write(ctx, edited(source), {
+          ...WRITE,
+          onConflict: "copy",
+        });
+
+        expect(result.targetAgentId).toBe(join(ctx.cwd, "ada-2"));
+        expect(await text(join(outside.dir, "AGENTS.md"))).toBe(outside.agents);
+      });
     });
 
     it("update counts an earlier export without a readable id as a different agent", async () => {
