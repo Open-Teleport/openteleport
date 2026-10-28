@@ -331,7 +331,7 @@ Po zadaniu 1. Równolegle z 2–5.
 
 ### Task 9: Rejestracja, dokumentacja, wersja
 
-Po scaleniu zadań 2–8 do `v0.2`.
+Po scaleniu zadań 2–8 i 10 do `v0.2`. Dodatkowo: `handoff: true` na adapterach `letta`, `openbot`, `grok-bot` (pole `Adapter.handoff` dodane w zadaniu 8) z testem, że każdy adapter z `handoff: true` zwraca `outcome: "handoff"` z `write` na przykładowym bundle, i adnotacja w spec 9.2, że kształt `advanced` na drucie jest zagnieżdżony (`days: { kind, days }`, `time: { kind: "at-time", time }`).
 
 **Files:**
 - Modify: `src/adapters/index.ts`, `test/commands/adapters.test.ts`, `README.md`, `CHANGELOG.md`, `docs/STATUS.md`, `docs/design.md`, `docs/demo.md`, `CONTRIBUTING.md`, `src/index.ts` (eksport nowych adapterów i typów `Adapter.createsOnWrite`, jeśli `index.ts` eksportuje adaptery)
@@ -346,7 +346,25 @@ Po scaleniu zadań 2–8 do `v0.2`.
 
 - [ ] **Step 5: `npm run lint && npm test`; `node dist/cli.js adapters` pokazuje 8 wierszy; commit** `docs: v0.2 adapters, wizard and status`.
 
-### Task 10: Przegląd całej gałęzi i PR
+### Task 10: Konsolidacja zduplikowanych helperów adapterów
+
+Po scaleniu zadań 2–8 do `v0.2`, przed zadaniem 9. Dodane w trakcie wykonania (ruling kontrolera po przeglądzie zadania 4): adaptery pisane równolegle skopiowały te same helpery z adaptera Claude Code, bo nie mogły ich współdzielić bez konfliktów.
+
+**Files:**
+- Create: `src/adapters/skill-files.ts` (czytnik katalogów skilli z dysku), `test/adapters/skill-files.test.ts`
+- Modify: `src/adapters/marker.ts` (eksport `replaceFile`), `src/adapters/fs.ts` lub `src/adapters/names.ts` (wspólne `freeName`, `recordedCopy`, `ULID_PATTERN` jeśli potrzebne), `src/adapters/claude-code/read.ts`, `src/adapters/claude-code/write.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/folder/index.ts` (`lstatOrUndefined` → `lstatIfAny`), `src/adapters/codex/*`, `src/adapters/hermes/*`, `src/adapters/letta/*` i ich testy tylko tam, gdzie zmienia się import
+
+**Interfaces:**
+- Produces `src/adapters/skill-files.ts`: `export async function readSkillFolders(dir: string, opts?: { skipHidden?: boolean; nested?: boolean }): Promise<{ skills: Skill[]; warnings: string[] }>` (jedna implementacja tego, co dziś robią `readSkills`/`skillFiles`/`linkWarning` w claude-code, openclaw, codex, hermes, letta; dowiązania nigdy nie są śledzone; `nested` dla kategorii Hermesa).
+- Produces w `marker.ts`: `export async function replaceFile(file: string, content: string | Uint8Array): Promise<void>` (dzisiejszy prywatny `replaceFile`; `writeAtomically` w adapterach znika).
+- Produces wspólne `freeName(dir, base, ext)` i `recordedCopy(...)` sparametryzowane rozszerzeniem, z wariantem `.isFile()` jako zachowaniem wspólnym.
+
+- [ ] **Step 1:** Spis kopii: `grep -n "function readSkills\|function skillFiles\|function writeAtomically\|function freeName\|function recordedCopy\|lstatOrUndefined\|ULID_PATTERN" src -r` i zapis listy w raporcie.
+- [ ] **Step 2:** Test wspólnego czytnika (przypadki z istniejących testów adapterów: skill z plikami w podkatalogach, dowiązanie pomijane z ostrzeżeniem, katalog bez `SKILL.md` pomijany, ukryty katalog z `skipHidden`, kategorie z `nested`).
+- [ ] **Step 3:** Implementacja i przełączenie każdego adaptera; żaden test adaptera nie zmienia oczekiwań poza nazwą importu; `npm run lint && npm test` zielone.
+- [ ] **Step 4: Commit** `refactor(adapters): one skill-folder reader, one atomic file writer, shared conflict names`.
+
+### Task 11: Przegląd całej gałęzi i PR
 
 - [ ] **Step 1:** Przegląd całej gałęzi `v0.2` względem `main` przez świeżego recenzenta na najmocniejszym modelu (pakiet przeglądu: spec, plan, `git diff main...v0.2`, Review Focus); poprawki w jednej fali; ponowny przegląd.
 - [ ] **Step 2:** `git push -u origin v0.2`; PR do `main` tytułem „v0.2: Hermes, Codex, OpenBot, Grok Bot and Letta adapters; wizard" z opisem wg szablonu PR (bez stopek atrybucji); CI na trzech systemach zielone; scalenie przez właściciela lub za jego zgodą.
