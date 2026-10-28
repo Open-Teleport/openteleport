@@ -321,6 +321,30 @@ describe("read", () => {
     expect(warnings.filter((warning) => /memory|fact/i.test(warning))).toEqual([]);
   });
 
+  it("reads a bullet that is only a link to a memory file as neither a fact nor prose", async () => {
+    await writeFile(
+      join(memory, "MEMORY.md"),
+      [
+        "- Short fact.",
+        "- [diary](imported-ada-diary.md)",
+        "- [plans \\[old\\]](<imported-ada-plans (old).md>)",
+        "- [Release checklist](2026-10-20.md) — run the full test suite before tagging.",
+        "- [elsewhere](docs/guide.md)",
+        "Prose line.",
+        "",
+      ].join("\n"),
+    );
+
+    const { bundle } = await claudeCodeAdapter.read(ctx, "reviewer");
+
+    expect(bundle.facts).toEqual([
+      "Short fact.",
+      "[Release checklist](2026-10-20.md) — run the full test suite before tagging.",
+      "[elsewhere](docs/guide.md)",
+    ]);
+    expect(bundle.notes.find((note) => note.name === "MEMORY-prose")?.text).toBe("Prose line.");
+  });
+
   it("keeps a fact over 500 characters as a note and says so", async () => {
     const long = "x".repeat(501);
     await writeFile(join(memory, "MEMORY.md"), `- Short fact.\n- ${long}\n`);

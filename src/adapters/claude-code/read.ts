@@ -14,7 +14,7 @@ import { splitInstructions } from "../../core/text.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
-import { idsFileOf, readIds } from "./write.js";
+import { idsFileOf, isNoteLink, readIds } from "./write.js";
 
 const APP = "claude-code";
 const MAX_NAME_CHARS = 80;
@@ -228,7 +228,9 @@ async function readSkills(skillsDir: string, warnings: string[]): Promise<Skill[
 /**
  * `MEMORY.md` bullets are facts, its other lines one `MEMORY-prose` note, and every other `*.md`
  * file of the memory directory a note named by its stem. A bullet over 500 characters is kept
- * in a `MEMORY-long` note instead of being cut.
+ * in a `MEMORY-long` note instead of being cut. A bullet that is only a link to a file beside
+ * `MEMORY.md` (`- [diary](imported-ada-diary.md)`, as a move in writes for each note) is an
+ * index entry: the file is read as a note, the line as neither a fact nor prose.
  */
 async function readMemory(
   memoryDir: string,
@@ -253,6 +255,7 @@ async function readMemory(
         continue;
       }
       const fact = trimmed.slice(2).trim();
+      if (isNoteLink(fact)) continue;
       if (fact.length > MAX_FACT_CHARS) long.push(fact);
       else facts.push(fact);
     }

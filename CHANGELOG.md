@@ -36,7 +36,8 @@ First release.
 - Routines arrive disabled. `--enable-routines` keeps the ones that were enabled.
 - Conflict handling when the target already has an agent of that name: `update` in place (the
   default, only for the same agent), `--copy` for a numbered copy, `--replace` to overwrite it
-  (asks first unless `--yes`).
+  (asks first unless `--yes`). Claude Code skills belong to the whole project and are never
+  overwritten: one with other content gets a numbered copy in every mode.
 - A report for every move and import: what was moved, approximated and skipped, with the Markdown
   copy saved under `~/.openteleport/reports/`. The source is never modified.
 - A library API (`readBundle`, `writeBundle`, `exportBundle`, `importBundle`, `move`, `getAdapter`,

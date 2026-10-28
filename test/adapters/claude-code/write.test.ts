@@ -161,9 +161,65 @@ describe("write", () => {
         "",
         "- Prefers answers in Polish unless the source is in English.",
         "- Reads the digest on a phone, so keep it under five lines.",
+        "- [2026-10-20](imported-ada-2026-10-20.md)",
+        "- [MEMORY-prose](imported-ada-MEMORY-prose.md)",
         "",
       ].join("\n"),
     );
+  });
+
+  it("only appends to MEMORY.md: what it held stays byte for byte", async () => {
+    const memoryFile = join(memoryOf(project), "MEMORY.md");
+    // Bytes that are not UTF-8 and CRLF endings would not survive a read and a rewrite.
+    const before = Buffer.concat([
+      Buffer.from("- Old fact.\r\nCaf"),
+      Buffer.from([0xe9, 0xff]),
+      Buffer.from(" notes\r\n"),
+    ]);
+    await writeFile(memoryFile, before);
+
+    await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({ facts: ["New."], notes: [{ name: "diary", text: "Day one.\n" }] }),
+      COPY,
+    );
+
+    const after = await readFile(memoryFile);
+    expect(after.subarray(0, before.length).equals(before)).toBe(true);
+    expect(after.subarray(before.length).toString("utf8")).toBe(
+      "\r\n- New.\r\n- [diary](imported-ada-diary.md)\r\n",
+    );
+  });
+
+  it("links each imported note from MEMORY.md once, so that Claude Code finds it", async () => {
+    const memoryFile = join(memoryOf(project), "MEMORY.md");
+    const bundle = bundleOf({
+      notes: [
+        { name: "diary", text: "Day one.\n" },
+        { name: "plans (old)", text: "Old plans.\n" },
+      ],
+    });
+
+    await claudeCodeAdapter.write(ctx, bundle, UPDATE);
+    await claudeCodeAdapter.write(ctx, bundle, UPDATE);
+
+    const lines = lf(await readFile(memoryFile, "utf8")).split("\n");
+    expect(lines.filter((line) => line === "- [diary](imported-ada-diary.md)")).toHaveLength(1);
+    expect(
+      lines.filter((line) => line === "- [plans (old)](<imported-ada-plans (old).md>)"),
+    ).toHaveLength(1);
+  });
+
+  it("reads the note links it wrote back as neither facts nor prose", async () => {
+    const ada = await readBundle(ADA_DIR);
+    await claudeCodeAdapter.write(ctx, ada, UPDATE);
+
+    const { bundle } = await claudeCodeAdapter.read({ ...ctx, sourceDir: project }, "ada");
+
+    expect(bundle.facts.filter((fact) => fact.includes("imported-"))).toEqual([]);
+    for (const fact of ada.facts) expect(bundle.facts).toContain(fact);
+    const prose = bundle.notes.find((note) => note.name === "MEMORY-prose")?.text ?? "";
+    expect(prose).not.toContain("imported-");
   });
 
   it("skips a fact that MEMORY.md already holds verbatim", async () => {
@@ -402,9 +458,11 @@ describe("write", () => {
     });
   });
 
+  // Skills are shared by the whole project, so even replace never removes one.
   it.each([
     ["update", UPDATE],
     ["copy", COPY],
+    ["replace", REPLACE],
   ])("writes a skill that exists with other content as <name>-2 on %s, and says so", async (_mode, opts) => {
     const skills = join(project, ".claude", "skills");
     const before = await snapshot(join(skills, "web-brief"));
@@ -438,27 +496,19 @@ describe("write", () => {
     expect(items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
   });
 
-  it("replaces a skill in place on replace, leaving none of its old files", async () => {
-    const skills = join(project, ".claude", "skills");
-
-    const { items } = await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), REPLACE);
-
-    expect(await snapshot(join(skills, "web-brief"))).toEqual({ "SKILL.md": await adaSkill() });
-    expect(await exists(join(skills, "web-brief-2"))).toBe(false);
-    expect(items.warnings.filter((warning) => warning.includes("web-brief"))).toEqual([]);
-  });
-
-  it("does not follow a link inside the skill folder it replaces", async () => {
+  it("leaves a skill folder with a link inside alone on replace", async () => {
     const skills = join(project, ".claude", "skills");
     const outside = join(root, "outside");
     await mkdir(outside);
     await writeFile(join(outside, "keep.txt"), "KEEP\n");
-    await symlink(outside, join(skills, "web-brief", "linked"), "junction");
+    const linked = join(skills, "web-brief", "linked");
+    await symlink(outside, linked, "junction");
 
     await claudeCodeAdapter.write(ctx, await readBundle(ADA_DIR), REPLACE);
 
     expect(await snapshot(outside)).toEqual({ "keep.txt": "KEEP\n" });
-    expect(await snapshot(join(skills, "web-brief"))).toEqual({ "SKILL.md": await adaSkill() });
+    expect((await lstat(linked)).isSymbolicLink()).toBe(true);
+    expect(await snapshot(join(skills, "web-brief-2"))).toEqual({ "SKILL.md": await adaSkill() });
   });
 
   it.each([
@@ -555,13 +605,17 @@ describe("write", () => {
     await rm(memoryFile);
     await fileLink(outside, memoryFile, () => context.skip());
 
-    const { items } = await claudeCodeAdapter.write(ctx, bundleOf({ facts: ["New."] }), COPY);
+    const bundle = bundleOf({ facts: ["New."], notes: [{ name: "diary", text: "Day one.\n" }] });
+    const { items } = await claudeCodeAdapter.write(ctx, bundle, COPY);
 
     expect(await readFile(outside, "utf8")).toBe("- Elsewhere.\n");
     expect(items.skipped).toContainEqual({
       field: "memory.facts",
       detail: `${memoryFile} is a symlink; not written`,
     });
+    expect(items.warnings).toContain(
+      `${memoryFile} is a symlink; the imported notes are not linked from it`,
+    );
   });
 
   it("does not write a note through a linked file and still writes the others", async (context) => {
@@ -580,6 +634,10 @@ describe("write", () => {
 
     expect(await readFile(outside, "utf8")).toBe("ORIGINAL\n");
     expect(await readFile(join(memoryOf(project), "imported-ada-second.md"), "utf8")).toBe("Two.\n");
+    // Only the note that was written is linked.
+    const memory = lf(await readFile(join(memoryOf(project), "MEMORY.md"), "utf8"));
+    expect(memory).toContain("- [second](imported-ada-second.md)\n");
+    expect(memory).not.toContain("imported-ada-first.md");
     // Named by the note, so that the report still counts the note that was written as moved.
     expect(items.skipped).toContainEqual({
       field: "note:first",

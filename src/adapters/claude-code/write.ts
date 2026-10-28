@@ -1,4 +1,13 @@
-import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
@@ -235,17 +244,12 @@ async function holdsSkill(dir: string, skill: Skill): Promise<boolean> {
 /**
  * The folder name to write `skill` under, or `undefined` to reuse a folder that already holds
  * it. `<name>`, then `<name>-2`, `<name>-3`... are tried in order: the first real folder with the
- * same files and bytes is reused. Under `replace` a real `<name>` folder that differs is removed
- * and its name returned. Otherwise the first free name is returned, with a warning when it is
- * not `<name>`. A link (symbolic link or junction) is never followed or removed: it counts as a
- * taken name that differs.
+ * same files and bytes is reused, else the first free name is returned, with a warning when it
+ * is not `<name>`. Skills belong to the whole project, so a folder that differs is never
+ * removed, whatever the conflict mode: `replace` only replaces the agent. A link (symbolic link
+ * or junction) is never followed: it counts as a taken name that differs.
  */
-async function placeSkill(
-  dir: string,
-  skill: Skill,
-  opts: WriteOpts,
-  items: Items,
-): Promise<string | undefined> {
+async function placeSkill(dir: string, skill: Skill, items: Items): Promise<string | undefined> {
   for (let n = 1; ; n += 1) {
     const name = n === 1 ? skill.name : `${skill.name}-${n}`;
     const path = join(dir, name);
@@ -261,10 +265,6 @@ async function placeSkill(
     // lstat: a symbolic link or junction is never a directory here.
     if (!existing.isDirectory()) continue;
     if (await holdsSkill(path, skill)) return undefined;
-    if (n === 1 && opts.onConflict === "replace") {
-      await rm(path, { recursive: true, force: true });
-      return name;
-    }
   }
 }
 
@@ -272,7 +272,7 @@ async function placeSkill(
  * Skills go to `<project>/.claude/skills/<name>/`, where the whole project shares them, so one
  * that is already there is reused rather than written again (see `placeSkill`).
  */
-async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: Items) {
+async function writeSkills(dir: string, bundle: Bundle, items: Items) {
   for (const skill of bundle.skills) {
     if (!isSafeName(skill.name) || skill.files.some((file) => !isSafeArchivePath(file.path))) {
       items.skipped.push({
@@ -281,7 +281,7 @@ async function writeSkills(dir: string, bundle: Bundle, opts: WriteOpts, items: 
       });
       continue;
     }
-    const name = await placeSkill(dir, skill, opts, items);
+    const name = await placeSkill(dir, skill, items);
     if (name === undefined) continue;
     for (const file of skill.files) {
       const path = join(dir, name, ...file.path.split("/"));
@@ -317,25 +317,57 @@ const linkedMemory = (field: string, path: string): Item => ({
 });
 
 /**
- * Appends the facts `MEMORY.md` does not hold yet as `- fact` lines, in the file's own line
- * endings and after a blank line when the file ends in prose. A linked `MEMORY.md` is left
- * alone and reported.
+ * The bullet text that links a note file from `MEMORY.md`, `[<note>](<file>)`, so that Claude
+ * Code, which loads `MEMORY.md` as the index of the memory directory, finds the note. A file
+ * name with spaces or parentheses is put in `<...>`.
  */
-async function appendFacts(memoryDir: string, facts: readonly string[], items: Items) {
-  if (facts.length === 0) return;
+export function noteLink(note: string, file: string): string {
+  const label = note.replace(/[\\[\]]/g, "\\$&");
+  return `[${label}](${/[\s()<>]/.test(file) ? `<${file}>` : file})`;
+}
+
+/** `[label](file.md)` alone, the file a single name: what `noteLink` writes. */
+const NOTE_LINK = /^\[(?:\\.|[^\\[\]\r\n])*\]\((?:<([^<>\r\n]+)>|([^\s()<>]+))\)$/;
+
+/**
+ * Whether the text of a `MEMORY.md` bullet is only a link to a Markdown file beside it, as
+ * `noteLink` writes one: an index entry, not a fact. A link with more text after it is a fact.
+ */
+export function isNoteLink(text: string): boolean {
+  const match = NOTE_LINK.exec(text);
+  const file = match?.[1] ?? match?.[2];
+  return file !== undefined && file.endsWith(".md") && !/[\\/]/.test(file);
+}
+
+/**
+ * Appends to `MEMORY.md` the facts it does not hold yet, then a link to each imported note it
+ * does not link yet, as `- ` lines in the file's own line endings, after a blank line when the
+ * file ends in prose. The file is only ever appended to, never rewritten, so what it holds stays
+ * byte for byte even while Claude Code writes to it. A linked `MEMORY.md` is left alone and
+ * reported.
+ */
+async function appendMemory(
+  memoryDir: string,
+  facts: readonly string[],
+  links: readonly string[],
+  items: Items,
+) {
+  if (facts.length === 0 && links.length === 0) return;
   const path = join(memoryDir, MEMORY_FILE);
   if ((await lstatOf(path))?.isSymbolicLink()) {
-    items.skipped.push(linkedMemory("memory.facts", path));
+    if (facts.length > 0) items.skipped.push(linkedMemory("memory.facts", path));
+    if (links.length > 0) {
+      items.warnings.push(`${path} is a symlink; the imported notes are not linked from it`);
+    }
     return;
   }
   const existing = await readText(path);
   const known = factsIn(existing);
   const fresh: string[] = [];
-  for (const fact of facts) {
-    const line = factsToProse([fact]).slice(2);
-    if (line === "" || known.has(line)) continue;
-    known.add(line);
-    fresh.push(line);
+  for (const bullet of [...facts.map((fact) => factsToProse([fact]).slice(2)), ...links]) {
+    if (bullet === "" || known.has(bullet)) continue;
+    known.add(bullet);
+    fresh.push(bullet);
   }
   if (fresh.length === 0) return;
 
@@ -345,16 +377,23 @@ async function appendFacts(memoryDir: string, facts: readonly string[], items: I
   let separator = "";
   if (existing !== "" && !existing.endsWith("\n")) separator = eol;
   if (last !== undefined && !last.trim().startsWith("- ")) separator += eol;
-  const appended = fresh.map((fact) => `- ${fact}${eol}`).join("");
+  const appended = fresh.map((bullet) => `- ${bullet}${eol}`).join("");
   await mkdir(memoryDir, { recursive: true });
-  await writeFile(path, `${existing}${separator}${appended}`);
+  await appendFile(path, `${separator}${appended}`);
 }
 
 /**
  * Notes go next to `MEMORY.md` as `imported-<slug>-<note>.md`, overwriting earlier imports. A
- * note whose file is a link is left alone and reported.
+ * note whose file is a link is left alone and reported. Returns the `MEMORY.md` link of each
+ * note written (see `noteLink`).
  */
-async function writeNotes(memoryDir: string, slug: string, bundle: Bundle, items: Items) {
+async function writeNotes(
+  memoryDir: string,
+  slug: string,
+  bundle: Bundle,
+  items: Items,
+): Promise<string[]> {
+  const links: string[] = [];
   for (const note of bundle.notes) {
     const name = `imported-${slug}-${note.name}.md`;
     if (!isSafeName(note.name) || !isSafeName(name)) {
@@ -368,7 +407,9 @@ async function writeNotes(memoryDir: string, slug: string, bundle: Bundle, items
     }
     await mkdir(memoryDir, { recursive: true });
     await writeFile(path, note.text);
+    links.push(noteLink(note.name, name));
   }
+  return links;
 }
 
 /** What Claude Code cannot hold at all, one skipped item each. */
@@ -448,8 +489,9 @@ async function recordId(path: string, slug: string, id: string, items: Items): P
 /**
  * Writes a Bundle as a project subagent of `ctx.targetDir` (or `ctx.cwd`): the agent file in
  * `.claude/agents/`, its skills in `.claude/skills/`, its facts and notes in the project's memory
- * directory under the user's Claude Code directory, and its id in `IDS_FILE` beside that memory
- * directory. Nothing else of the user's directory is touched, and `bundle` is not changed.
+ * directory under the user's Claude Code directory (each note linked from `MEMORY.md`, which is
+ * only appended to), and its id in `IDS_FILE` beside that memory directory. Nothing else of the
+ * user's directory is touched, and `bundle` is not changed.
  */
 export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Promise<WriteResult> {
   const paths = claudePaths(ctx, ctx.targetDir ?? ctx.cwd);
@@ -460,9 +502,9 @@ export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Pro
 
   const ids = await readIds(idsFile);
   const agent = await writeAgentFile(paths.projectAgents, bundle, opts, ids, items);
-  await writeSkills(paths.projectSkills, bundle, opts, items);
-  await appendFacts(memoryDir, bundle.facts, items);
-  await writeNotes(memoryDir, agent.slug, bundle, items);
+  await writeSkills(paths.projectSkills, bundle, items);
+  const links = await writeNotes(memoryDir, agent.slug, bundle, items);
+  await appendMemory(memoryDir, bundle.facts, links, items);
   items.skipped.push(...unsupported(bundle, opts));
   await recordId(idsFile, agent.slug, bundle.manifest.id, items);
 
