@@ -1,0 +1,109 @@
+---
+const links = [
+  { href: "https://github.com/openteleport/openteleport", label: "github" },
+  { href: "https://www.npmjs.com/package/openteleport", label: "npm" },
+];
+---
+
+<header class="top">
+  <a class="brand" href="#main">openteleport</a>
+  <nav aria-label="Links">
+    {links.map((l) => <a href={l.href}>{l.label}</a>)}
+    <button id="theme" type="button" aria-label="Switch between dark and light theme" title="Theme">
+      <span data-when="dark">light</span><span data-when="light">dark</span>
+    </button>
+  </nav>
+</header>
+
+<style>
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding-block: 18px;
+    font-family: var(--font-code);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+  .top a,
+  .top button {
+    color: var(--fg-2);
+    text-decoration: none;
+  }
+  .top .brand {
+    color: var(--fg);
+    letter-spacing: 0.22em;
+  }
+  .top a:hover,
+  .top button:hover {
+    color: var(--accent);
+  }
+  nav {
+    display: flex;
+    gap: 22px;
+    align-items: center;
+  }
+  button {
+    font: inherit;
+    letter-spacing: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+  /* The button names the theme it switches to. */
+  [data-when] {
+    display: none;
+  }
+  :global(:root[data-theme="dark"]) [data-when="dark"] {
+    display: inline;
+  }
+  :global(:root[data-theme="light"]) [data-when="light"] {
+    display: inline;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme])) [data-when="dark"] {
+      display: inline;
+    }
+  }
+  @media (prefers-color-scheme: light) {
+    :global(:root:not([data-theme])) [data-when="light"] {
+      display: inline;
+    }
+  }
+  @media (max-width: 860px) {
+    nav {
+      gap: 16px;
+    }
+    .top {
+      padding-block: 14px;
+    }
+  }
+</style>
+
+<script>
+  const root = document.documentElement;
+  const button = document.getElementById("theme");
+  const prefersDark = matchMedia("(prefers-color-scheme: dark)");
+  function current(): "dark" | "light" {
+    const set = root.getAttribute("data-theme");
+    if (set === "dark" || set === "light") return set;
+    return prefersDark.matches ? "dark" : "light";
+  }
+  button?.addEventListener("click", () => {
+    const next = current() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem("theme", next);
+    } catch {
+      /* storage may be unavailable; the choice then lasts for this page only */
+    }
+  });
+</script>

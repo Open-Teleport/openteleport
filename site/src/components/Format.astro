@@ -1,0 +1,23 @@
+---
+---
+
+<section class="block" aria-labelledby="h-format">
+  <p class="label">the .jetpack file</p>
+  <h2 class="display" id="h-format">A file that is already a folder.</h2>
+  <div class="cols">
+    <div class="prose">
+      <p>A <strong>.jetpack</strong> is a zip archive. Unzipped, it is a working agent folder for any tool that reads <code>AGENTS.md</code> and Agent Skills. No new file names, nothing to leave behind.</p>
+      <p>The manifest, <code>jetpack.json</code>, has a published JSON Schema. Fields only one app understands go under <code>x-&lt;vendor&gt;</code> keys, which other apps ignore. A folder without a manifest is a valid source too.</p>
+    </div>
+    <div class="term"><pre><span class="cmd">reviewer.jetpack</span>
+├── jetpack.json            <span class="k">manifest: id, name, models, capabilities</span>
+├── AGENTS.md               <span class="k">how the agent works</span>
+├── SOUL.md                 <span class="k">who the agent is</span>
+├── skills/&lt;name&gt;/SKILL.md  <span class="k">Agent Skills</span>
+├── MEMORY.md               <span class="k">facts, one bullet each</span>
+├── memory/&lt;name&gt;.md        <span class="k">notes, carried as they are</span>
+├── routines/&lt;name&gt;.json    <span class="k">scheduled tasks, arrive disabled</span>
+├── files/                  <span class="k">only with --include-files</span>
+└── avatar.png</pre></div>
+  </div>
+</section>
