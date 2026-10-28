@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Nazwa pakietu npm: `openteleport`; polecenie: `openteleport` (nigdy `teleport`). Organizacja GitHub: `openteleport`, repo `openteleport/openteleport`. Licencja Apache-2.0.
+- Nazwa pakietu npm: `openteleport`; polecenie: `openteleport` (nigdy `teleport`). Organizacja GitHub: `Open-Teleport`, repo `Open-Teleport/openteleport`. Licencja Apache-2.0.
 - Język kodu, README, komunikatów CLI, issues: angielski.
 - Node `>=24`. `"type": "module"`. Zero zależności natywnych.
 - Żadna aplikacja nie jest wyznacznikiem: w `core/` nie ma importów z `adapters/`; nazwa żadnej aplikacji nie występuje w `core/` poza komentarzami.

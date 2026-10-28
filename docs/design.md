@@ -147,7 +147,7 @@ Zasada: żadna aplikacja nie jest wyznacznikiem. Najpierw to, co obejmuje najwi�
 
 ## 9. Organizacja, licencja, repo
 
-- GitHub: organizacja `openteleport`, repo `openteleport/openteleport`. Jedno repo na start (core + adapters + cli w jednym pakiecie, podział na pakiety dopiero gdy będzie potrzebny).
+- GitHub: organizacja `Open-Teleport`, repo `Open-Teleport/openteleport`. Jedno repo na start (core + adapters + cli w jednym pakiecie, podział na pakiety dopiero gdy będzie potrzebny).
 - Licencja: Apache 2.0.
 - Domeny: openteleport.dev (główna), openteleport.io i openteleport.ai (przekierowania). Do zarejestrowania przez właściciela.
 - npm: `openteleport`. Do zarezerwowania publikacją wersji 0.0.1 z samym README.

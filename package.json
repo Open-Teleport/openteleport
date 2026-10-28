@@ -14,11 +14,11 @@
   ],
   "homepage": "https://openteleport.dev",
   "bugs": {
-    "url": "https://github.com/openteleport/openteleport/issues"
+    "url": "https://github.com/Open-Teleport/openteleport/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openteleport/openteleport.git"
+    "url": "git+https://github.com/Open-Teleport/openteleport.git"
   },
   "license": "Apache-2.0",
   "type": "module",

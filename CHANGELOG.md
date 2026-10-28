@@ -57,4 +57,4 @@ First release.
   import it there.
 - Planned for later releases: OpenBot, Hermes, Codex, Grok Bot and Letta.
 
-[0.1.0]: https://github.com/openteleport/openteleport/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0

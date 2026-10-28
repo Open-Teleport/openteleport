@@ -10,7 +10,7 @@ large new portability and credential contract for core, and that a plugin or a f
 design proposal is the best next step. This is both: a small design for two commands, shipped as
 a plugin so that core does not change.
 
-The plugin would be a thin layer over [OpenTeleport](https://github.com/openteleport/openteleport)
+The plugin would be a thin layer over [OpenTeleport](https://github.com/Open-Teleport/openteleport)
 (Apache-2.0, npm `openteleport`), which already reads and writes OpenClaw agents through the
 `openclaw` CLI and moves agents to and from Claude Code and plain `AGENTS.md` folders.
 
@@ -81,7 +81,7 @@ to do even that is reported loudly.
 A `.jetpack` is a plain zip that unpacks to a working agent folder, laid out on the standards
 OpenClaw already reads: `AGENTS.md`, `SOUL.md`, `skills/<name>/SKILL.md` (Agent Skills),
 `MEMORY.md`, plus `jetpack.json` (manifest) and `routines/<name>.json`. The manifest is described
-by [`schema/jetpack.schema.json`](https://github.com/openteleport/openteleport/blob/main/schema/jetpack.schema.json)
+by [`schema/jetpack.schema.json`](https://github.com/Open-Teleport/openteleport/blob/main/schema/jetpack.schema.json)
 (JSON Schema, `schemaVersion` `0.1`). Vendor-specific fields go under `x-<vendor>` keys that other
 tools ignore.
 
