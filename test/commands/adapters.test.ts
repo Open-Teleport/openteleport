@@ -29,7 +29,7 @@ describe("adapters", () => {
       .slice(1)
       .filter((line) => line.trim() !== "")
       .map((line) => line.split(/\s+/)[0]);
-    expect(names).toEqual(["folder", "openclaw", "claude-code", "codex", "memory"]);
+    expect(names).toEqual(["folder", "openclaw", "claude-code", "codex", "letta", "memory"]);
     const [header] = result.stdout.split(/\r?\n/);
     expect(header).toMatch(/^name\s+app\s+found\s+version\s+location\s+hint$/);
   });
@@ -43,6 +43,7 @@ describe("adapters", () => {
       "openclaw",
       "claude-code",
       "codex",
+      "letta",
       "memory",
     ]);
     for (const row of rows) {
@@ -51,7 +52,7 @@ describe("adapters", () => {
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[4]).toEqual({
+    expect(rows[5]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -59,10 +60,16 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw, Claude Code or Codex lives in the sandbox home.
+    // Nothing of OpenClaw, Claude Code, Codex or Letta Code lives in the sandbox home.
     expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[3]).toMatchObject({ found: false, hint: expect.any(String) });
+    expect(rows[4]).toMatchObject({
+      name: "letta",
+      displayName: "Letta Code",
+      found: false,
+      hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
+    });
   });
 
   it("lists only the built-in adapters without an extra one", async () => {
@@ -73,6 +80,7 @@ describe("adapters", () => {
       "openclaw",
       "claude-code",
       "codex",
+      "letta",
     ]);
   });
 });

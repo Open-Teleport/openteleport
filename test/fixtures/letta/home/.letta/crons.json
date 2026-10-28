@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "cron-0001",
+      "agent_id": "agent-local-1111",
+      "conversation_id": "conv-9",
+      "name": "Morning review",
+      "description": "Check the open pull requests",
+      "cron": "0 9 * * 1-5",
+      "timezone": "Europe/Warsaw",
+      "recurring": true,
+      "prompt": "List the open pull requests and say which ones need a review.\nStart with the oldest.",
+      "status": "active",
+      "created_at": "2026-10-01T08:00:00.000Z",
+      "last_fired_at": "2026-10-27T07:00:00.000Z",
+      "fire_count": 18,
+      "scheduled_for": null
+    },
+    {
+      "id": "cron-0002",
+      "agent_id": "agent-local-1111",
+      "conversation_id": null,
+      "name": "Weekly digest",
+      "description": "",
+      "cron": "0 17 * * 5",
+      "timezone": "UTC",
+      "recurring": true,
+      "prompt": "Write the weekly review digest.",
+      "status": "paused",
+      "created_at": "2026-10-02T08:00:00.000Z",
+      "last_fired_at": null,
+      "fire_count": 0,
+      "scheduled_for": null
+    },
+    {
+      "id": "cron-0003",
+      "agent_id": "agent-local-1111",
+      "conversation_id": null,
+      "name": "Release freeze reminder",
+      "description": "",
+      "cron": null,
+      "timezone": "UTC",
+      "recurring": false,
+      "prompt": "Remind the team that the release freeze starts today.",
+      "status": "fired",
+      "created_at": "2026-10-03T08:00:00.000Z",
+      "last_fired_at": "2026-10-20T08:00:00.000Z",
+      "fire_count": 1,
+      "scheduled_for": "2026-10-20T08:00:00.000Z"
+    },
+    {
+      "id": "cron-0004",
+      "agent_id": "agent-local-9999",
+      "conversation_id": null,
+      "name": "Someone else's task",
+      "description": "",
+      "cron": "*/5 * * * *",
+      "timezone": "UTC",
+      "recurring": true,
+      "prompt": "This belongs to another agent.",
+      "status": "active",
+      "created_at": "2026-10-04T08:00:00.000Z",
+      "last_fired_at": null,
+      "fire_count": 0,
+      "scheduled_for": null
+    }
+  ]
+}

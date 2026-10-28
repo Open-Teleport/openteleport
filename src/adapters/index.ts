@@ -1,12 +1,14 @@
 import { claudeCodeAdapter } from "./claude-code/index.js";
 import { codexAdapter } from "./codex/index.js";
 import { folderAdapter } from "./folder/index.js";
+import { lettaAdapter } from "./letta/index.js";
 import { openclawAdapter } from "./openclaw/index.js";
 import { registerAdapter } from "./registry.js";
 
 /**
  * Registers the adapters that ship with OpenTeleport: `folder`, `openclaw`, `claude-code` and
- * `codex`, in that order. Calling it again is harmless: an adapter registered under a taken name
+ * `codex` and `letta`, in that order. Calling it again is harmless: an adapter registered under a
+ * taken name
  * replaces the earlier one in its place.
  */
 export function registerBuiltinAdapters(): void {
@@ -14,4 +16,5 @@ export function registerBuiltinAdapters(): void {
   registerAdapter(openclawAdapter);
   registerAdapter(claudeCodeAdapter);
   registerAdapter(codexAdapter);
+  registerAdapter(lettaAdapter);
 }
