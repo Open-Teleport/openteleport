@@ -1,0 +1,7 @@
+# Trimmed from cli-config.yaml.example (H18) and the configuration guide (H3).
+model:
+  default: "anthropic/claude-sonnet-4-5"
+  provider: "anthropic"
+timezone: "Europe/Warsaw"
+memory:
+  memory_char_limit: 2200
