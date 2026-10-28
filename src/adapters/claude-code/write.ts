@@ -1,9 +1,10 @@
-import { appendFile, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
-import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
+import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle, Manifest } from "../../core/schema.js";
 import { factsToProse, mergeInstructions } from "../../core/text.js";
+import { isSafeName, lstatIfAny } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
@@ -38,22 +39,9 @@ export function agentSlug(name: string): string {
   return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
 }
 
-/** A name that is one safe path segment: it cannot reach outside the directory it is put in. */
-const isSafeName = (name: string): boolean => isSafeArchivePath(name) && !name.includes("/");
-
 /** Cuts `text` to `max` characters, the last one an ellipsis. */
 const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
-async function lstatOf(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
 
 /**
  * `<base><ext>` in `dir`, or the first of `<base>-2<ext>`, `<base>-3<ext>`... that is free. A
@@ -61,7 +49,7 @@ async function lstatOf(path: string) {
  */
 async function freeName(dir: string, base: string, ext: string): Promise<string> {
   let name = base;
-  for (let n = 2; (await lstatOf(join(dir, `${name}${ext}`))) !== undefined; n += 1) {
+  for (let n = 2; (await lstatIfAny(join(dir, `${name}${ext}`))) !== undefined; n += 1) {
     name = `${base}-${n}`;
   }
   return name;
@@ -104,7 +92,7 @@ async function recordedCopy(
     .filter(({ n }) => /^[1-9]\d*$/.test(n) && Number(n) >= 2)
     .sort((a, b) => Number(a.n) - Number(b.n));
   for (const { slug } of copies) {
-    if (!(await lstatOf(join(dir, `${slug}.md`)))?.isSymbolicLink()) return slug;
+    if (!(await lstatIfAny(join(dir, `${slug}.md`)))?.isSymbolicLink()) return slug;
   }
   return undefined;
 }
@@ -125,7 +113,7 @@ async function agentFileSlug(
   items: Items,
 ): Promise<string> {
   const base = agentSlug(bundle.manifest.name);
-  const existing = await lstatOf(join(dir, `${base}.md`));
+  const existing = await lstatIfAny(join(dir, `${base}.md`));
   if (existing === undefined) return base;
 
   if (opts.onConflict === "copy") {
@@ -268,7 +256,7 @@ async function appendMemory(
 ) {
   if (facts.length === 0 && links.length === 0) return;
   const path = join(memoryDir, MEMORY_FILE);
-  if ((await lstatOf(path))?.isSymbolicLink()) {
+  if ((await lstatIfAny(path))?.isSymbolicLink()) {
     if (facts.length > 0) items.skipped.push(linkedMemory("memory.facts", path));
     if (links.length > 0) {
       items.warnings.push(`${path} is a symlink; the imported notes are not linked from it`);
@@ -315,7 +303,7 @@ async function writeNotes(
       continue;
     }
     const path = join(memoryDir, name);
-    if ((await lstatOf(path))?.isSymbolicLink()) {
+    if ((await lstatIfAny(path))?.isSymbolicLink()) {
       items.skipped.push(linkedMemory(`note:${note.name}`, path));
       continue;
     }

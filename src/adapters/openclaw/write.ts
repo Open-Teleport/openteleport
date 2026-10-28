@@ -1,12 +1,10 @@
 // Writes a Bundle into an OpenClaw install. The agent is created (or found) and configured
 // through the `openclaw` CLI; its workspace files are written directly, since they are plain
 // files that OpenClaw reads as they are.
-import type { Stats } from "node:fs";
 import { constants } from "node:fs";
 import {
   chmod,
   copyFile,
-  lstat,
   mkdir,
   readFile,
   realpath,
@@ -25,6 +23,7 @@ import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
 import { factsToProse } from "../../core/text.js";
+import { lstatIfAny } from "../fs.js";
 import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
@@ -103,17 +102,6 @@ const blamesGateway = (error: unknown): boolean => /gateway/i.test(errorOutput(e
 /** Says once per write that the routines need the Gateway started. */
 function warnGatewayDown(items: Items): void {
   if (!items.warnings.includes(GATEWAY_WARNING)) items.warnings.push(GATEWAY_WARNING);
-}
-
-/** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
-async function lstatIfAny(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
-    throw error;
-  }
 }
 
 // -- Where the agent goes ----------------------------------------------------------------------

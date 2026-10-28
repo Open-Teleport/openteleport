@@ -1,4 +1,4 @@
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
 import type {
@@ -11,6 +11,7 @@ import type {
   Skill,
 } from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
+import { lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
@@ -58,16 +59,6 @@ async function entriesOf(dir: string) {
     return await readdir(dir, { withFileTypes: true });
   } catch (error) {
     if (isMissing(error)) return [];
-    throw error;
-  }
-}
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
-async function lstatOf(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isMissing(error)) return undefined;
     throw error;
   }
 }
@@ -209,13 +200,13 @@ async function readSkills(skillsDir: string, warnings: string[]): Promise<Skill[
   const names = (await entriesOf(skillsDir)).map((entry) => entry.name).sort(byCodeUnit);
   for (const name of names) {
     const dir = join(skillsDir, name);
-    const folder = await lstatOf(dir);
+    const folder = await lstatIfAny(dir);
     if (folder?.isSymbolicLink()) {
       warnings.push(linkWarning(name));
       continue;
     }
     if (!folder?.isDirectory()) continue;
-    const skillFile = await lstatOf(join(dir, SKILL_FILE));
+    const skillFile = await lstatIfAny(join(dir, SKILL_FILE));
     if (skillFile?.isSymbolicLink()) {
       warnings.push(linkWarning(name, SKILL_FILE));
       continue;

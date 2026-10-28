@@ -1,24 +1,12 @@
 // Writing a Bundle's skills into the skills folder of a file-based app. Skills belong to the
 // whole folder, shared by every agent that uses it, so one already there is reused rather than
 // written again, and a folder that differs is never removed or written through.
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isSafeArchivePath } from "../core/paths.js";
 import type { Skill } from "../core/schema.js";
+import { isSafeName, lstatIfAny } from "./fs.js";
 import type { WriteResult } from "./types.js";
-
-/** A name that is one safe path segment: it cannot reach outside the directory it is put in. */
-const isSafeName = (name: string): boolean => isSafeArchivePath(name) && !name.includes("/");
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
-async function lstatOf(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
 
 /**
  * True when the real directory `dir` holds exactly the files of `skill`, byte for byte. A link
@@ -65,7 +53,7 @@ export async function placeSkill(
   for (let n = 1; ; n += 1) {
     const name = n === 1 ? skill.name : `${skill.name}-${n}`;
     const path = join(dir, name);
-    const existing = await lstatOf(path);
+    const existing = await lstatIfAny(path);
     if (existing === undefined) {
       if (name !== skill.name) {
         items.warnings.push(

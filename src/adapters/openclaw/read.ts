@@ -1,5 +1,5 @@
-import type { Dirent, Stats } from "node:fs";
-import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { MAX_AVATAR_BYTES, MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
@@ -15,6 +15,7 @@ import {
   RoutineSchema,
   type Skill,
 } from "../../core/schema.js";
+import { lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli } from "./cli.js";
@@ -66,16 +67,6 @@ const isNotFound = (error: unknown): boolean => {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR";
 };
-
-/** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
-async function lstatIfAny(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  }
-}
 
 /** Whether `path` is `root` itself or below it; both absolute. */
 function isWithin(root: string, path: string): boolean {
