@@ -845,6 +845,84 @@ describe("the id cache key", () => {
   });
 });
 
+describe("looking up the cache identity", () => {
+  /** A source whose `cacheIdentity` counts its calls, and fails when told to. */
+  function counting(agent: Bundle, fails = false) {
+    let calls = 0;
+    const adapter: Adapter = {
+      ...source(agent),
+      cacheIdentity: () => {
+        calls += 1;
+        if (fails) throw new Error("cannot tell which agent this is");
+        return "/agents/one/ada";
+      },
+    };
+    return { adapter, calls: () => calls };
+  }
+  const idsFile = (): string => join(home, ".openteleport", "ids.json");
+  const exists = (path: string): Promise<boolean> =>
+    stat(path).then(
+      () => true,
+      () => false,
+    );
+
+  it("asks once for an agent without an id", async () => {
+    const { adapter, calls } = counting(fullAgent());
+
+    await move({ from: adapter, to: target(), agent: "ada", ctx, write: WRITE });
+
+    expect(calls()).toBe(1);
+    expect(Object.keys(JSON.parse(await readFile(idsFile(), "utf8")))).toEqual([
+      "src//agents/one/ada",
+    ]);
+  });
+
+  it("does not ask for an agent that has an id", async () => {
+    const agent = fullAgent();
+    agent.manifest.id = KNOWN_ID;
+    const { adapter, calls } = counting(agent);
+    const to = target();
+
+    await move({ from: adapter, to, agent: "ada", ctx, write: WRITE });
+
+    expect(calls()).toBe(0);
+    expect(writtenTo(to).manifest.id).toBe(KNOWN_ID);
+    expect(await exists(idsFile())).toBe(false);
+  });
+
+  it("does not let a failing identity stop an agent that has an id", async () => {
+    const agent = fullAgent();
+    agent.manifest.id = KNOWN_ID;
+    const { adapter, calls } = counting(agent, true);
+
+    const { bundle } = await exportBundle({
+      from: adapter,
+      agent: "ada",
+      ctx,
+      includeFiles: false,
+    });
+
+    expect(calls()).toBe(0);
+    expect(bundle.manifest.id).toBe(KNOWN_ID);
+  });
+
+  it("still asks on an export of an agent without an id", async () => {
+    const { adapter, calls } = counting(fullAgent());
+
+    await exportBundle({ from: adapter, agent: "ada", ctx, includeFiles: false });
+
+    expect(calls()).toBe(1);
+  });
+
+  it("still fails when the identity of an agent without an id cannot be told", async () => {
+    const { adapter } = counting(fullAgent(), true);
+
+    await expect(
+      move({ from: adapter, to: target(), agent: "ada", ctx, write: WRITE }),
+    ).rejects.toThrow("cannot tell which agent this is");
+  });
+});
+
 describe("SecretsFoundError", () => {
   it("lists one finding per line without previews", () => {
     const error = new SecretsFoundError([
