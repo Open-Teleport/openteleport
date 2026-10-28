@@ -2,8 +2,26 @@
   "name": "openteleport",
   "version": "0.1.0",
   "description": "Move your AI agent between apps in one command.",
-  "type": "module",
+  "keywords": [
+    "ai",
+    "agents",
+    "openclaw",
+    "claude-code",
+    "agents-md",
+    "agent-skills",
+    "portability",
+    "jetpack"
+  ],
+  "homepage": "https://openteleport.dev",
+  "bugs": {
+    "url": "https://github.com/openteleport/openteleport/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openteleport/openteleport.git"
+  },
   "license": "Apache-2.0",
+  "type": "module",
   "bin": {
     "openteleport": "dist/cli.js"
   },
@@ -13,12 +31,17 @@
   },
   "files": [
     "dist",
+    "!dist/scripts",
     "schema",
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
+    "prepack": "npm run build",
     "pretest": "npm run build",
     "test": "vitest run",
     "lint": "tsc --noEmit",
