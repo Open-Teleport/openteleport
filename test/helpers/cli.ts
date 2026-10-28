@@ -2,6 +2,7 @@
 // directory (`OPENTELEPORT_HOME`) and the working directory are fresh temp folders, the
 // app-specific locations an adapter could read from the environment point into the sandbox, and
 // `PATH` leads to an empty folder so that no real `openclaw` or `claude` binary ever runs.
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,11 +54,8 @@ export type RunOptions = {
 
 export type RunResult = { exitCode: number; stdout: string; stderr: string };
 
-export async function run(
-  box: Sandbox,
-  args: readonly string[],
-  opts: RunOptions = {},
-): Promise<RunResult> {
+/** The whole environment of a CLI run: a copy of the real one with the sandbox laid over it. */
+function sandboxEnv(box: Sandbox, opts: RunOptions): Record<string, string> {
   const extra = opts.extraAdapter === undefined ? MEMORY_ADAPTER : opts.extraAdapter;
   const env: Record<string, string | undefined> = {
     OPENTELEPORT_HOME: box.home,
@@ -76,9 +74,17 @@ export async function run(
   for (const [key, value] of Object.entries({ ...process.env, ...env })) {
     if (value !== undefined) full[key] = value;
   }
+  return full;
+}
+
+export async function run(
+  box: Sandbox,
+  args: readonly string[],
+  opts: RunOptions = {},
+): Promise<RunResult> {
   const result = await execaNode(CLI, [...args], {
     cwd: opts.cwd ?? box.cwd,
-    env: full,
+    env: sandboxEnv(box, opts),
     extendEnv: false,
     reject: false,
     stdin: "ignore",
@@ -88,6 +94,30 @@ export async function run(
     stdout: String(result.stdout),
     stderr: String(result.stderr),
   };
+}
+
+/**
+ * Runs the CLI with the reading end of its stdout closed before it starts, as the reader of
+ * `openteleport ... | head` is once it has had enough, and resolves to how the CLI ended. Whatever
+ * it writes to stdout meets a closed pipe.
+ */
+export async function runWithClosedStdout(
+  box: Sandbox,
+  args: readonly string[],
+  opts: RunOptions = {},
+): Promise<{ exitCode: number | null; stderr: string }> {
+  const child = spawn(process.execPath, [CLI, ...args], {
+    cwd: opts.cwd ?? box.cwd,
+    env: sandboxEnv(box, opts),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.destroy();
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString("utf8");
+  });
+  const exitCode = await new Promise<number | null>((resolve) => child.on("close", resolve));
+  return { exitCode, stderr };
 }
 
 /**

@@ -97,11 +97,13 @@ export function reportFailure(error: unknown, json: boolean): void {
 
 /**
  * For the `error` event of stdout and stderr: a reader that went away (`| head`) ends the
- * program quietly with 0, never with a stack trace; any other error is thrown on.
+ * program quietly, never with a stack trace; any other error is thrown on. The exit code is the
+ * one the command has set (`process.exitCode`), 0 when it has set none: a reader that leaves
+ * early does not turn a failure into a success.
  */
 export function exitOnBrokenPipe(error: NodeJS.ErrnoException): void {
   if (error.code !== "EPIPE") throw error;
-  process.exit(0);
+  process.exit();
 }
 
 export function writeOut(text: string): void {

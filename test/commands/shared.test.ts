@@ -203,12 +203,27 @@ describe("ensureDetected", () => {
 });
 
 describe("exitOnBrokenPipe", () => {
-  it("ends the program quietly with 0 when the reader of the output went away", () => {
+  it("ends the program quietly when the reader of the output went away", () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     try {
       exitOnBrokenPipe(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
-      expect(exit).toHaveBeenCalledWith(0);
+      expect(exit).toHaveBeenCalledTimes(1);
     } finally {
+      exit.mockRestore();
+    }
+  });
+
+  // `process.exit(0)` would turn a failure that was already recorded into a success.
+  it("leaves the exit code to the one already set, asking for no code of its own", () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const before = process.exitCode;
+    try {
+      process.exitCode = 1;
+      exitOnBrokenPipe(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+      expect(exit).toHaveBeenCalledWith();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = before;
       exit.mockRestore();
     }
   });
