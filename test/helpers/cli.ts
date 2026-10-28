@@ -1,7 +1,8 @@
 // Runs the built CLI (`dist/cli.js`) the way a user would, inside a temporary sandbox: the home
 // directory (`OPENTELEPORT_HOME`) and the working directory are fresh temp folders, the
 // app-specific locations an adapter could read from the environment point into the sandbox, and
-// `PATH` leads to an empty folder so that no real `openclaw` or `claude` binary ever runs.
+// `PATH` leads to an empty folder so that no real app binary (`openclaw`, `claude`, `hermes`,
+// `codex`...) ever runs.
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,6 +64,13 @@ function sandboxEnv(box: Sandbox, opts: RunOptions): Record<string, string> {
     OPENCLAW_STATE_DIR: join(box.home, ".openclaw"),
     OPENCLAW_CONFIG_PATH: undefined,
     CLAUDE_CONFIG_DIR: join(box.home, ".claude"),
+    HERMES_HOME: join(box.home, ".hermes"),
+    CODEX_HOME: join(box.home, ".codex"),
+    // Where Windows apps keep their data; the home directory is all a test may touch.
+    APPDATA: join(box.home, "AppData", "Roaming"),
+    LOCALAPPDATA: join(box.home, "AppData", "Local"),
+    LETTA_LOCAL_BACKEND_DIR: undefined,
+    HERMES_TIMEZONE: undefined,
     NO_COLOR: undefined,
     FORCE_COLOR: undefined,
     [PATH_KEY]: box.bin,
