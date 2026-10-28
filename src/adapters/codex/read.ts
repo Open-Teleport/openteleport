@@ -94,7 +94,9 @@ async function readText(path: string, label: string): Promise<string | undefined
       `${label} is ${size} bytes, over the ${MAX_TEXT_ENTRY_BYTES} byte limit for text files`,
     );
   }
-  return readFile(path, "utf8");
+  const text = await readFile(path, "utf8");
+  // Some Windows editors start a UTF-8 file with a byte order mark, which would hide `# Persona`.
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 /** The entries of `dir`, or none when it does not exist. */

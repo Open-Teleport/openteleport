@@ -163,6 +163,17 @@ describe("read default", () => {
     );
   });
 
+  it("splits a file that starts with a byte order mark", async () => {
+    const path = join(codex, "AGENTS.md");
+    const byteOrderMark = String.fromCharCode(0xfeff);
+    await writeFile(path, `${byteOrderMark}${await readFile(path, "utf8")}`);
+
+    const { bundle } = await readCodexAgent(ctx, "default");
+
+    expect(bundle.persona).toMatch(/^Rowan is/);
+    expect(bundle.instructions).toMatch(/^- Read the code/);
+  });
+
   it("reads the manifest, models, vendor settings and memory", async () => {
     const { bundle, warnings } = await readCodexAgent(ctx, "default");
 
