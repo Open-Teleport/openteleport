@@ -1,4 +1,13 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, truncate, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,9 +19,12 @@ import {
   openBotCacheIdentity,
   readOpenBotAgent,
 } from "../../../src/adapters/openbot/read.js";
+import { openbotAdapter } from "../../../src/adapters/openbot/index.js";
 import { openBotUserData } from "../../../src/adapters/openbot/paths.js";
 import type { Ctx } from "../../../src/adapters/types.js";
+import { move } from "../../../src/core/engine.js";
 import { MAX_FILES_BYTES } from "../../../src/core/paths.js";
+import { readOpenBotZip } from "../../../src/formats/openbot-zip.js";
 import { RoutineSchema, parseManifest } from "../../../src/core/schema.js";
 import { buildOpenBotDatabase, setWorkspace, sqlString } from "../../helpers/openbot-db.js";
 import { zipDirectoryToFile } from "../../helpers/zip.js";
@@ -475,6 +487,46 @@ describe("cacheIdentity", () => {
     await database();
     expect(await openBotCacheIdentity(ctx, "ada")).toBe(`${await realpath(userData)}#ada`);
     expect(await openBotCacheIdentity(ctx, "min")).toBe(`${await realpath(userData)}#min`);
+  });
+
+  it("is the same for a database agent however its id or name is spelled", async () => {
+    await database();
+    const expected = `${await realpath(userData)}#ada`;
+    for (const spelling of ["ada", "Ada", "ADA", "aDa"]) {
+      expect(await openBotCacheIdentity(ctx, spelling)).toBe(expected);
+    }
+  });
+
+  it("names the agents there are when the database has none of that name", async () => {
+    await database();
+    await expect(openBotCacheIdentity(ctx, "nobody")).rejects.toThrow(
+      'OpenBot has no agent "nobody". Available: ada (Ada), min (Min)',
+    );
+  });
+
+  it("gives an agent one id in the cache, whichever way a move names it", async () => {
+    await database();
+    const spellings = ["ada", "Ada", "ADA"];
+    const written = new Set<string>();
+    const ids = new Set<string>();
+    for (const agent of spellings) {
+      const report = await move({
+        from: openbotAdapter,
+        to: openbotAdapter,
+        agent,
+        ctx,
+        write: { enableRoutines: false, includeFiles: false, onConflict: "update" },
+      });
+      expect(report.outcome).toBe("handoff");
+      const files = (await readdir(cwd)).filter((name) => name.endsWith(".zip"));
+      for (const file of files) written.add(file);
+      const [only] = (await readOpenBotZip(join(cwd, "ada-openbot-import.zip"))).agents;
+      ids.add(only?.bundle.manifest.id ?? "");
+    }
+    // One archive, updated in place each time, and the id the first move gave it.
+    expect([...written]).toEqual(["ada-openbot-import.zip"]);
+    expect(ids.size).toBe(1);
+    expect([...ids][0]).toMatch(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
   });
 
   it("is zip, the format and the key for an archive, whatever the file is called", async () => {

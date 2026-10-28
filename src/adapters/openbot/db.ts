@@ -67,7 +67,7 @@ function text(value: unknown): string | undefined {
 // -- Loading the module -----------------------------------------------------------------------
 
 /** Whether a call of `process.emitWarning` is Node's notice that `node:sqlite` is experimental. */
-function isSqliteNotice(warning: string | Error, rest: readonly unknown[]): boolean {
+export function isSqliteNotice(warning: string | Error, rest: readonly unknown[]): boolean {
   const [first] = rest;
   const name =
     warning instanceof Error
@@ -159,9 +159,26 @@ export async function withDatabaseCopy<T>(
     db = new Database(copy, { readOnly: true });
     return fn(db);
   } finally {
+    await discard(folder, db);
+  }
+}
+
+/**
+ * Closes the connection and removes the folder of the copy. Best effort: the copy lives in the
+ * temporary folder of the system, so a folder that cannot be removed (Windows keeps a file that
+ * a virus scanner holds) is left for the system to clean up and must not turn a read that worked
+ * into a failure, nor hide the error of one that did not.
+ */
+async function discard(folder: string, db: DatabaseSync | undefined): Promise<void> {
+  try {
     // The connection first: Windows does not remove a file that is open.
     db?.close();
-    await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch {
+    // A read-only connection that does not close has nothing to lose.
+  } finally {
+    await rm(folder, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
+      () => undefined,
+    );
   }
 }
 

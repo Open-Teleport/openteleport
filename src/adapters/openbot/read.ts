@@ -133,7 +133,8 @@ export async function listOpenBotAgents(ctx: Ctx): Promise<AgentRef[]> {
 
 /**
  * What tells this agent apart from every other: the real path of the data folder and the agent's
- * id for the database (as `list` shows it), and `zip:<format>:<key>` for an archive, so that
+ * id for the database (the id `list` shows, found from the id or the name given, which costs
+ * another copy of the database), and `zip:<format>:<key>` for an archive, so that
  * exporting the same bot again and moving it again updates what was written instead of
  * starting another.
  */
@@ -147,9 +148,13 @@ export async function openBotCacheIdentity(ctx: Ctx, agent: string): Promise<str
     );
     return `zip:${format}:${found.id}`;
   }
+  // The id the database holds, whichever way `agent` spells it (an id, or a name in any case):
+  // the cache keys the id it gives the agent by this, and one agent must have one key.
+  const { agents } = await loadDatabase(ctx);
+  const found = pickAgent(agents, agent);
   const userData = openBotUserData(ctx);
   const real = await realpath(userData).catch(() => resolve(userData));
-  return `${real}#${agent}`;
+  return `${real}#${found.id}`;
 }
 
 // -- read: the database -----------------------------------------------------------------------

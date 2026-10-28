@@ -40,21 +40,8 @@ describe("loadSqlite", () => {
     expect(process.emitWarning).toBe(before);
   });
 
-  it("does not let Node's notice about the experimental module through", async () => {
-    const seen: string[] = [];
-    const listener = (warning: Error): void => {
-      seen.push(`${warning.name}: ${warning.message}`);
-    };
-    process.on("warning", listener);
-    try {
-      await loadSqlite();
-      // A warning is emitted on the next tick.
-      await new Promise((resolve) => setImmediate(resolve));
-    } finally {
-      process.off("warning", listener);
-    }
-    expect(seen.filter((line) => /SQLite/.test(line))).toEqual([]);
-  });
+  // What it holds back, restores and does when the import fails: load.test.ts. That Node's
+  // notice does not reach stderr of the built CLI: cli.test.ts.
 });
 
 describe("withDatabaseCopy", () => {

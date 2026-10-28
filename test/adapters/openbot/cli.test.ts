@@ -152,7 +152,7 @@ describe("a move from openbot", () => {
       "--to",
       "openbot",
       "--agent",
-      "ada",
+      "Ada",
       "--source-dir",
       userData(),
       "--json",
@@ -188,8 +188,8 @@ describe("a move from openbot", () => {
     const id = ada?.bundle.manifest.id;
     expect(id).toMatch(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
 
-    // The same agent again: the id the first move gave it is found again through the cache
-    // identity (the data folder and the agent), so the archive is updated, not copied.
+    // The same agent again, named in another case: the id the first move gave it is found again
+    // through the cache identity (the data folder and the agent id), so the archive is updated.
     const again = await run(box, [
       "move",
       "--from",
@@ -197,7 +197,7 @@ describe("a move from openbot", () => {
       "--to",
       "openbot",
       "--agent",
-      "ada",
+      "ADA",
       "--source-dir",
       userData(),
     ]);
