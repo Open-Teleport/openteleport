@@ -1,10 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { ulid } from "ulid";
-import type { Bundle } from "./schema.js";
-
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+import { type Bundle, ULID_PATTERN } from "./schema.js";
 
 /** Where an agent comes from: the app and that app's own id or name for it. */
 export type IdKey = { app: string; agentId: string };

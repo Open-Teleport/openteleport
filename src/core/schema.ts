@@ -3,13 +3,17 @@ import { z } from "zod";
 /** Public location of the v0.1 manifest JSON Schema. */
 export const MANIFEST_SCHEMA_ID = "https://openteleport.dev/schema/0.1/jetpack.json";
 
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+/** A manifest `id`: a ULID, in capitals. */
+export const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const VENDOR_KEY_PATTERN = /^x-[a-z0-9-]+$/;
 const DURATION_PATTERN = /^[1-9]\d*(m|h|d)$/;
 
-// Building a formatter is the portable IANA check: V8 throws a RangeError for unknown zones
-// and accepts the aliases routines use in practice ("UTC", "Etc/UTC", "US/Pacific").
-function isTimeZone(zone: string): boolean {
+/**
+ * Whether `zone` is an IANA time zone. Building a formatter is the portable check: V8 throws a
+ * RangeError for unknown zones and accepts the aliases routines use in practice ("UTC",
+ * "Etc/UTC", "US/Pacific").
+ */
+export function isTimeZone(zone: string): boolean {
   try {
     new Intl.DateTimeFormat(undefined, { timeZone: zone });
     return true;

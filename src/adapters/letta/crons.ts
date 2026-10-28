@@ -2,7 +2,7 @@
 // way out [L9][L12][L17].
 import { readFile } from "node:fs/promises";
 import { everyToCron, parseCron } from "../../core/schedule.js";
-import { type Routine, RoutineSchema, ScheduleSchema } from "../../core/schema.js";
+import { type Routine, RoutineSchema, ScheduleSchema, isTimeZone } from "../../core/schema.js";
 import { isRecord, oneLine, text, withoutMark } from "./util.js";
 
 /** One entry of `tasks[]` in `crons.json`; the fields Letta keeps beyond these stay in it. */
@@ -58,17 +58,6 @@ export async function readCrons(
     });
   }
   return { tasks };
-}
-
-// Building a formatter is the portable IANA check: V8 throws a RangeError for unknown zones.
-function isTimeZone(zone: string): boolean {
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone: zone });
-    return true;
-  } catch (error) {
-    if (error instanceof RangeError) return false;
-    throw error;
-  }
 }
 
 type Converted = {

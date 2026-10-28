@@ -1,14 +1,15 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
-import type {
-  Bundle,
-  Capability,
-  FileEntry,
-  Manifest,
-  ModelPref,
-  Note,
-  Skill,
+import {
+  type Bundle,
+  type Capability,
+  type FileEntry,
+  type Manifest,
+  type ModelPref,
+  type Note,
+  type Skill,
+  ULID_PATTERN,
 } from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
 import { lstatIfAny } from "../fs.js";
@@ -28,8 +29,6 @@ const SKILL_FILE = "SKILL.md";
 const PROSE_NOTE = "MEMORY-prose";
 /** The note that carries the `MEMORY.md` bullets too long to be facts. */
 const LONG_NOTE = "MEMORY-long";
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 /** Tool name prefixes, compared ignoring case, and the capability each one implies. */
 const CAPABILITY_PREFIXES: readonly { capability: Capability; prefixes: readonly string[] }[] = [

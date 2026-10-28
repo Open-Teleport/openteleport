@@ -14,6 +14,7 @@ import {
   type Routine,
   RoutineSchema,
   type Skill,
+  ULID_PATTERN,
 } from "../../core/schema.js";
 import { lstatIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
@@ -42,8 +43,6 @@ const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declar
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;

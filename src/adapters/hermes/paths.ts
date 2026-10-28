@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
+import { isTimeZone } from "../../core/schema.js";
 import { isSafeName, lstatIfAny } from "../fs.js";
 import type { Ctx } from "../types.js";
 
@@ -156,16 +157,6 @@ export async function readConfig(
   if (raw === null || raw === undefined) return { config: {}, raw: {} };
   if (!isRecord(raw)) throw new Error(`${file} is not a mapping`);
   return { config: configOf(raw), raw };
-}
-
-function isTimeZone(zone: string): boolean {
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone: zone });
-    return true;
-  } catch (error) {
-    if (error instanceof RangeError) return false;
-    throw error;
-  }
 }
 
 /**

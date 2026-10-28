@@ -11,14 +11,15 @@ import {
   MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
 } from "../../core/paths.js";
-import type {
-  Bundle,
-  FileEntry,
-  Manifest,
-  ModelPref,
-  Note,
-  Routine,
-  Skill,
+import {
+  type Bundle,
+  type FileEntry,
+  type Manifest,
+  type ModelPref,
+  type Note,
+  type Routine,
+  type Skill,
+  ULID_PATTERN,
 } from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
 import { lstatIfAny } from "../fs.js";
@@ -42,8 +43,6 @@ const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const SKILL_FILE = "SKILL.md";
 const MANIFEST_FILE = ".bundled_manifest";
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 /** What Hermes accepts as the id of a named profile (`PROFILE_ID_RE` in `hermes_constants.py`). */
 const PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 /** How many names a warning lists before it says "and N more". */

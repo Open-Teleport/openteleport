@@ -5,7 +5,15 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse } from "smol-toml";
 import { MAX_TEXT_ENTRY_BYTES, isForbiddenPath } from "../../core/paths.js";
-import type { Bundle, FileEntry, Manifest, ModelPref, Note, Skill } from "../../core/schema.js";
+import {
+  type Bundle,
+  type FileEntry,
+  type Manifest,
+  type ModelPref,
+  type Note,
+  type Skill,
+  ULID_PATTERN,
+} from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
 import { lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
@@ -33,7 +41,6 @@ const SKILL_FILE = "SKILL.md";
 const MEMORY_NOTE = "codex-memory";
 const NOT_FOUND_HINT = "Install Codex or pass --source-dir <CODEX_HOME>";
 /** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 /** What an agent file holds that a Bundle has a place for. Everything else is `rest`. */
 export type CodexAgentFile = {

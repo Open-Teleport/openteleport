@@ -43,6 +43,7 @@ import {
   type Routine,
   RoutineSchema,
   type Skill,
+  ULID_PATTERN,
 } from "../core/schema.js";
 import { type ZipPolicy, readZipEntries } from "../core/zip.js";
 
@@ -71,7 +72,6 @@ const MAX_ROUTINE_INSTRUCTION_CHARS = 100_000;
 const MAX_SKILL_FILES = 200;
 const MAX_SKILL_BYTES = 10 * 1024 * 1024;
 
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const AVATAR_EXTENSION = /\.(png|jpe?g|webp)$/i;
 const AGENT_ENTRY = /^agents\/([^/]+)\/(.+)$/;
 const FILES_PREFIX = "files/";
