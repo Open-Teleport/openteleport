@@ -1,5 +1,6 @@
 import { cp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readBundle, writeBundle } from "../../src/core/bundle.js";
 import {
@@ -33,7 +34,7 @@ describe("validate", () => {
     await writeBundle(await readBundle(ADA_DIR), file);
     const result = await run(box, ["validate", file, "--json"]);
     expect(result.exitCode).toBe(0);
-    expect(json(result)).toEqual({ ok: true, findings: [], errors: [] });
+    expect(json(result)).toEqual({ ok: true, findings: [], errors: [], warnings: [] });
   });
 
   it("fails with exit 1 on a secret, naming where it is", async () => {
@@ -46,6 +47,7 @@ describe("validate", () => {
       ok: false,
       findings: [{ path: "SOUL.md", line: 2, kind: "anthropic-api-key", preview: "sk-ant…" }],
       errors: [],
+      warnings: [],
     });
     expect(result.stdout).not.toContain(FAKE_KEY);
   });
@@ -72,8 +74,30 @@ describe("validate", () => {
     expect(report.errors).toEqual([expect.stringMatching(/^jetpack\.json is invalid: id:/)]);
   });
 
-  it("fails with exit 1 on a folder without jetpack.json", async () => {
+  it("passes an agent folder without jetpack.json, with a warning", async () => {
     const result = await run(box, ["validate", NO_MANIFEST_DIR]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.split(/\r?\n/)).toEqual([
+      `${NO_MANIFEST_DIR} is a valid agent folder`,
+      "warning: no jetpack.json; manifest would be synthesized",
+    ]);
+  });
+
+  it("says so as JSON, ok and without errors", async () => {
+    const result = await run(box, ["validate", NO_MANIFEST_DIR, "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(json(result)).toEqual({
+      ok: true,
+      findings: [],
+      errors: [],
+      warnings: ["no jetpack.json; manifest would be synthesized"],
+    });
+  });
+
+  it("still fails with exit 1 on a .jetpack archive without jetpack.json", async () => {
+    const file = join(box.root, "bare.jetpack");
+    await writeFile(file, zipSync({ "AGENTS.md": new TextEncoder().encode("# Bare\n") }));
+    const result = await run(box, ["validate", file]);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("missing jetpack.json");
     expect(result.stderr).not.toMatch(STACK_LINE);

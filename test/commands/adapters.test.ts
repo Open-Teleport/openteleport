@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Sandbox, json, run, sandbox } from "../helpers/cli.js";
+import { type Sandbox, adapterModule, json, run, sandbox } from "../helpers/cli.js";
 
 let box: Sandbox;
 beforeEach(async () => {
@@ -66,6 +66,14 @@ describe("OPENTELEPORT_EXTRA_ADAPTER", () => {
     const result = await run(box, ["adapters"], { extraAdapter: missing });
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toMatch(/^error: Cannot load OPENTELEPORT_EXTRA_ADAPTER /m);
+  });
+
+  it("exits 2 when it would replace a built-in adapter", async () => {
+    const shadow = await adapterModule(box, "shadow.mjs", { name: "folder" });
+    const result = await run(box, ["adapters"], { extraAdapter: shadow });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toBe("error: extra adapter 'folder' would replace a built-in adapter");
+    expect(result.stdout).toBe("");
   });
 
   it("exits 2 when the default export is not an adapter", async () => {

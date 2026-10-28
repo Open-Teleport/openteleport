@@ -1,8 +1,15 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { readBundle } from "../core/bundle.js";
 import type { ModelPref } from "../core/schema.js";
-import { type CommonOptions, existingPath, oneLine, writeJson, writeOut } from "./shared.js";
+import {
+  type CommonOptions,
+  NO_MANIFEST_WARNING,
+  existingPath,
+  oneLine,
+  readInput,
+  writeJson,
+  writeOut,
+} from "./shared.js";
 
 /** What `inspect --json` prints. */
 type Summary = {
@@ -29,21 +36,18 @@ const describeModel = (pref: ModelPref): string =>
   [pref.runtime, pref.provider, pref.model].filter((part) => part !== undefined).join("/");
 
 /**
- * `inspect <file|folder>`: what a `.jetpack` archive or an agent folder holds. A folder without
- * `jetpack.json` is read as the folder adapter reads it.
+ * `inspect <file|folder>`: what a `.jetpack` archive or an agent folder holds. An archive must
+ * hold `jetpack.json`; a folder without one is read as the folder adapter reads it, with a
+ * warning.
  */
 export async function inspectCommand(source: string, opts: CommonOptions): Promise<void> {
   const { path, isDirectory } = await existingPath(source);
-  const bundle = await readBundle(path, { requireManifest: false });
+  const bundle = await readInput(path, isDirectory);
   const { manifest } = bundle;
 
   const warnings: string[] = [];
   // A manifest that was read always has a valid id; only a synthesized one is empty.
-  if (manifest.id === "") {
-    warnings.push(
-      "no jetpack.json: the name comes from the path, and the first export gives the agent an id",
-    );
-  }
+  if (manifest.id === "") warnings.push(NO_MANIFEST_WARNING);
   for (const unknown of bundle.unknownPaths) warnings.push(`not part of the layout: ${unknown}`);
 
   const summary: Summary = {

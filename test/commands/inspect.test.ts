@@ -1,5 +1,6 @@
-import { stat } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readBundle, writeBundle } from "../../src/core/bundle.js";
 import {
@@ -31,7 +32,15 @@ describe("inspect", () => {
     expect(lines).toContain("facts: 1");
     expect(lines).toContain("routines: 0");
     expect(result.stdout).toMatch(/^size: \d+ bytes$/m);
-    expect(result.stdout).toMatch(/^warning: no jetpack\.json/m);
+    expect(lines).toContain("warning: no jetpack.json; manifest would be synthesized");
+  });
+
+  it("refuses a .jetpack archive without jetpack.json with exit 1", async () => {
+    const file = join(box.root, "bare.jetpack");
+    await writeFile(file, zipSync({ "AGENTS.md": new TextEncoder().encode("# Bare\n") }));
+    const result = await run(box, ["inspect", file]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("missing jetpack.json");
   });
 
   it("describes a .jetpack archive as JSON", async () => {

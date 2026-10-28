@@ -7,11 +7,13 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { confirm, isCancel, select } from "@clack/prompts";
 import { execa } from "execa";
-import { UnknownAdapterError, registerAdapter } from "../adapters/registry.js";
+import { UnknownAdapterError, listAdapters, registerAdapter } from "../adapters/registry.js";
 import type { Adapter, AgentRef, Ctx, WriteOpts } from "../adapters/types.js";
 import { SecretsFoundError } from "../core/engine.js";
+import { readBundle } from "../core/bundle.js";
 import { isReservedDeviceName } from "../core/paths.js";
 import { type MoveReport, renderReportMarkdown, renderReportTerminal } from "../core/report.js";
+import type { Bundle } from "../core/schema.js";
 import type { SecretFinding } from "../core/secrets.js";
 
 /** Flags every command takes. */
@@ -150,6 +152,9 @@ export function printReport(report: MoveReport, opts: CommonOptions, reportPath:
 
 // -- Files ----------------------------------------------------------------------------------
 
+/** What `inspect` and `validate` say about an agent folder that holds no `jetpack.json`. */
+export const NO_MANIFEST_WARNING = "no jetpack.json; manifest would be synthesized";
+
 const MAX_SLUG_CHARS = 64;
 
 /** A file name made from an agent's name: `Ada Lovelace` → `ada-lovelace`. */
@@ -185,6 +190,21 @@ export async function saveReport(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+  }
+}
+
+/**
+ * Reads a bundle a command was given: a `.jetpack` archive, which must hold `jetpack.json`, or
+ * an agent folder, which may do without, as the folder adapter reads one. The error names the
+ * path.
+ */
+export async function readInput(path: string, isDirectory: boolean): Promise<Bundle> {
+  try {
+    return await readBundle(path, { requireManifest: !isDirectory });
+  } catch (error) {
+    const message = messageOf(error);
+    if (message.includes(path)) throw error;
+    throw new Error(`Cannot read ${path}: ${message}`, { cause: error });
   }
 }
 
@@ -311,8 +331,8 @@ function adapterProblem(value: unknown): string | undefined {
 
 /**
  * Registers the default export of the ESM module at `path` (from `OPENTELEPORT_EXTRA_ADAPTER`)
- * after the built-in adapters. A module that cannot be loaded or does not export an adapter is
- * exit code 2.
+ * after the built-in adapters. A module that cannot be loaded, does not export an adapter or
+ * exports one under a name already registered is exit code 2.
  */
 export async function loadExtraAdapter(path: string): Promise<void> {
   const absolute = resolve(process.cwd(), path);
@@ -328,7 +348,14 @@ export async function loadExtraAdapter(path: string): Promise<void> {
       `OPENTELEPORT_EXTRA_ADAPTER ${absolute}: the default export is not an adapter: ${problem}`,
     );
   }
-  registerAdapter(loaded.default as Adapter);
+  const adapter = loaded.default as Adapter;
+  // Registering under a taken name would quietly swap a built-in adapter for this one.
+  if (listAdapters().some(({ name }) => name === adapter.name)) {
+    throw new UsageError(
+      `extra adapter '${oneLine(adapter.name)}' would replace a built-in adapter`,
+    );
+  }
+  registerAdapter(adapter);
 }
 
 // -- Asking the user ------------------------------------------------------------------------
