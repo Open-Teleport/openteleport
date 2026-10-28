@@ -1,0 +1,132 @@
+// What an adapter leaves in the folders it writes so that a later move of the same agent updates
+// them in place: the marker file of an agent folder, and the map of ids kept beside a project.
+import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { ulid } from "ulid";
+
+/** Left in a folder an adapter wrote, with the manifest id of the agent it wrote there. */
+export const MARKER_FILE = ".openteleport.json";
+
+export type Marker = { id: string; movedAt: string } & Record<string, unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The marker in `dir`. It is `undefined` when there is none, when it is a link (never followed),
+ * is not JSON or holds no string `id`; this never throws for any of those, since a marker that
+ * cannot be read only costs an update that becomes a copy. A marker without a time gets an
+ * empty `movedAt`.
+ */
+export async function readMarker(dir: string): Promise<Marker | undefined> {
+  const file = join(dir, MARKER_FILE);
+  try {
+    if (!(await lstat(file)).isFile()) return undefined;
+    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
+    if (!isRecord(marker) || typeof marker.id !== "string") return undefined;
+    return {
+      ...marker,
+      id: marker.id,
+      movedAt: typeof marker.movedAt === "string" ? marker.movedAt : "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether `dir` holds the marker of the agent whose manifest id is `id`; never for no id. */
+export async function carriesMarker(dir: string, id: string): Promise<boolean> {
+  if (id === "") return false;
+  return (await readMarker(dir))?.id === id;
+}
+
+/** The marker as it is written: JSON indented by two spaces, ending in a line break. */
+export function renderMarker(marker: Marker): string {
+  return `${JSON.stringify(marker, null, 2)}\n`;
+}
+
+/**
+ * Replaces `path` in one step through a temporary sibling, so that it is never left half written
+ * and a link in its place is replaced rather than written through. The folder is created when it
+ * is not there.
+ */
+async function replaceFile(path: string, content: string): Promise<void> {
+  const temporary = `${path}.${ulid()}.tmp`;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * Writes the marker into `dir`, creating the folder when needed. The file is replaced in one
+ * step. Throws when `<dir>/.openteleport.json` is there and is not a regular file (a link or a
+ * folder): nothing is written then.
+ */
+export async function writeMarker(dir: string, marker: Marker): Promise<void> {
+  const file = join(dir, MARKER_FILE);
+  try {
+    if (!(await lstat(file)).isFile()) throw new Error(`${file} is not a regular file`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await replaceFile(file, renderMarker(marker));
+}
+
+/** Agent slug → manifest id, as a project's map of ids holds it. */
+export type AgentIds = Record<string, string>;
+
+/**
+ * The ids recorded in `path`. A missing file records none, and so does one that is not a JSON
+ * object: it is replaced on the next write, which costs only an update that becomes a copy. Any
+ * other read error is thrown before anything is written.
+ */
+export async function readIds(path: string): Promise<AgentIds> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (typeof json !== "object" || json === null || Array.isArray(json)) return {};
+  return Object.fromEntries(
+    Object.entries(json).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+    ),
+  );
+}
+
+/**
+ * Records that `slug` holds the agent with `id`, keeping what was recorded for the other slugs.
+ * The file is replaced in one step through a temporary sibling, so it is never left half written
+ * and a link in its place is replaced rather than written through. A failure only costs a later
+ * in-place update, so it becomes a warning.
+ */
+export async function recordId(
+  path: string,
+  slug: string,
+  id: string,
+  items: { warnings: string[] },
+): Promise<void> {
+  if (id === "") return;
+  try {
+    const ids = { ...(await readIds(path)), [slug]: id };
+    await replaceFile(path, `${JSON.stringify(ids, null, 2)}\n`);
+  } catch (error) {
+    items.warnings.push(
+      `could not record the agent's id in ${path} (${(error as Error).message}); a later move ` +
+        "will write a copy instead of updating it",
+    );
+  }
+}

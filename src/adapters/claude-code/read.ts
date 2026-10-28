@@ -11,10 +11,11 @@ import type {
   Skill,
 } from "../../core/schema.js";
 import { splitInstructions } from "../../core/text.js";
+import { readIds } from "../marker.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
-import { idsFileOf, isNoteLink, readIds } from "./write.js";
+import { idsFileOf, isNoteLink } from "./write.js";
 
 const APP = "claude-code";
 const MAX_NAME_CHARS = 80;

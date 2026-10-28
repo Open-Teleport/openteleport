@@ -15,6 +15,7 @@ import {
   RoutineSchema,
   type Skill,
 } from "../../core/schema.js";
+import { readMarker } from "../marker.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli } from "./cli.js";
 import {
@@ -40,8 +41,6 @@ const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declar
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
-/** Left in a workspace by the write side, with the manifest id of the agent it wrote there. */
-const MARKER_FILE = ".openteleport.json";
 /** Same rule as the manifest `id` in `schema.ts`. */
 const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
@@ -487,15 +486,8 @@ async function readAvatar(
  * which only costs a new id.
  */
 async function markerId(workspace: string): Promise<string> {
-  const file = join(workspace, MARKER_FILE);
-  try {
-    if (!(await lstatIfAny(file))?.isFile()) return "";
-    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
-    if (!isRecord(marker) || typeof marker.id !== "string") return "";
-    return ULID_PATTERN.test(marker.id) ? marker.id : "";
-  } catch {
-    return "";
-  }
+  const id = (await readMarker(workspace))?.id ?? "";
+  return ULID_PATTERN.test(id) ? id : "";
 }
 
 /**

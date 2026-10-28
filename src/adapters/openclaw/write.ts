@@ -25,6 +25,7 @@ import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
 import { factsToProse } from "../../core/text.js";
+import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
 import {
@@ -37,8 +38,6 @@ import {
 } from "./paths.js";
 
 const MAX_ID_CHARS = 32;
-/** Left in every workspace this adapter writes, so that a later move of the agent updates it. */
-const MARKER_FILE = ".openteleport.json";
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 /** The note that is the workspace's `USER.md`. */
@@ -153,19 +152,6 @@ function existingWorkspace(
   if (isRecord(entry) && label(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
   const listed = rows.find((row) => row.id === id)?.workspace;
   return listed !== undefined && isAbsolute(listed) ? listed : paths.workspaceFor(id, cfg);
-}
-
-/** Whether the workspace holds the marker of the agent whose manifest id is `id`. */
-async function carriesMarker(workspace: string, id: string): Promise<boolean> {
-  if (id === "") return false;
-  const file = join(workspace, MARKER_FILE);
-  if (!(await lstatIfAny(file))?.isFile()) return false;
-  try {
-    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
-    return isRecord(marker) && marker.id === id;
-  } catch {
-    return false;
-  }
 }
 
 type Target = {
@@ -741,11 +727,7 @@ async function finishWrite(
 ): Promise<WriteResult> {
   const identity = await writeWorkspace(target.workspace, bundle, items);
   const marker = { id: bundle.manifest.id, movedAt: new Date().toISOString() };
-  const unmarked = await writeInside(
-    target.workspace,
-    MARKER_FILE,
-    `${JSON.stringify(marker, null, 2)}\n`,
-  );
+  const unmarked = await writeInside(target.workspace, MARKER_FILE, renderMarker(marker));
   if (unmarked !== undefined) {
     items.warnings.push(
       `${unmarked}; not written, so a later move will not update this agent in place`,
