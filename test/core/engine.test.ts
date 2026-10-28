@@ -494,6 +494,71 @@ describe("a secret in a file that is not carried over", () => {
   });
 });
 
+describe("the context each side gets", () => {
+  /** The contexts `adapter` was called with, by method, recorded as it passes them on. */
+  function watched(adapter: MemoryAdapter): { adapter: Adapter; seen: Record<string, Ctx[]> } {
+    const seen: Record<string, Ctx[]> = { read: [], write: [] };
+    return {
+      seen,
+      adapter: {
+        ...adapter,
+        read: (given, agent) => {
+          seen.read?.push(given);
+          return adapter.read(given, agent);
+        },
+        write: (given, bundle, opts) => {
+          seen.write?.push(given);
+          return adapter.write(given, bundle, opts);
+        },
+      },
+    };
+  }
+  const both = (): Ctx => ({ ...ctx, sourceDir: "/from/here", targetDir: "/to/there" });
+  const onlySource = (given: Ctx | undefined) => {
+    expect(given?.sourceDir).toBe("/from/here");
+    expect(given?.targetDir).toBeUndefined();
+    expect(given?.home).toBe(home);
+  };
+  const onlyTarget = (given: Ctx | undefined) => {
+    expect(given?.targetDir).toBe("/to/there");
+    expect(given?.sourceDir).toBeUndefined();
+    expect(given?.home).toBe(home);
+  };
+
+  it("move reads without the target's folder and writes without the source's", async () => {
+    const from = watched(source());
+    const to = watched(target());
+    await move({ from: from.adapter, to: to.adapter, agent: "ada", ctx: both(), write: WRITE });
+
+    expect(from.seen.read).toHaveLength(1);
+    onlySource(from.seen.read?.[0]);
+    expect(to.seen.write).toHaveLength(1);
+    onlyTarget(to.seen.write?.[0]);
+  });
+
+  it("exportBundle reads without the target's folder", async () => {
+    const from = watched(source());
+    await exportBundle({ from: from.adapter, agent: "ada", ctx: both(), includeFiles: false });
+
+    expect(from.seen.read).toHaveLength(1);
+    onlySource(from.seen.read?.[0]);
+  });
+
+  it("importBundle writes without the source's folder", async () => {
+    const to = watched(target());
+    await importBundle({ to: to.adapter, bundle: fullAgent(), ctx: both(), write: WRITE });
+
+    expect(to.seen.write).toHaveLength(1);
+    onlyTarget(to.seen.write?.[0]);
+  });
+
+  it("leaves the caller's context as it was", async () => {
+    const given = both();
+    await move({ from: source(), to: target(), agent: "ada", ctx: given, write: WRITE });
+    expect(given).toMatchObject({ sourceDir: "/from/here", targetDir: "/to/there" });
+  });
+});
+
 describe("SecretsFoundError", () => {
   it("lists one finding per line without previews", () => {
     const error = new SecretsFoundError([

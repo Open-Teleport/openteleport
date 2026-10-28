@@ -150,6 +150,14 @@ export function diffCapabilities(
   return { bundle: { ...fitted, routines }, skipped };
 }
 
+/**
+ * `ctx` as the source adapter gets it, without `targetDir`; `targetSide` is the converse.
+ * Adapters fall back from one folder to the other (a state directory may be
+ * `sourceDir ?? targetDir`), so a side that saw the other's folder could read or write there.
+ */
+const sourceSide = ({ targetDir: _targetDir, ...ctx }: Ctx): Ctx => ctx;
+const targetSide = ({ sourceDir: _sourceDir, ...ctx }: Ctx): Ctx => ctx;
+
 function assertNoSecrets(bundle: Bundle): void {
   const findings = scanSecrets(bundle);
   if (findings.length > 0) throw new SecretsFoundError(findings);
@@ -177,7 +185,7 @@ async function deliver(opts: {
   const carried = filesIf(opts.bundle, write.includeFiles);
   assertNoSecrets(carried);
   const { bundle, skipped } = diffCapabilities(carried, to.capabilities, to.displayName);
-  const result = await to.write(ctx, bundle, write);
+  const result = await to.write(targetSide(ctx), bundle, write);
   return {
     source: opts.source,
     target: {
@@ -196,7 +204,7 @@ async function deliver(opts: {
 /**
  * Moves an agent from one app to another: read it from `from`, give it an id, refuse it if it
  * holds secrets, drop what `to` cannot hold, write it to `to` and report what happened. The
- * source is only read.
+ * source is only read. `from` never sees `ctx.targetDir` and `to` never sees `ctx.sourceDir`.
  */
 export async function move(opts: {
   from: Adapter;
@@ -206,7 +214,7 @@ export async function move(opts: {
   write: WriteOpts;
 }): Promise<MoveReport> {
   const { from, agent, ctx } = opts;
-  const read = await from.read(ctx, agent);
+  const read = await from.read(sourceSide(ctx), agent);
   const bundle = await ensureId(read.bundle, { app: from.name, agentId: agent }, ctx.home);
   return deliver({
     to: opts.to,
@@ -221,7 +229,7 @@ export async function move(opts: {
 /**
  * Reads an agent from `from` as a Bundle with an id. `files` is emptied unless `includeFiles`,
  * and what is left is refused if it holds secrets. With `out` the Bundle is also written there
- * as a `.jetpack` archive.
+ * as a `.jetpack` archive. `from` never sees `ctx.targetDir`.
  */
 export async function exportBundle(opts: {
   from: Adapter;
@@ -231,7 +239,7 @@ export async function exportBundle(opts: {
   includeFiles: boolean;
 }): Promise<{ bundle: Bundle; report: MoveReport }> {
   const { from, agent, ctx } = opts;
-  const read = await from.read(ctx, agent);
+  const read = await from.read(sourceSide(ctx), agent);
   const withId = await ensureId(read.bundle, { app: from.name, agentId: agent }, ctx.home);
   const bundle = filesIf(withId, opts.includeFiles);
   assertNoSecrets(bundle);
@@ -251,7 +259,8 @@ export async function exportBundle(opts: {
 
 /**
  * Writes a Bundle, typically read from a `.jetpack` file, to `to`. A Bundle without an id gets
- * the one recorded for its name, so importing the same file twice gives the same id.
+ * the one recorded for its name, so importing the same file twice gives the same id. `to` never
+ * sees `ctx.sourceDir`.
  */
 export async function importBundle(opts: {
   to: Adapter;
