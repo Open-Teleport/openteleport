@@ -66,6 +66,19 @@ export async function isProfile(dir: string): Promise<boolean> {
   return false;
 }
 
+/**
+ * `source` parsed as YAML. Throws, naming `file`, with the first line of what the parser says
+ * (the rest of it quotes the text).
+ */
+export function parseYaml(file: string, source: string): unknown {
+  try {
+    return parse(source);
+  } catch (error) {
+    const reason = (error as Error).message.split("\n")[0];
+    throw new Error(`${file} is not valid YAML: ${reason}`, { cause: error });
+  }
+}
+
 /** The part of `config.yaml` the adapter uses. */
 export type HermesConfig = {
   model?: { default?: string; provider?: string; base_url?: string };
@@ -132,12 +145,7 @@ export async function readConfig(
     if (code === "ENOENT" || code === "ENOTDIR") return undefined;
     throw error;
   }
-  let raw: unknown;
-  try {
-    raw = parse(source);
-  } catch (error) {
-    throw new Error(`${file} is not valid YAML: ${(error as Error).message}`, { cause: error });
-  }
+  const raw = parseYaml(file, source);
   if (raw === null || raw === undefined) return { config: {}, raw: {} };
   if (!isRecord(raw)) throw new Error(`${file} is not a mapping`);
   return { config: configOf(raw), raw };
