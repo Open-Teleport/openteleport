@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("adapters", () => {
-  it("prints one row per adapter: the four built in, then the extra one", async () => {
+  it("prints one row per adapter: the built-in ones, then the extra one", async () => {
     const result = await run(box, ["adapters"]);
     expect(result.exitCode).toBe(0);
     const names = result.stdout
@@ -36,6 +36,7 @@ describe("adapters", () => {
       "codex",
       "letta",
       "hermes",
+      "grok-bot",
       "memory",
     ]);
     const [header] = result.stdout.split(/\r?\n/);
@@ -53,6 +54,7 @@ describe("adapters", () => {
       "codex",
       "letta",
       "hermes",
+      "grok-bot",
       "memory",
     ]);
     for (const row of rows) {
@@ -61,7 +63,7 @@ describe("adapters", () => {
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[6]).toEqual({
+    expect(rows[7]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -69,7 +71,8 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw, Claude Code, Codex, Letta Code or Hermes lives in the sandbox home.
+    // Nothing of OpenClaw, Claude Code, Codex, Letta Code or Hermes lives in the sandbox home, and
+    // Grok Bot has no home at all: it is found only through a zip.
     expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[3]).toMatchObject({ found: false, hint: expect.any(String) });
@@ -85,6 +88,14 @@ describe("adapters", () => {
       found: false,
       hint: "Install Hermes Agent or pass --source-dir <HERMES_HOME>",
     });
+    expect(rows[6]).toEqual({
+      name: "grok-bot",
+      displayName: "Grok Bot",
+      found: false,
+      location: null,
+      version: null,
+      hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>",
+    });
   });
 
   it("lists only the built-in adapters without an extra one", async () => {
@@ -97,6 +108,7 @@ describe("adapters", () => {
       "codex",
       "letta",
       "hermes",
+      "grok-bot",
     ]);
   });
 });
