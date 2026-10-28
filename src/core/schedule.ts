@@ -386,3 +386,248 @@ export function fromOpenClawJob(job: {
       return null;
   }
 }
+
+/**
+ * The schedule shapes OpenBot keeps for a routine (`ipc-routines.ts`). `once` is only in a
+ * transfer file, never in an agent import. `advanced` is the plain form the design maps: some
+ * months, some days of the month and a time. OpenBot writes the day and the time nested
+ * (`{ kind: "days-of-month", days }`, `{ kind: "at-time", time }`); `fromOpenBotSchedule` reads
+ * both forms.
+ */
+export type OpenBotSchedule =
+  | { kind: "hourly"; minute: number }
+  | { kind: "daily"; time: string }
+  | { kind: "weekdays"; time: string }
+  | { kind: "weekly"; weekday: number; time: string }
+  | { kind: "monthly"; day: number; time: string }
+  | {
+      kind: "interval";
+      amount: number;
+      unit: "minutes" | "hours" | "days";
+      /** When the interval started counting; OpenBot starts it at the import when it is absent. */
+      anchorAt?: string;
+    }
+  | { kind: "advanced"; months: number[]; days: number[]; time: string }
+  | { kind: "custom"; expression: string }
+  | { kind: "once"; date: string; time: string };
+
+/** The largest amount OpenBot takes in an interval. */
+const OPENBOT_MAX_INTERVAL_AMOUNT = 100_000;
+/** The shortest interval OpenBot runs a routine at. */
+const OPENBOT_MIN_INTERVAL_MINUTES = 3;
+/** The longest cron expression of a `custom` schedule. */
+const OPENBOT_MAX_CRON_CHARS = 255;
+
+const OPENBOT_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const OPENBOT_UNIT_SUFFIX = new Map([
+  ["minutes", "m"],
+  ["hours", "h"],
+  ["days", "d"],
+]);
+// Largest unit first: an interval is written in the largest one that divides it exactly.
+const OPENBOT_UNITS = [
+  ["days", MS_PER_DAY],
+  ["hours", MS_PER_HOUR],
+  ["minutes", MS_PER_MINUTE],
+] as const;
+
+function integerIn(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+
+/** `HH:MM` on a 24 hour clock as its two parts. */
+function clockOf(value: unknown): { hour: number; minute: number } | undefined {
+  const match = typeof value === "string" ? OPENBOT_TIME.exec(value) : null;
+  return match ? { hour: Number(match[1]), minute: Number(match[2]) } : undefined;
+}
+
+/** A non-empty list of whole numbers within a range. */
+function numberList(value: unknown, min: number, max: number): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const entries: readonly unknown[] = value;
+  return entries.every((entry) => integerIn(entry, min, max)) ? (entries as number[]) : undefined;
+}
+
+// The cron of an `advanced` schedule. Both forms are read: the plain one (a list of days of the
+// month and a time) and OpenBot's nested one. A nested time that repeats within a day has no
+// cron form that keeps its meaning.
+function advancedToCron(spec: Record<string, unknown>): string | undefined {
+  const months = numberList(spec.months, 1, 12);
+  if (months === undefined) return undefined;
+  let clock: { hour: number; minute: number } | undefined;
+  let dayOfMonth = "*";
+  let dayOfWeek = "*";
+  if (Array.isArray(spec.days)) {
+    const days = numberList(spec.days, 1, 31);
+    if (days === undefined) return undefined;
+    dayOfMonth = days.join(",");
+    clock = clockOf(spec.time);
+  } else if (isRecord(spec.days)) {
+    if (spec.days.kind === "days-of-month") {
+      const days = numberList(spec.days.days, 1, 31);
+      if (days === undefined) return undefined;
+      dayOfMonth = days.join(",");
+    } else if (spec.days.kind === "days-of-week") {
+      const days = numberList(spec.days.days, 0, 6);
+      if (days === undefined) return undefined;
+      dayOfWeek = days.join(",");
+    } else if (spec.days.kind !== "every-day") {
+      return undefined;
+    }
+    clock =
+      isRecord(spec.time) && spec.time.kind === "at-time" ? clockOf(spec.time.time) : undefined;
+  }
+  if (clock === undefined) return undefined;
+  return `${clock.minute} ${clock.hour} ${dayOfMonth} ${months.join(",")} ${dayOfWeek}`;
+}
+
+/**
+ * Reads the schedule of an OpenBot routine, from an agent import or a transfer file, as a
+ * manifest schedule (the table in the design). `timezone` is the zone of the routine, which a
+ * `once` date and time are read in. An interval's `anchorAt` comes back as `extra`, for the
+ * caller to keep with the routine. `null` means the schedule has no manifest form: a shape this
+ * does not know, a value out of range, a `custom` expression that is not cron, a date that does
+ * not exist or a zone that does not.
+ */
+export function fromOpenBotSchedule(
+  schedule: unknown,
+  timezone: string,
+): { schedule: Schedule; extra?: Record<string, unknown> } | null {
+  if (!isRecord(schedule)) return null;
+  const cron = (expression: string): { schedule: Schedule } => ({
+    schedule: { kind: "cron", expression },
+  });
+  switch (schedule.kind) {
+    case "hourly":
+      return integerIn(schedule.minute, 0, 59) ? cron(`${schedule.minute} * * * *`) : null;
+    case "daily":
+    case "weekdays": {
+      const clock = clockOf(schedule.time);
+      if (clock === undefined) return null;
+      const days = schedule.kind === "daily" ? "*" : "1-5";
+      return cron(`${clock.minute} ${clock.hour} * * ${days}`);
+    }
+    case "weekly": {
+      const clock = clockOf(schedule.time);
+      if (clock === undefined || !integerIn(schedule.weekday, 0, 6)) return null;
+      return cron(`${clock.minute} ${clock.hour} * * ${schedule.weekday}`);
+    }
+    case "monthly": {
+      const clock = clockOf(schedule.time);
+      if (clock === undefined || !integerIn(schedule.day, 1, 31)) return null;
+      return cron(`${clock.minute} ${clock.hour} ${schedule.day} * *`);
+    }
+    case "interval": {
+      const suffix =
+        typeof schedule.unit === "string" ? OPENBOT_UNIT_SUFFIX.get(schedule.unit) : undefined;
+      if (suffix === undefined || !integerIn(schedule.amount, 1, OPENBOT_MAX_INTERVAL_AMOUNT)) {
+        return null;
+      }
+      const every: Schedule = { kind: "every", every: `${schedule.amount}${suffix}` };
+      const anchorAt = schedule.anchorAt;
+      return typeof anchorAt === "string" && !Number.isNaN(Date.parse(anchorAt))
+        ? { schedule: every, extra: { anchorAt } }
+        : { schedule: every };
+    }
+    case "advanced": {
+      const expression = advancedToCron(schedule);
+      return expression === undefined ? null : cron(expression);
+    }
+    case "custom": {
+      const expression = nonBlank(schedule.expression);
+      return expression !== undefined && parseCron(expression).ok ? cron(expression) : null;
+    }
+    case "once": {
+      if (typeof schedule.date !== "string" || clockOf(schedule.time) === undefined) return null;
+      const at = zonedToInstant(`${schedule.date}T${String(schedule.time)}`, timezone);
+      return at === undefined ? null : { schedule: { kind: "at", at } };
+    }
+    default:
+      return null;
+  }
+}
+
+function plainList(token: string, min: number, max: number): number[] | undefined {
+  const values = token.split(",").map((entry) => plainNumber(entry, min, max));
+  return values.every((value) => value !== undefined) ? (values as number[]) : undefined;
+}
+
+// The named shape of a five field cron expression, if it has one: the shapes `describeCron` puts
+// into words, and the advanced one (lists of days of the month and of months).
+function namedCronShape(
+  parts: readonly string[],
+): Exclude<OpenBotSchedule, { kind: "interval" | "custom" | "once" }> | undefined {
+  const [minuteToken, hourToken, dayToken, monthToken, weekdayToken] = parts as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const minute = plainNumber(minuteToken, 0, 59);
+  if (minute === undefined) return undefined;
+  if (hourToken === "*") {
+    return dayToken === "*" && monthToken === "*" && weekdayToken === "*"
+      ? { kind: "hourly", minute }
+      : undefined;
+  }
+  const hour = plainNumber(hourToken, 0, 23);
+  if (hour === undefined) return undefined;
+  const time = `${twoDigits(hour)}:${twoDigits(minute)}`;
+
+  if (monthToken === "*") {
+    if (dayToken === "*") {
+      if (weekdayToken === "*") return { kind: "daily", time };
+      if (/^(?:1-5|mon-fri)$/i.test(weekdayToken)) return { kind: "weekdays", time };
+      const weekday = weekdayIndex(weekdayToken);
+      return weekday === undefined ? undefined : { kind: "weekly", weekday, time };
+    }
+    const day = plainNumber(dayToken, 1, 31);
+    return day !== undefined && weekdayToken === "*" ? { kind: "monthly", day, time } : undefined;
+  }
+  if (weekdayToken !== "*") return undefined;
+  const months = plainList(monthToken, 1, 12);
+  const days = plainList(dayToken, 1, 31);
+  return months !== undefined && days !== undefined
+    ? { kind: "advanced", months, days, time }
+    : undefined;
+}
+
+/**
+ * Writes a manifest schedule as an OpenBot schedule. A cron expression of five fields becomes
+ * the shape that names it (hourly, daily, weekdays, weekly, monthly, or advanced for lists of
+ * days of the month and of months) and any other cron expression becomes `custom`. An interval
+ * becomes an `interval` in the largest unit that divides it. `null` means OpenBot cannot hold
+ * the schedule: a one-off time (only a transfer file has those), an interval under 3 minutes or
+ * over what OpenBot takes, and a cron expression that is not valid or is over 255 characters.
+ */
+export function toOpenBotSchedule(
+  schedule: Schedule,
+): Exclude<OpenBotSchedule, { kind: "once" }> | null {
+  switch (schedule.kind) {
+    case "at":
+      return null;
+    case "every": {
+      let ms: number;
+      try {
+        ms = everyToMs(schedule.every);
+      } catch {
+        return null;
+      }
+      if (ms < OPENBOT_MIN_INTERVAL_MINUTES * MS_PER_MINUTE) return null;
+      for (const [unit, size] of OPENBOT_UNITS) {
+        if (ms % size !== 0) continue;
+        const amount = ms / size;
+        return amount <= OPENBOT_MAX_INTERVAL_AMOUNT ? { kind: "interval", amount, unit } : null;
+      }
+      return null;
+    }
+    case "cron": {
+      const expression = schedule.expression.trim();
+      if (!parseCron(expression).ok || expression.length > OPENBOT_MAX_CRON_CHARS) return null;
+      const parts = expression.split(/\s+/);
+      const named = parts.length === 5 ? namedCronShape(parts) : undefined;
+      return named ?? { kind: "custom", expression };
+    }
+  }
+}
