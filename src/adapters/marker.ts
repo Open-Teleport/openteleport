@@ -3,6 +3,7 @@
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { ulid } from "ulid";
+import { lstatIfAny } from "./fs.js";
 
 /** Left in a folder an adapter wrote, with the manifest id of the agent it wrote there. */
 export const MARKER_FILE = ".openteleport.json";
@@ -12,29 +13,47 @@ export type Marker = { id: string; movedAt: string } & Record<string, unknown>;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const isNotFound = (error: unknown): boolean => {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
 /**
- * The marker in `dir`. It is `undefined` when there is none, when it is a link (never followed),
- * is not JSON or holds no string `id`; this never throws for any of those, since a marker that
- * cannot be read only costs an update that becomes a copy. A marker without a time gets an
- * empty `movedAt`.
+ * The marker in `dir`. It is `undefined` when there is none (no file, or nothing on the way to
+ * it), when it is not a regular file (a link is never followed), is not JSON or holds no string
+ * `id`; a marker without a time gets an empty `movedAt`. Any other error, such as a refused
+ * permission, is thrown: a marker that cannot be read is not proof that there is none, and
+ * treating it so would turn an update into a copy.
  */
 export async function readMarker(dir: string): Promise<Marker | undefined> {
   const file = join(dir, MARKER_FILE);
+  if (!(await lstatIfAny(file))?.isFile()) return undefined;
+  let text: string;
   try {
-    if (!(await lstat(file)).isFile()) return undefined;
-    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
-    if (!isRecord(marker) || typeof marker.id !== "string") return undefined;
-    return {
-      ...marker,
-      id: marker.id,
-      movedAt: typeof marker.movedAt === "string" ? marker.movedAt : "",
-    };
+    text = await readFile(file, "utf8");
+  } catch (error) {
+    // Gone since the check above.
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+  let marker: unknown;
+  try {
+    marker = JSON.parse(text);
   } catch {
     return undefined;
   }
+  if (!isRecord(marker) || typeof marker.id !== "string") return undefined;
+  return {
+    ...marker,
+    id: marker.id,
+    movedAt: typeof marker.movedAt === "string" ? marker.movedAt : "",
+  };
 }
 
-/** Whether `dir` holds the marker of the agent whose manifest id is `id`; never for no id. */
+/**
+ * Whether `dir` holds the marker of the agent whose manifest id is `id`; never for no id. Throws
+ * what `readMarker` throws.
+ */
 export async function carriesMarker(dir: string, id: string): Promise<boolean> {
   if (id === "") return false;
   return (await readMarker(dir))?.id === id;

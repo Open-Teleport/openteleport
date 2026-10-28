@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, lstat, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MARKER_FILE,
   carriesMarker,
@@ -11,6 +11,27 @@ import {
   renderMarker,
   writeMarker,
 } from "../../src/adapters/marker.js";
+
+/** Errors the file system is made to give, for the tests that need one a machine cannot give. */
+const injected = vi.hoisted(() => ({
+  lstat: undefined as Error | undefined,
+  readFile: undefined as Error | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    lstat: (path: string) =>
+      injected.lstat === undefined ? actual.lstat(path) : Promise.reject(injected.lstat),
+    readFile: (path: string, encoding: BufferEncoding) =>
+      injected.readFile === undefined
+        ? actual.readFile(path, encoding)
+        : Promise.reject(injected.readFile),
+  };
+});
+
+const failure = (code: string): Error => Object.assign(new Error(`${code}: injected`), { code });
 
 const ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
 const OTHER_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2V";
@@ -40,6 +61,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  injected.lstat = undefined;
+  injected.readFile = undefined;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -98,6 +121,33 @@ describe("readMarker", () => {
     expect(await readMarker(dir)).toBeUndefined();
   });
 
+  it("is undefined when a file is where the folder should be", async () => {
+    await writeFile(join(root, "a-file"), "");
+
+    expect(await readMarker(join(root, "a-file"))).toBeUndefined();
+  });
+
+  it("is undefined when the marker is gone by the time it is read", async () => {
+    await writeFile(markerFile(), JSON.stringify({ id: ID, movedAt: MOVED_AT }));
+    injected.readFile = failure("ENOENT");
+
+    expect(await readMarker(dir)).toBeUndefined();
+  });
+
+  // An unreadable marker is not proof that there is none: the update would become a copy.
+  it.each(["EACCES", "EIO", "EPERM"])("throws %s when the marker cannot be read", async (code) => {
+    await writeFile(markerFile(), JSON.stringify({ id: ID, movedAt: MOVED_AT }));
+    injected.readFile = failure(code);
+
+    await expect(readMarker(dir)).rejects.toMatchObject({ code });
+  });
+
+  it.each(["EACCES", "EIO"])("throws %s when the marker cannot be looked at", async (code) => {
+    injected.lstat = failure(code);
+
+    await expect(readMarker(dir)).rejects.toMatchObject({ code });
+  });
+
   it.skipIf(!canSymlink)("never reads a marker through a symbolic link", async () => {
     const real = join(root, "elsewhere.json");
     await writeFile(real, JSON.stringify({ id: ID, movedAt: MOVED_AT }));
@@ -122,6 +172,13 @@ describe("carriesMarker", () => {
 
   it("is false without a marker", async () => {
     expect(await carriesMarker(dir, ID)).toBe(false);
+  });
+
+  it("throws what readMarker throws, rather than say there is no marker", async () => {
+    await writeFile(markerFile(), renderMarker({ id: ID, movedAt: MOVED_AT }));
+    injected.readFile = failure("EACCES");
+
+    await expect(carriesMarker(dir, ID)).rejects.toMatchObject({ code: "EACCES" });
   });
 
   it("is false for an empty id, even when the marker holds an empty one", async () => {
