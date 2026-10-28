@@ -1,0 +1,11 @@
+{
+  "id": "agent-local-1111",
+  "name": "Reviewer",
+  "description": "Reviews pull requests",
+  "system": "You review PRs.",
+  "tags": ["review"],
+  "model": "anthropic/claude-sonnet-4-5",
+  "model_settings": { "temperature": 0.2 },
+  "hidden": false,
+  "compaction_settings": {}
+}
