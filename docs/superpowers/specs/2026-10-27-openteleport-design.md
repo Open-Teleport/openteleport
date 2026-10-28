@@ -70,7 +70,7 @@ npx openteleport import --to openclaw ada.jetpack
 
 Pomocnicze: `inspect <plik>` (co jest w środku), `validate <plik>` (czy zgodny ze schematem, czy nie ma sekretów), `list --from openclaw` (jacy agenci są dostępni).
 
-Po każdym `move` i `import` drukuje się **raport przeniesienia**: co przeniesiono 1:1, co przeniesiono z przybliżeniem (np. rutyna cron zamieniona na format docelowy), co pominięto i dlaczego. Raport jest też zapisywany jako `move-report.md` obok pliku.
+Po każdym `move` i `import` drukuje się **raport przeniesienia**: co przeniesiono 1:1, co przeniesiono z przybliżeniem (np. rutyna cron zamieniona na format docelowy), co pominięto i dlaczego. Raport jest też zapisywany: przy `export` jako `move-report.md` obok pliku, przy `move` i `import` (które nie mają pliku obok) w `~/.openteleport/reports/<data>-<agent>.md` (decyzja z wdrożenia v0.1).
 
 Gdy brakuje argumentu (np. `--agent`), narzędzie pyta interaktywnie z listą do wyboru. Gdy terminal nie jest interaktywny, kończy się błędem z czytelnym komunikatem.
 
