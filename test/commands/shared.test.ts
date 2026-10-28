@@ -10,6 +10,7 @@ import {
   ensureDetected,
   exitCodeOf,
   fileSlug,
+  exitOnBrokenPipe,
   matchAgents,
   resolveAgent,
   sideOf,
@@ -142,6 +143,29 @@ describe("ensureDetected", () => {
 
   it("lets a folder target be created on write", async () => {
     await expect(ensureDetected(missing, ctx, "target")).resolves.toBeUndefined();
+  });
+});
+
+describe("exitOnBrokenPipe", () => {
+  it("ends the program quietly with 0 when the reader of the output went away", () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      exitOnBrokenPipe(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+      expect(exit).toHaveBeenCalledWith(0);
+    } finally {
+      exit.mockRestore();
+    }
+  });
+
+  it("throws any other output error on", () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      const failure = Object.assign(new Error("write ENOSPC"), { code: "ENOSPC" });
+      expect(() => exitOnBrokenPipe(failure)).toThrow(failure);
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      exit.mockRestore();
+    }
   });
 });
 

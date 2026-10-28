@@ -8,6 +8,7 @@ import { type ListOptions, listCommand } from "./commands/list.js";
 import { type MoveOptions, moveCommand } from "./commands/move.js";
 import {
   type CommonOptions,
+  exitOnBrokenPipe,
   loadExtraAdapter,
   reportFailure,
   writeJson,
@@ -134,6 +135,10 @@ async function main(): Promise<void> {
     }
   }
 }
+
+// `openteleport list ... | head` closes the pipe early: that ends the program, it is no error.
+process.stdout.on("error", exitOnBrokenPipe);
+process.stderr.on("error", exitOnBrokenPipe);
 
 // Last resort: whatever escapes is still one `error:` line, never a stack trace.
 process.on("unhandledRejection", (reason) => {

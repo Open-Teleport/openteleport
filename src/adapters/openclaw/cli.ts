@@ -168,6 +168,34 @@ export type OpenClawCommand = {
   viaShell: boolean;
 };
 
+/** How long `--version` and the probe for the job family may take. */
+const SHORT_TIMEOUT_MS = 10_000;
+/** How long a job, config or agents command may take: jobs go through the Gateway. */
+const LONG_TIMEOUT_MS = 90_000;
+
+/** How long commands may take, in milliseconds; tests make them short. */
+export type OpenClawTimeouts = { short?: number; long?: number };
+
+const duration = (ms: number): string => (ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`);
+
+/** `openclaw` and the command words of `args` (`cron add`), its options left out. */
+function commandName(args: readonly string[]): string {
+  const words: string[] = [];
+  for (const arg of args) {
+    if (arg.startsWith("-") || words.length === 2) break;
+    words.push(arg);
+  }
+  return `openclaw ${words.length === 0 ? (args[0] ?? "") : words.join(" ")}`.trimEnd();
+}
+
+/** A command that did not finish in time; it is stopped and named, with the time it had. */
+export class OpenClawTimeoutError extends Error {
+  constructor(command: string, ms: number) {
+    super(`${command} did not finish within ${duration(ms)}`);
+    this.name = "OpenClawTimeoutError";
+  }
+}
+
 /** Refused instead of run: a line break would cut the command line short in `cmd.exe`. */
 export class ShimLineBreakError extends Error {
   constructor() {
@@ -258,17 +286,21 @@ export class OpenClawCli {
   private jobFamily: JobCommand | undefined;
   /** Found by the first command; see `command`. */
   private resolved: Promise<OpenClawCommand> | undefined;
+  private readonly shortTimeout: number;
+  private readonly longTimeout: number;
 
   constructor(
     ctx: Ctx,
     stateDir: string,
     configFile: string,
-    options: { platform?: NodeJS.Platform } = {},
+    options: { platform?: NodeJS.Platform; timeouts?: OpenClawTimeouts } = {},
   ) {
     this.ctx = ctx;
     this.stateDir = stateDir;
     this.configFile = configFile;
     this.platform = options.platform ?? process.platform;
+    this.shortTimeout = options.timeouts?.short ?? SHORT_TIMEOUT_MS;
+    this.longTimeout = options.timeouts?.long ?? LONG_TIMEOUT_MS;
   }
 
   /** How `openclaw` is started (see `resolveOpenClawCommand`); found once and kept. */
@@ -278,19 +310,42 @@ export class OpenClawCli {
   }
 
   /**
-   * Runs OpenClaw with `args`. Through the Windows shim, an argument with a line break is
-   * refused with a `ShimLineBreakError`, since `cmd.exe` would drop everything after it.
+   * Runs OpenClaw with `args`, for at most `timeout` milliseconds: then the command is stopped
+   * and an `OpenClawTimeoutError` names it, so that a hung Gateway or CLI never hangs a move.
+   * Through the Windows shim, an argument with a line break is refused with a
+   * `ShimLineBreakError`, since `cmd.exe` would drop everything after it.
    */
-  private async exec(args: readonly string[]): Promise<string> {
+  private async exec(args: readonly string[], timeout: number): Promise<string> {
     const command = await this.command();
     if (command.viaShell && args.some((arg) => /[\r\n]/.test(arg))) throw new ShimLineBreakError();
     const argv = [...command.prefix, ...args];
-    const { stdout } = await this.ctx.exec(command.file, argv, { env: this.env() });
-    return stdout;
+    const timedOut = new OpenClawTimeoutError(commandName(args), timeout);
+    let timer: NodeJS.Timeout | undefined;
+    // execa stops the process at `timeout`; the race also covers an exec that never settles.
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(timedOut), timeout);
+    });
+    try {
+      const { stdout } = await Promise.race([
+        this.ctx.exec(command.file, argv, { env: this.env(), timeout }),
+        late,
+      ]);
+      return stdout;
+    } catch (error) {
+      if ((error as { timedOut?: unknown }).timedOut === true) throw timedOut;
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  private async run(args: readonly string[], json = true): Promise<string> {
-    return this.exec(json ? [...args, "--json"] : args);
+  /** Runs `args`, with `--json` unless `json` is false, for at most `timeout` (90 s). */
+  private async run(
+    args: readonly string[],
+    json = true,
+    timeout: number = this.longTimeout,
+  ): Promise<string> {
+    return this.exec(json ? [...args, "--json"] : args, timeout);
   }
 
   private env(): NodeJS.ProcessEnv {
@@ -304,11 +359,12 @@ export class OpenClawCli {
   /**
    * Runs `automations list --all --json` to settle the job command family: `cron` when OpenClaw
    * answers "Unknown command", otherwise `automations`. Returns the listing when it ran; throws
-   * when it failed for another reason.
+   * when it failed for another reason, a timeout included. `timeout` is the long one when the
+   * listing is what the caller wants, the short one when only the family is.
    */
-  private async probeJobCommand(): Promise<string | undefined> {
+  private async probeJobCommand(timeout: number = this.longTimeout): Promise<string | undefined> {
     try {
-      const stdout = await this.run(["automations", "list", "--all"]);
+      const stdout = await this.run(["automations", "list", "--all"], true, timeout);
       this.jobFamily = "automations";
       return stdout;
     } catch (error) {
@@ -325,7 +381,10 @@ export class OpenClawCli {
    * `automations`.
    */
   async jobCommand(): Promise<JobCommand> {
-    if (this.jobFamily === undefined) await this.probeJobCommand().catch(() => undefined);
+    if (this.jobFamily === undefined) {
+      // Only the family is wanted, and an OpenClaw without `automations` says so at once.
+      await this.probeJobCommand(this.shortTimeout).catch(() => undefined);
+    }
     return this.jobFamily ?? "automations";
   }
 
@@ -470,7 +529,7 @@ export class OpenClawCli {
    */
   async version(): Promise<string | undefined> {
     try {
-      const text = firstLine(await this.run(["--version"], false));
+      const text = firstLine(await this.run(["--version"], false, this.shortTimeout));
       return /\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?/.exec(text)?.[0] ?? label(text);
     } catch {
       return undefined;

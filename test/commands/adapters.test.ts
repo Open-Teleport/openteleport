@@ -1,7 +1,16 @@
+import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Sandbox, adapterModule, json, run, sandbox } from "../helpers/cli.js";
+import {
+  CLI,
+  STACK_LINE,
+  type Sandbox,
+  adapterModule,
+  json,
+  run,
+  sandbox,
+} from "../helpers/cli.js";
 
 let box: Sandbox;
 beforeEach(async () => {
@@ -57,6 +66,32 @@ describe("adapters", () => {
       "openclaw",
       "claude-code",
     ]);
+  });
+});
+
+describe("a reader that goes away", () => {
+  it("ends with 0 and no stack trace when stdout is closed early, as `| head` does", async () => {
+    const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+    const env: NodeJS.ProcessEnv = { ...process.env, OPENTELEPORT_HOME: box.home };
+    delete env.OPENTELEPORT_EXTRA_ADAPTER;
+    env[pathKey] = box.bin;
+    const child = spawn(process.execPath, [CLI, "adapters", "--json"], {
+      cwd: box.cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    // The reader is gone before the CLI has started, let alone written anything.
+    child.stdout.destroy();
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+
+    expect(stderr).not.toMatch(STACK_LINE);
+    expect(stderr).not.toContain("EPIPE");
+    expect(code).toBe(0);
   });
 });
 
