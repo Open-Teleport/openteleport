@@ -37,15 +37,17 @@ powershell -ExecutionPolicy Bypass -File scripts/demo.ps1   # or: pwsh -File scr
 Each script works in a new temporary folder and prints its path at the start and the end. In it:
 
 - `project/`: a copy of `test/fixtures/claude-code/project` with five agents, its `reviewer` and four copies of it (`planner`, `tester`, `docs-writer`, `release-manager`) that differ only in name and description. The fixture's other agent, `plain`, is left out.
-- `home/`: `OPENTELEPORT_HOME` and `CLAUDE_CONFIG_DIR` for the run, with the project's Claude Code memory from the fixtures, so the moves carry facts as well.
-- `openclaw/`: a throwaway OpenClaw state directory, set up with `openclaw onboard --non-interactive` (the flags are the ones listed under the e2e below; its output goes to `onboard.log`). `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` point at it for the whole run, so `openclaw agents list` shows this install and not yours. To use a state directory you onboarded yourself, set `OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR`; the five agents are added to it.
+- `home/`: `HOME`, `USERPROFILE`, `OPENTELEPORT_HOME` and `CLAUDE_CONFIG_DIR` for the run, with the project's Claude Code memory from the fixtures, so the moves carry facts as well and nothing falls back to your own home.
+- `openclaw/`: a throwaway OpenClaw state directory, set up with `openclaw onboard --non-interactive` (the flags are the ones listed under the e2e below; stdin is closed, so it cannot wait on a prompt, and its output goes to `onboard.log`). `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` point at it for the whole run, so `openclaw agents list` shows this install and not yours. To use a state directory you onboarded yourself, set `OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR`; the five agents are added to it.
+
+As the e2e does, the scripts first clear every `OPENCLAW_*` and `OPENTELEPORT_*` variable they inherit, in any case, so that nothing in your environment leads a command to your own installs. `demo.ps1` puts every variable it changed back when it ends, since it may run inside your PowerShell session; `demo.sh` runs in a shell of its own.
 - `agents/reviewer/`: the agent folder the last move writes.
 
 The scripts print every command before running it, stop at the first one that fails, and end by printing the move report of the last move (saved under `home/.openteleport/reports/`; `export` would have written it as `move-report.md` next to the `.jetpack`). Nothing starts a Gateway; the agents carry no routines, so none is needed. Delete the temporary folder when you are done.
 
 ## Running the end-to-end test
 
-`test/e2e/roundtrip.test.ts` runs the round trip on the real OpenClaw. It is not part of `npm test`: `vitest.config.ts` leaves `test/e2e` out unless `OPENTELEPORT_E2E=1`, and the test skips itself without it.
+`test/e2e/roundtrip.test.ts` runs the round trip on the real OpenClaw. Without `OPENTELEPORT_E2E=1` its tests are skipped: `npm test` lists the file as skipped and never starts OpenClaw.
 
 Prerequisites: Node.js 24+, `npm ci`, `npm run build` (the test runs `dist/cli.js`), and `openclaw` on `PATH`. Claude Code is optional: the adapter reads its files, and only its version is recorded.
 
@@ -74,14 +76,19 @@ What it does, all in one temporary folder:
 3. **(a)** `move --from claude-code --source-dir <project> --to openclaw --target-dir <state> --agent reviewer --keep first.jetpack`, then checks that `openclaw agents list --json` lists `reviewer`.
 4. **(b)** `move --from openclaw --source-dir <state> --to folder --target-dir <tmp>/folder/reviewer --agent reviewer`, and checks for `AGENTS.md` there.
 5. **(c)** `export --from folder --source-dir <tmp>/folder/reviewer --agent . --out last.jetpack`, and compares `name`, `instructions`, `facts` and the skill names of the two bundles, leaving out any part the reports of (a) and (b) list as approximated.
-6. **(d)** Imports the `ada` fixture renamed to "Ada Lovelace" (OpenClaw id `ada-lovelace`, with a dash) with two routines, a cron one and an interval one. No job may land enabled. Then either both jobs are listed disabled by `openclaw cron list --json --all`, or the report says to run `openclaw gateway start`. Then it checks that `config set` gave `agents.entries.ada-lovelace` its model and runtime.
+6. **(d)** Imports the `ada` fixture renamed to "Ada Lovelace" (OpenClaw id `ada-lovelace`, with a dash) with two routines: its cron one, and an interval one whose instruction has two lines.
+   - No job may land enabled.
+   - The report must not skip a routine as "cannot be passed through the Windows shim".
+   - Either both jobs are listed disabled by `openclaw cron list --json --all`, or the report says to run `openclaw gateway start`.
+   - With a Gateway up, both jobs must be listed, and the two-line instruction must arrive whole.
+   - Finally it checks that `config set` gave `agents.entries.ada-lovelace` its model and runtime.
 7. Checks that your own `openclaw.json` (`OPENCLAW_CONFIG_PATH`, else `$OPENCLAW_STATE_DIR` or `~/.openclaw`) did not change.
 
 Optional variables:
 
 | Variable | Effect |
 | --- | --- |
-| `OPENTELEPORT_E2E_GATEWAY=1` | Runs `openclaw gateway run --port <the state dir's port> --bind loopback` for the length of the test and stops it afterwards. (d) then requires both jobs to be listed, disabled. |
+| `OPENTELEPORT_E2E_GATEWAY=1` | Runs `openclaw gateway run --port <the state dir's port> --bind loopback` for the length of the test and stops it afterwards. (d) then requires both jobs to be listed, disabled, with the two-line instruction whole. The Gateway's output goes to `gateway.log` in the temporary folder, never into an error or the diagnostics, since it may print the Gateway token; errors give its exit code, line count and path (keep it with `OPENTELEPORT_E2E_KEEP=1`). |
 | `OPENTELEPORT_E2E_OPENCLAW_STATE_DIR=<dir>` | Uses a state directory you onboarded yourself instead of onboarding one. Use a throwaway one: the test adds `reviewer` and `ada-lovelace` to it (a second run updates them in place). With `OPENTELEPORT_E2E_GATEWAY=1` its `gateway.port` is used. |
 | `OPENTELEPORT_E2E_KEEP=1` | Keeps the temporary folder; its path is in the diagnostics. |
 
@@ -111,7 +118,7 @@ OpenTeleport e2e diagnostics (sandbox <tmp>/openteleport-e2e-XXXXXX):
       Tests  6 passed (6)
 ```
 
-The diagnostics hold what the real install answered: the onboarding exit code, the raw output of `openclaw agents list --json` and `openclaw cron list --json --all`, the files in the `reviewer` workspace, the three reports, the `agents` part of the sandbox `openclaw.json` (never the rest, which holds the Gateway token), and which parts (c) compared. They are what fills the table below.
+The diagnostics hold what the real install answered: the onboarding exit code, the raw output of `openclaw agents list --json` and `openclaw cron list --json --all`, the files in the `reviewer` workspace, the three reports, the `agents` part of the sandbox `openclaw.json` (never the rest, which holds the Gateway token), and which parts (c) compared. With `OPENTELEPORT_E2E_GATEWAY=1` they also give the Gateway's exit code and log path, and whether its port closed within ten seconds of stopping it. They are what fills the table below.
 
 ## What Task 13 could not verify on this machine
 
@@ -126,5 +133,9 @@ The OpenClaw adapter was written against `--help` of OpenClaw 2026.5.28 and its 
 | Whether `agents add` seeds `BOOTSTRAP.md` | Not assumed either way: the adapter writes `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `MEMORY.md`, the skills and its marker, and leaves any other file in the workspace alone. | (a), `reviewerWorkspace` | _to fill_ |
 | JSON of `openclaw agents list --json` | Rows `{ id, name?, workspace? }`, bare or under `agents`. | (a), `agentsList` | _to fill_ |
 | Headless onboarding | `openclaw onboard --non-interactive` with the flags above sets up a state directory without a prompt. | `onboardExitCode` | _to fill_ |
+| Where `openclaw.json` keeps agents | Under `agents.entries.<id>`, each with `workspace`, `identity`, `model`, `runtime` and `skills`; the workspace path is worked out from there. If `agents add` records agents elsewhere (a list, say), reading them back in (b) and the config check in (d) break. | (b), (d), `configAgents` | _to fill_ |
+| The Windows `.cmd` shim and multi-line routines | The adapter reads the npm `openclaw.cmd` shim and runs the script it names with this node, so a routine instruction with a line break arrives whole. When the shim cannot be read, that routine is skipped as "cannot be passed through the Windows shim" rather than cut. | (d): its interval routine has two lines; the skip fails the test, and with a Gateway the listed job must hold both lines. | _to fill_ |
+| The OpenClaw half of `scripts/demo.sh` and `scripts/demo.ps1` | Onboarding with the flags above, the five moves into OpenClaw, `openclaw agents list` on the throwaway install, and the move back into a folder all run. Only the part before onboarding was tried (setup, `list`, an `export`, `openclaw --version`). | Not in the e2e: run both scripts once. | _to fill_ |
+| Stopping `openclaw gateway run` on Windows | Killing the node process the test started stops the Gateway. A process the Gateway started itself could outlive it. | `OPENTELEPORT_E2E_GATEWAY=1`, `gatewayPortClosedAfterStop`; after the run, also look for a `node` process left from the sandbox. | _to fill_ |
 
 Versions of the passing run: OpenClaw _to fill_, Claude Code _to fill_.

@@ -5,8 +5,8 @@
 //   (c) agent folder        -> .jetpack          `export`, compared with the bundle of (a)
 //   (d) bundle with two routines -> OpenClaw     `import`: the routines land disabled
 //
-// It runs the real `openclaw` binary, so it runs only with OPENTELEPORT_E2E=1, and
-// `vitest.config.ts` leaves `test/e2e` out of every other run. How to run it: docs/demo.md.
+// It runs the real `openclaw` binary, so its tests are skipped unless OPENTELEPORT_E2E=1;
+// `npm test` lists them as skipped. How to run it: docs/demo.md.
 //
 // Nothing outside one temporary folder is written. OpenTeleport's home, Claude Code's config
 // directory and HOME / USERPROFILE of every child process point into it, so a command that falls
@@ -54,6 +54,11 @@ const AGENT = "reviewer";
 const ROUTINES_AGENT_NAME = "Ada Lovelace";
 const ROUTINES_AGENT_ID = "ada-lovelace";
 const ROUTINE_NAMES = ["Inbox sweep", "Morning digest"];
+/** Two lines: on Windows the routine must cross the npm `.cmd` shim with its line break. */
+const SWEEP_INSTRUCTION =
+  "Check the inbox and flag anything urgent.\nReply to nothing; only list what needs me.";
+/** How the report skips a routine whose line break the Windows shim would cut. */
+const SHIM_REFUSAL = "cannot be passed through the Windows shim";
 /** What the report says when the routines could not be created for want of a Gateway. */
 const GATEWAY_HINT = "openclaw gateway start";
 
@@ -256,6 +261,15 @@ function accepts(port: number): Promise<boolean> {
   });
 }
 
+/** Whether `port` stops taking connections within ten seconds. */
+async function closes(port: number): Promise<boolean> {
+  for (let tries = 0; tries < 10; tries += 1) {
+    if (!(await accepts(port))) return true;
+    await delay(1000);
+  }
+  return false;
+}
+
 /**
  * Onboards a fresh state directory without a prompt, a model provider, a service or a channel.
  * `--accept-risk` is what `--non-interactive` requires; the rest keeps it local and offline.
@@ -297,6 +311,22 @@ async function onboard(port: number): Promise<void> {
   }
 }
 
+/** Where the sandbox Gateway's output goes; never into an error or the diagnostics. */
+const gatewayLogFile = (): string => join(root, "gateway.log");
+
+/**
+ * Writes what the Gateway printed to its log file and says how it ended and where the log is.
+ * The output itself is never shown: a Gateway may print its token.
+ */
+async function saveGatewayLog(child: ResultPromise): Promise<string> {
+  const run = settle(await child);
+  const output = [run.stdout, run.stderr].filter((text) => text !== "").join("\n");
+  await writeFile(gatewayLogFile(), output);
+  const lines = output === "" ? 0 : output.split(/\r?\n/).length;
+  const keep = KEEP ? "" : " (set OPENTELEPORT_E2E_KEEP=1 to keep it)";
+  return `exit code ${run.exitCode}, ${lines} lines of output in ${gatewayLogFile()}${keep}`;
+}
+
 /** Starts `openclaw gateway run` on the sandbox state directory and waits for its port. */
 async function startGateway(port: number): Promise<void> {
   const [file, argv] = await openclawArgv([
@@ -320,10 +350,10 @@ async function startGateway(port: number): Promise<void> {
   });
   const deadline = Date.now() + GATEWAY_WAIT_MS;
   while (!(await accepts(port))) {
-    if (exited) throw new Error(`openclaw gateway run stopped:\n${describeRun(settle(await child))}`);
+    if (exited) throw new Error(`openclaw gateway run stopped: ${await saveGatewayLog(child)}`);
     if (Date.now() > deadline) {
       child.kill();
-      throw new Error(`the Gateway did not open port ${port}:\n${describeRun(settle(await child))}`);
+      throw new Error(`the Gateway did not open port ${port}: ${await saveGatewayLog(child)}`);
     }
     await delay(1000);
   }
@@ -421,9 +451,11 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
       diagnostics.configAgents = at(await sandboxConfig(), "agents") ?? null;
     }
     if (gateway !== undefined) {
-      // Its output is not kept: a Gateway may print its token.
       gateway.kill();
-      diagnostics.gatewayExitCode = settle(await gateway).exitCode;
+      diagnostics.gateway = await saveGatewayLog(gateway);
+      // On Windows a process the Gateway started could outlive it and keep the port open.
+      diagnostics.gatewayPortClosedAfterStop =
+        gatewayPort === undefined ? null : await closes(gatewayPort);
     }
     const kept = KEEP ? ", kept" : "";
     console.info(
@@ -556,10 +588,11 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
         manifestFile,
         `${JSON.stringify({ ...manifest, name: ROUTINES_AGENT_NAME }, null, 2)}\n`,
       );
-      // The fixture's one routine is a cron job; this one runs on an interval.
+      // The fixture's one routine is a cron job; this one runs on an interval, and its
+      // instruction has two lines.
       const sweep = {
         name: "Inbox sweep",
-        instruction: "Check the inbox and flag anything urgent.",
+        instruction: SWEEP_INSTRUCTION,
         enabled: true,
         timezone: "Europe/Warsaw",
         schedule: { kind: "every", every: "30m" },
@@ -583,6 +616,9 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
       diagnostics.reportD = report;
       expect(report.target).toEqual({ app: "openclaw", agent: ROUTINES_AGENT_ID });
       const toldToStart = report.warnings.some((warning) => warning.includes(GATEWAY_HINT));
+      // A line break must not cost the routine: on Windows the adapter runs the script behind
+      // the npm shim with node, since `cmd.exe` would cut the command line at the break.
+      expect(report.skipped.filter((item) => item.detail.includes(SHIM_REFUSAL))).toEqual([]);
 
       const listed = await openclaw(["cron", "list", "--json", "--all"]);
       diagnostics.cronList = {
@@ -604,7 +640,13 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
         landed || toldToStart,
         `neither both jobs disabled nor "${GATEWAY_HINT}" in the report:\n${describeRun(listed)}`,
       ).toBe(true);
-      if (gatewayUp) expect(landed, "the Gateway runs, so both jobs must be listed").toBe(true);
+      if (gatewayUp) {
+        expect(landed, "the Gateway runs, so both jobs must be listed").toBe(true);
+        const job = jobs.find((row) => row.name === "Inbox sweep");
+        const message = at(job, "payload", "message") ?? job?.message;
+        const text = typeof message === "string" ? message.replace(/\r\n?/g, "\n") : message;
+        expect(text, "the two-line instruction arrives whole").toBe(SWEEP_INSTRUCTION);
+      }
     },
     TEST_TIMEOUT_MS,
   );

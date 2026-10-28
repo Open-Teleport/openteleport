@@ -47,16 +47,27 @@ run() {
 openteleport() { node "$CLI" "$@"; }
 
 DEMO="$(native "$(mktemp -d "${TMPDIR:-/tmp}/openteleport-demo.XXXXXX")")"
-if [ -n "${OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR:-}" ]; then
-  [ -f "$OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR/openclaw.json" ] ||
+# Read before the variables below are cleared.
+GIVEN_STATE_DIR="${OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR:-}"
+if [ -n "$GIVEN_STATE_DIR" ]; then
+  [ -f "$GIVEN_STATE_DIR/openclaw.json" ] ||
     fail "OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR has no openclaw.json"
-  OPENCLAW_DIR="$(native "$(cd "$OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR" && pwd)")"
+  OPENCLAW_DIR="$(native "$(cd "$GIVEN_STATE_DIR" && pwd)")"
 else
   OPENCLAW_DIR=openclaw
 fi
 cd "$DEMO"
 
-# OpenTeleport, Claude Code and OpenClaw keep their state in the demo folder, not in your home.
+# As in the e2e: no inherited OPENCLAW_* or OPENTELEPORT_* variable (in any case) may lead a
+# command to your own installs, and HOME and USERPROFILE point into the demo folder, so nothing
+# falls back to your home. OpenTeleport, Claude Code and OpenClaw keep their state there too.
+for name in $(compgen -e); do
+  case "$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')" in
+    OPENCLAW_* | OPENTELEPORT_*) unset "$name" ;;
+  esac
+done
+export HOME="$DEMO/home"
+export USERPROFILE="$DEMO/home"
 export OPENTELEPORT_HOME="$DEMO/home"
 export CLAUDE_CONFIG_DIR="$DEMO/home/.claude"
 mkdir -p "$OPENCLAW_DIR"
@@ -85,13 +96,13 @@ cp -R "$FIXTURES/home/.claude/projects/__project__/memory" "$CLAUDE_CONFIG_DIR/p
 
 # A throwaway OpenClaw, onboarded without prompts, providers, services or channels. Its Gateway
 # gets a free port, so nothing here reaches a Gateway you already run.
-if [ -z "${OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR:-}" ]; then
+if [ -z "$GIVEN_STATE_DIR" ]; then
   port="$(node -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); })')"
   echo "Onboarding a throwaway OpenClaw in $OPENCLAW_STATE_DIR (log: $DEMO/onboard.log)"
   openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip \
     --workspace "$OPENCLAW_STATE_DIR/workspace" --gateway-port "$port" --gateway-bind loopback \
     --tailscale off --skip-daemon --skip-channels --skip-skills --skip-search --skip-hooks \
-    --skip-ui --skip-health --suppress-gateway-token-output >onboard.log 2>&1 ||
+    --skip-ui --skip-health --suppress-gateway-token-output </dev/null >onboard.log 2>&1 ||
     fail "openclaw onboard failed; see $DEMO/onboard.log"
   [ -f "$OPENCLAW_CONFIG_PATH" ] || fail "openclaw onboard wrote no openclaw.json; see onboard.log"
 fi

@@ -57,6 +57,7 @@ function Invoke-Node([string]$Script) {
 
 $demo = Join-Path ([System.IO.Path]::GetTempPath()) ('openteleport-demo-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $demo | Out-Null
+# Read before the variables below are cleared.
 $givenState = $env:OPENTELEPORT_DEMO_OPENCLAW_STATE_DIR
 if ([string]::IsNullOrEmpty($givenState)) {
     $openclawDir = 'openclaw'
@@ -69,19 +70,25 @@ if ([string]::IsNullOrEmpty($givenState)) {
     $stateDir = $openclawDir
 }
 
-# OpenTeleport, Claude Code and OpenClaw keep their state in the demo folder, not in your home.
-# The variables are put back as they were when the script ends.
-$variables = @{
-    OPENTELEPORT_HOME    = (Join-Path $demo 'home')
-    CLAUDE_CONFIG_DIR    = (Join-Path $demo 'home/.claude')
-    OPENCLAW_STATE_DIR   = $stateDir
-    OPENCLAW_CONFIG_PATH = (Join-Path $stateDir 'openclaw.json')
-}
+# As in the e2e: no inherited OPENCLAW_* or OPENTELEPORT_* variable (in any case) may lead a
+# command to your own installs, and HOME and USERPROFILE point into the demo folder, so nothing
+# falls back to your home. OpenTeleport, Claude Code and OpenClaw keep their state there too.
+# Every variable changed here is put back as it was when the script ends.
 $saved = @{}
-foreach ($name in $variables.Keys) {
-    $saved[$name] = [Environment]::GetEnvironmentVariable($name)
-    [Environment]::SetEnvironmentVariable($name, $variables[$name])
+function Set-DemoVariable([string]$Name, $Value) {
+    if (-not $saved.ContainsKey($Name)) { $saved[$Name] = [Environment]::GetEnvironmentVariable($Name) }
+    [Environment]::SetEnvironmentVariable($Name, $Value)
 }
+$inherited = @(Get-ChildItem Env: | Where-Object { $_.Name -match '^(OPENCLAW_|OPENTELEPORT_)' } |
+    ForEach-Object { $_.Name })
+foreach ($name in $inherited) { Set-DemoVariable $name $null }
+$demoHome = Join-Path $demo 'home'
+Set-DemoVariable 'HOME' $demoHome
+Set-DemoVariable 'USERPROFILE' $demoHome
+Set-DemoVariable 'OPENTELEPORT_HOME' $demoHome
+Set-DemoVariable 'CLAUDE_CONFIG_DIR' (Join-Path $demoHome '.claude')
+Set-DemoVariable 'OPENCLAW_STATE_DIR' $stateDir
+Set-DemoVariable 'OPENCLAW_CONFIG_PATH' (Join-Path $stateDir 'openclaw.json')
 Push-Location -LiteralPath $demo
 try {
     Write-Host "Setting up the demo in $demo"
@@ -124,7 +131,8 @@ try {
             '--suppress-gateway-token-output'
         )
         $ErrorActionPreference = 'Continue'
-        & $openclaw.Path @onboard *> $log
+        # Piped input leaves onboarding a closed stdin, so it can never wait on a prompt.
+        $null | & $openclaw.Path @onboard *> $log
         $code = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         if ($code -ne 0) { Stop-Demo "openclaw onboard failed; see $log" }
