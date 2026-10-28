@@ -17,7 +17,7 @@ import {
 } from "./commands/shared.js";
 import { validateCommand } from "./commands/validate.js";
 import { clackPrompter, runWizard } from "./commands/wizard.js";
-import { VERSION } from "./index.js";
+import { VERSION } from "./version.js";
 
 /** For failures that happen before commander has parsed the options. */
 const argvWantsJson = (): boolean => process.argv.slice(2).includes("--json");

@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { ulid } from "ulid";
 import type { Bundle } from "../../core/schema.js";
 import { readOpenBotZip, writeOpenBotImportZip } from "../../formats/openbot-zip.js";
-import { VERSION } from "../../index.js";
+import { VERSION } from "../../version.js";
 import { lstatIfAny } from "../fs.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 
