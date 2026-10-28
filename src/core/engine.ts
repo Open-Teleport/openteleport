@@ -30,10 +30,23 @@ export class SecretsFoundError extends Error {
   }
 }
 
+/**
+ * A field that is a list of named parts. The report names one part as `<prefix>:<name>`
+ * (`skill:web-brief`), and counts the parts as `<n> <noun>s`.
+ */
+type Parts = {
+  prefix: string;
+  noun: string;
+  names(bundle: Bundle): string[];
+  /** A target without the field gets one skipped item per part, not one for the field. */
+  skippedOneByOne: boolean;
+};
+
 type Field = {
   /** How the report names the field. */
   label: string;
   capability: Exclude<keyof AdapterCapabilities, "schedules">;
+  parts?: Parts;
   /** The detail of the field's `moved` item, or `undefined` when the field is empty. */
   describe(bundle: Bundle): string | undefined;
   /** A copy of the Bundle with the field emptied. */
@@ -42,6 +55,12 @@ type Field = {
 
 const counted = (n: number, noun: string): string | undefined =>
   n === 0 ? undefined : `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/** `parts`, and the `moved` detail that counts them. */
+const listField = (parts: Parts): Pick<Field, "parts" | "describe"> => ({
+  parts,
+  describe: (bundle) => counted(parts.names(bundle).length, parts.noun),
+});
 
 const LINE_BREAK = /\r\n|\r|\n/;
 
@@ -68,13 +87,23 @@ const FIELDS: readonly Field[] = [
   {
     label: "skills",
     capability: "skills",
-    describe: (bundle) => counted(bundle.skills.length, "skill"),
+    ...listField({
+      prefix: "skill",
+      noun: "skill",
+      names: (bundle) => bundle.skills.map(({ name }) => name),
+      skippedOneByOne: true,
+    }),
     clear: (bundle) => ({ ...bundle, skills: [] }),
   },
   {
     label: "routines",
     capability: "routines",
-    describe: (bundle) => counted(bundle.routines.length, "routine"),
+    ...listField({
+      prefix: "routine",
+      noun: "routine",
+      names: (bundle) => bundle.routines.map(({ name }) => name),
+      skippedOneByOne: true,
+    }),
     clear: (bundle) => ({ ...bundle, routines: [] }),
   },
   {
@@ -86,7 +115,12 @@ const FIELDS: readonly Field[] = [
   {
     label: "memory.notes",
     capability: "notes",
-    describe: (bundle) => counted(bundle.notes.length, "note"),
+    ...listField({
+      prefix: "note",
+      noun: "note",
+      names: (bundle) => bundle.notes.map(({ name }) => name),
+      skippedOneByOne: false,
+    }),
     clear: (bundle) => ({ ...bundle, notes: [] }),
   },
   {
@@ -109,20 +143,30 @@ const FIELDS: readonly Field[] = [
   },
 ];
 
-/** One `moved` item per non-empty field of `bundle`. */
-function movedItems(bundle: Bundle): Item[] {
-  return FIELDS.flatMap(({ label, describe }) => {
-    const detail = describe(bundle);
+/**
+ * One `moved` item per non-empty field of `bundle`, leaving out what `skipped` says did not
+ * arrive after all: a field whose label is skipped is left out, and a part skipped as
+ * `<prefix>:<name>` (`routine:Daily`) is not counted, the field left out when none is left.
+ */
+function movedItems(bundle: Bundle, skipped: readonly Item[] = []): Item[] {
+  const fields = new Set(skipped.map(({ field }) => field));
+  return FIELDS.flatMap(({ label, parts, describe }) => {
+    if (fields.has(label)) return [];
+    let detail = describe(bundle);
+    if (parts !== undefined) {
+      const left = parts.names(bundle).filter((name) => !fields.has(`${parts.prefix}:${name}`));
+      detail = counted(left.length, parts.noun);
+    }
     return detail === undefined ? [] : [{ field: label, detail }];
   });
 }
 
 /**
  * Fits a Bundle to what the target can hold. Every non-empty field whose capability is `false`
- * is emptied and listed as skipped, then every routine whose schedule kind is not in
- * `capabilities.schedules` is dropped and listed on its own as `routine:<name>`. `targetName`
- * is the target's display name, used in the details. Returns a new Bundle; `bundle` is left as
- * it was.
+ * is emptied and listed as skipped, skills and routines one by one as `skill:<name>` and
+ * `routine:<name>`; then every routine whose schedule kind is not in `capabilities.schedules`
+ * is dropped and listed on its own as `routine:<name>`. `targetName` is the target's display
+ * name, used in the details. Returns a new Bundle; `bundle` is left as it was.
  */
 export function diffCapabilities(
   bundle: Bundle,
@@ -134,7 +178,15 @@ export function diffCapabilities(
   for (const field of FIELDS) {
     if (capabilities[field.capability]) continue;
     if (field.describe(fitted) !== undefined) {
-      skipped.push({ field: field.label, detail: `${targetName} does not support ${field.label}` });
+      const detail = `${targetName} does not support ${field.label}`;
+      const { parts } = field;
+      if (parts?.skippedOneByOne === true) {
+        for (const name of parts.names(fitted)) {
+          skipped.push({ field: `${parts.prefix}:${name}`, detail });
+        }
+      } else {
+        skipped.push({ field: field.label, detail });
+      }
     }
     fitted = field.clear(fitted);
   }
@@ -194,7 +246,8 @@ async function deliver(opts: {
     },
     outcome: result.outcome,
     ...(result.nextStep === undefined ? {} : { nextStep: result.nextStep }),
-    moved: movedItems(bundle),
+    // What the target handed back as skipped did not arrive, so it is not listed as moved.
+    moved: movedItems(bundle, result.items.skipped),
     approximated: [...result.items.approximated],
     skipped: [...skipped, ...result.items.skipped],
     warnings: [...opts.readWarnings, ...result.items.warnings],

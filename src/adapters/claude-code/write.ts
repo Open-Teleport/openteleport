@@ -160,6 +160,12 @@ async function writeAgentFile(
 ): Promise<{ slug: string; path: string }> {
   const { manifest } = bundle;
   const slug = await agentFileSlug(dir, bundle, opts, ids, items);
+  if (slug !== manifest.name) {
+    items.approximated.push({
+      field: "name",
+      detail: `written as ${slug}; Claude Code names are lowercase and hyphenated`,
+    });
+  }
 
   const model = manifest.models.find((pref) => pref.provider === "anthropic")?.model;
   if (model === undefined && manifest.models.length > 0) {
@@ -305,7 +311,7 @@ async function readText(path: string): Promise<string> {
 }
 
 /** A skipped item for a memory file that is a link: it is never written through. */
-const linkedMemory = (field: "memory.facts" | "memory.notes", path: string): Item => ({
+const linkedMemory = (field: string, path: string): Item => ({
   field,
   detail: `${path} is a symlink; not written`,
 });
@@ -357,7 +363,7 @@ async function writeNotes(memoryDir: string, slug: string, bundle: Bundle, items
     }
     const path = join(memoryDir, name);
     if ((await lstatOf(path))?.isSymbolicLink()) {
-      items.skipped.push(linkedMemory("memory.notes", path));
+      items.skipped.push(linkedMemory(`note:${note.name}`, path));
       continue;
     }
     await mkdir(memoryDir, { recursive: true });

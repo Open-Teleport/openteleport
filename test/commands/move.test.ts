@@ -133,9 +133,10 @@ describe("move", () => {
     expect(result.exitCode).toBe(0);
     const report = json<MoveReport>(result);
     expect(report.skipped).toContainEqual({
-      field: "routines",
+      field: "routine:Morning digest",
       detail: "Claude Code does not support routines",
     });
+    expect(report.moved.map((item) => item.field)).not.toContain("routines");
     expect(await readdir(join(box.cwd, "project", ".claude", "agents"))).toEqual(["ada.md"]);
     expect((await readdir(join(box.cwd, "agents", "ada"))).sort()).toEqual(
       (await readdir(ADA_DIR)).sort(),

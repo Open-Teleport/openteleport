@@ -540,8 +540,9 @@ describe("write", () => {
 
     expect(await readFile(outside, "utf8")).toBe("ORIGINAL\n");
     expect(await readFile(join(memoryOf(project), "imported-ada-second.md"), "utf8")).toBe("Two.\n");
+    // Named by the note, so that the report still counts the note that was written as moved.
     expect(items.skipped).toContainEqual({
-      field: "memory.notes",
+      field: "note:first",
       detail: `${linked} is a symlink; not written`,
     });
   });
@@ -632,6 +633,27 @@ describe("write", () => {
     await claudeCodeAdapter.write(ctx, bundle, COPY);
 
     expect(parseAgentFile(await readFile(agentFile(project, "ada"), "utf8")).model).toBe("sonnet");
+  });
+
+  it("says when the agent's name had to change to become a Claude Code name", async () => {
+    const renamed = await claudeCodeAdapter.write(ctx, bundleOf({ manifest: { name: "Ada" } }), COPY);
+    const kept = await claudeCodeAdapter.write(ctx, bundleOf({ manifest: { name: "scout" } }), COPY);
+
+    expect(renamed.items.approximated).toContainEqual({
+      field: "name",
+      detail: "written as ada; Claude Code names are lowercase and hyphenated",
+    });
+    expect(kept.items.approximated.map(({ field }) => field)).not.toContain("name");
+  });
+
+  it("names the copy in the approximated name when the name is taken", async () => {
+    await claudeCodeAdapter.write(ctx, bundleOf({ manifest: { name: "scout" } }), COPY);
+    const copy = await claudeCodeAdapter.write(ctx, bundleOf({ manifest: { name: "scout" } }), COPY);
+
+    expect(copy.items.approximated).toContainEqual({
+      field: "name",
+      detail: "written as scout-2; Claude Code names are lowercase and hyphenated",
+    });
   });
 
   it("says that capabilities without a tools list give the agent every tool", async () => {

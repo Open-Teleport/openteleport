@@ -206,8 +206,6 @@ describe("move", () => {
   it.each([
     ["persona", { persona: false }, "persona", (b: Bundle) => b.persona === undefined],
     ["instructions", { instructions: false }, "instructions", (b: Bundle) => b.instructions === ""],
-    ["skills", { skills: false }, "skills", (b: Bundle) => b.skills.length === 0],
-    ["routines", { routines: false }, "routines", (b: Bundle) => b.routines.length === 0],
     ["notes", { notes: false }, "memory.notes", (b: Bundle) => b.notes.length === 0],
     ["files", { files: false }, "files", (b: Bundle) => b.files.length === 0],
     ["avatar", { avatar: false }, "avatar", (b: Bundle) => b.avatar === undefined],
@@ -223,6 +221,83 @@ describe("move", () => {
       expect(report.moved.map((item) => item.field)).not.toContain(field);
     },
   );
+
+  it("names every skill and routine a target without them leaves behind", async () => {
+    const skill = (name: string) => ({
+      name,
+      files: [{ path: "SKILL.md", bytes: bytes(`# ${name}\n`) }],
+    });
+    const agent = fullAgent({
+      skills: [skill("web-brief"), skill("summarise")],
+      routines: [
+        routine("Daily", { kind: "cron", expression: "0 8 * * *" }),
+        routine("Weekly", { kind: "cron", expression: "0 8 * * 1" }),
+      ],
+    });
+    const to = target({ skills: false, routines: false });
+
+    const report = await move({ from: source(agent), to, agent: "ada", ctx, write: WRITE });
+
+    expect(report.skipped).toEqual([
+      { field: "skill:web-brief", detail: "In-memory dst does not support skills" },
+      { field: "skill:summarise", detail: "In-memory dst does not support skills" },
+      { field: "routine:Daily", detail: "In-memory dst does not support routines" },
+      { field: "routine:Weekly", detail: "In-memory dst does not support routines" },
+    ]);
+    expect(writtenTo(to).skills).toEqual([]);
+    expect(writtenTo(to).routines).toEqual([]);
+    const moved = report.moved.map((item) => item.field);
+    expect(moved).not.toContain("skills");
+    expect(moved).not.toContain("routines");
+  });
+
+  it("does not list as moved what the target adapter then skipped", async () => {
+    const agent = fullAgent({
+      skills: [
+        { name: "web-brief", files: [{ path: "SKILL.md", bytes: bytes("# Web brief\n") }] },
+        { name: "summarise", files: [{ path: "SKILL.md", bytes: bytes("# Summarise\n") }] },
+      ],
+      routines: [
+        routine("Daily", { kind: "cron", expression: "0 8 * * *" }),
+        routine("Weekly", { kind: "cron", expression: "0 8 * * 1" }),
+      ],
+    });
+    const memoryTarget = target();
+    const to: Adapter = {
+      ...memoryTarget,
+      async write(writeCtx, bundle, opts) {
+        const result = await memoryTarget.write(writeCtx, bundle, opts);
+        return {
+          ...result,
+          items: {
+            approximated: [],
+            skipped: [
+              { field: "routine:Daily", detail: "not created: the Gateway is down" },
+              // One item per file of the same skill still drops one skill.
+              { field: "skill:web-brief", detail: "unsafe path 'a'; not written" },
+              { field: "skill:web-brief", detail: "unsafe path 'b'; not written" },
+              { field: "memory.facts", detail: "MEMORY.md is a symlink; not written" },
+              { field: "avatar", detail: "avatars/avatar.png is a symbolic link; not written" },
+              { field: "note:2026-10-20", detail: "unsafe name; not written" },
+              { field: "description", detail: "the app has no field for it" },
+            ],
+            warnings: [],
+          },
+        };
+      },
+    };
+
+    const report = await move({ from: source(agent), to, agent: "ada", ctx, write: WRITE });
+
+    expect(report.moved).toEqual([
+      { field: "instructions", detail: "1 line" },
+      { field: "persona", detail: "2 lines" },
+      { field: "skills", detail: "1 skill" },
+      { field: "routines", detail: "1 routine" },
+      { field: "files", detail: "1 file" },
+      { field: "models", detail: "1 model preference" },
+    ]);
+  });
 
   it("lists nothing as skipped for an unsupported field that is already empty", async () => {
     const agent = fullAgent({ facts: [], persona: undefined });
