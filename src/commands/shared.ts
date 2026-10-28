@@ -282,18 +282,16 @@ export function boundTo(adapter: Adapter, ctx: Ctx): Adapter {
 // -- Adapters -------------------------------------------------------------------------------
 
 /**
- * A folder target is created when the agent is written, so a folder adapter that finds no agent
- * there yet does not mean an app is missing; its `detect` only answers for a source.
+ * Exit code 3, with the adapter's hint, when the app is not there. A target that
+ * `createsOnWrite` is created when the agent is written, so that no app is found there does not
+ * mean one is missing (the folder adapter's `detect` only answers for a source); it is not asked.
  */
-const CREATED_ON_WRITE: ReadonlySet<string> = new Set(["folder"]);
-
-/** Exit code 3, with the adapter's hint, when the app is not there. */
 export async function ensureDetected(
   adapter: Adapter,
   ctx: Ctx,
   side: "source" | "target",
 ): Promise<void> {
-  if (side === "target" && CREATED_ON_WRITE.has(adapter.name)) return;
+  if (side === "target" && adapter.createsOnWrite === true) return;
   const { found, location, hint } = await adapter.detect(ctx);
   if (found) return;
   const where = location === undefined ? "" : ` at ${location}`;

@@ -68,6 +68,12 @@ export type Adapter = {
   name: string;
   displayName: string;
   capabilities: AdapterCapabilities;
+  /**
+   * `true`: `write` creates its target (a file or a folder), so the app need not be installed on
+   * the target side and `detect` is not asked about it. Left out or `false`, a target that
+   * `detect` does not find ends the command with exit code 3. A source is always checked.
+   */
+  createsOnWrite?: boolean;
   detect(ctx: Ctx): Promise<{ found: boolean; location?: string; version?: string; hint?: string }>;
   list(ctx: Ctx): Promise<AgentRef[]>;
   /** Never modifies the source. */

@@ -1,7 +1,8 @@
 // The parts of the commands a spawned CLI cannot reach: prompts need a terminal.
 import type { execa } from "execa";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentRef, Ctx } from "../../src/adapters/types.js";
+import { folderAdapter } from "../../src/adapters/folder/index.js";
+import type { Adapter, AgentRef, Ctx } from "../../src/adapters/types.js";
 import {
   NotDetectedError,
   UsageError,
@@ -132,17 +133,72 @@ describe("sideOf", () => {
 });
 
 describe("ensureDetected", () => {
-  const missing = createMemoryAdapter({ name: "folder" });
-  missing.detect = async () => ({ found: false, location: "/x", hint: "Pass --source-dir" });
+  /** An adapter whose app is not there; `detect` counts its calls. */
+  function missingApp(createsOnWrite?: boolean): { adapter: Adapter; detected: () => number } {
+    let calls = 0;
+    const adapter: Adapter = {
+      ...createMemoryAdapter({ name: "app" }),
+      ...(createsOnWrite === undefined ? {} : { createsOnWrite }),
+      detect: async () => {
+        calls += 1;
+        return { found: false, location: "/x", hint: "Pass --source-dir" };
+      },
+    };
+    return { adapter, detected: () => calls };
+  }
 
   it("is exit code 3 for a source that is not there", async () => {
-    const error = await ensureDetected(missing, ctx, "source").catch((e: unknown) => e);
+    const error = await ensureDetected(missingApp().adapter, ctx, "source").catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(NotDetectedError);
+    expect(exitCodeOf(error)).toBe(3);
+    expect((error as Error).message).toBe("In-memory app was not detected at /x. Pass --source-dir");
+  });
+
+  it("is exit code 3 for a target that is not there", async () => {
+    const error = await ensureDetected(missingApp().adapter, ctx, "target").catch(
+      (e: unknown) => e,
+    );
     expect(error).toBeInstanceOf(NotDetectedError);
     expect(exitCodeOf(error)).toBe(3);
   });
 
-  it("lets a folder target be created on write", async () => {
-    await expect(ensureDetected(missing, ctx, "target")).resolves.toBeUndefined();
+  it("is exit code 3 for a target that does not create itself, said so or not", async () => {
+    await expect(ensureDetected(missingApp(false).adapter, ctx, "target")).rejects.toThrow(
+      NotDetectedError,
+    );
+  });
+
+  it("does not ask a target that is created on write whether it is there", async () => {
+    const { adapter, detected } = missingApp(true);
+
+    await expect(ensureDetected(adapter, ctx, "target")).resolves.toBeUndefined();
+    expect(detected()).toBe(0);
+  });
+
+  it("still asks a source that is created on write", async () => {
+    const { adapter, detected } = missingApp(true);
+
+    await expect(ensureDetected(adapter, ctx, "source")).rejects.toThrow(NotDetectedError);
+    expect(detected()).toBe(1);
+  });
+
+  it("returns when the app is there, whatever the target", async () => {
+    const found: Adapter = { ...createMemoryAdapter({ name: "app" }) };
+
+    await expect(ensureDetected(found, ctx, "target")).resolves.toBeUndefined();
+    await expect(ensureDetected(found, ctx, "source")).resolves.toBeUndefined();
+  });
+
+  it("lets a folder target be created on write", () => {
+    expect(folderAdapter.createsOnWrite).toBe(true);
+  });
+
+  it("does not go by the name: an adapter called folder that does not create itself is checked", async () => {
+    const lookalike: Adapter = { ...missingApp().adapter, name: "folder" };
+
+    await expect(ensureDetected(lookalike, ctx, "target")).rejects.toThrow(NotDetectedError);
   });
 });
 

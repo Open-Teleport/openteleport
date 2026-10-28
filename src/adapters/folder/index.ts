@@ -340,6 +340,7 @@ export const folderAdapter: Adapter = {
   name: "folder",
   displayName: "Folder",
   capabilities: CAPABILITIES,
+  createsOnWrite: true,
 
   async detect(ctx) {
     const dir = baseDir(ctx);
