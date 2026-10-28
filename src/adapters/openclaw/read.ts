@@ -14,7 +14,7 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { byCodeUnit } from "../../core/text.js";
+import { byCodeUnit, errorLine } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
 import { entriesOf, isNotFound, lstatIfAny, readTextIfAny } from "../fs.js";
 import { readMarker } from "../marker.js";
@@ -50,8 +50,6 @@ const MAX_TITLE_CHARS = 120;
 const AVATAR_EXTENSIONS: ReadonlySet<string> = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SCHEDULE_KINDS: ReadonlySet<string> = new Set(["cron", "every", "at"]);
 
-const errorLine = (error: unknown): string =>
-  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
 
 /** Whether `path` is `root` itself or below it; both absolute. */
 function isWithin(root: string, path: string): boolean {

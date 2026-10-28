@@ -14,6 +14,10 @@ export const truncate = (text: string, max: number): string =>
  */
 export const oneLine = (value: string): string => value.replace(/[\p{Cc}\s]+/gu, " ").trim();
 
+/** The first line of what went wrong, trimmed: an error's message, or anything else as text. */
+export const errorLine = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
+
 /** `1 skill`, `3 skills`; `many` is the plural when it is not the word with an `s`. */
 export const plural = (count: number, one: string, many = `${one}s`): string =>
   `${count} ${count === 1 ? one : many}`;

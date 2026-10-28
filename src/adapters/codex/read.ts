@@ -12,7 +12,7 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
-import { byCodeUnit, splitInstructions, truncate, withoutMark } from "../../core/text.js";
+import { byCodeUnit, errorLine, splitInstructions, truncate, withoutMark } from "../../core/text.js";
 import { isRecord } from "../../core/values.js";
 import { entriesOf, isNotFound, lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
@@ -57,8 +57,6 @@ const isStrings = (value: unknown): value is string[] =>
 /** The text with Windows line endings turned into line feeds. */
 const lf = (text: string): string => text.replace(/\r\n/g, "\n");
 
-const errorLine = (error: unknown): string =>
-  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
 
 /** What the TOML parser objected to, on one line, with the line it found it on. */
 function tomlProblem(error: unknown): string {

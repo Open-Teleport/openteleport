@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   byCodeUnit,
+  errorLine,
   factsToProse,
   mergeInstructions,
   oneLine,
@@ -329,5 +330,24 @@ describe("withoutMark", () => {
     expect(withoutMark("# Persona")).toBe("# Persona");
     expect(withoutMark("a\uFEFFb")).toBe("a\uFEFFb");
     expect(withoutMark("")).toBe("");
+  });
+});
+
+describe("errorLine", () => {
+  it("is the first line of the message of an error, trimmed", () => {
+    expect(errorLine(new Error("  Unexpected token at line 2: \n\nname: [x\n      ^"))).toBe(
+      "Unexpected token at line 2:",
+    );
+    expect(errorLine(new Error("one line"))).toBe("one line");
+  });
+
+  it("is the text of anything that is not an error", () => {
+    expect(errorLine("plain failure\nsecond line")).toBe("plain failure");
+    expect(errorLine(404)).toBe("404");
+    expect(errorLine(undefined)).toBe("undefined");
+  });
+
+  it("is empty for an error with no message", () => {
+    expect(errorLine(new Error(""))).toBe("");
   });
 });
