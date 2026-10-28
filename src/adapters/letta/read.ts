@@ -1,19 +1,13 @@
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MAX_FACT_CHARS } from "../../core/paths.js";
 import type { Bundle, Manifest, ModelPref, Note, Routine } from "../../core/schema.js";
 import { lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { readCrons, taskToRoutine, taskWarnings } from "./crons.js";
-import {
-  type MemFs,
-  REFERENCE_PREFIX,
-  oneLine,
-  readMemFs,
-  readPersona,
-  withoutMark,
-} from "./memfs.js";
+import { type MemFs, REFERENCE_PREFIX, readMemFs, readPersona } from "./memfs.js";
 import { CRONS_FILE, cloudAgentsDir, lettaDir, localBackendDir } from "./paths.js";
+import { entriesOf, isRecord, oneLine, text, truncate, withoutMark } from "./util.js";
 
 const APP = "letta";
 const MAX_NAME_CHARS = 80;
@@ -21,32 +15,6 @@ const MAX_TITLE_CHARS = 120;
 /** The note that carries what `human.md` holds besides bullets. */
 const HUMAN_NOTE = "human";
 const BULLET = /^\s*[-*]\s+(.*)$/;
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-blank string, or `undefined`. */
-function text(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
-/** The entries of `dir` in name order, or none when it does not exist. */
-async function entriesOf(dir: string) {
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return [];
-    throw error;
-  }
-}
 
 type Located = {
   id: string;
@@ -126,8 +94,10 @@ async function personaInfo(memoryDir: string): Promise<{ name?: string; descript
 }
 
 /** The agent's name and description: the record's, else those in the frontmatter of persona.md. */
-async function identityOf(located: Located): Promise<{ name: string; description?: string }> {
-  const persona = await personaInfo(located.memoryDir);
+function identityOf(
+  located: Located,
+  persona: { name?: string; description?: string },
+): { name: string; description?: string } {
   const description = text(located.record?.description) ?? persona.description;
   return {
     name: text(located.record?.name) ?? persona.name ?? located.id,
@@ -142,7 +112,7 @@ export async function listLettaAgents(ctx: Ctx): Promise<AgentRef[]> {
     // A record that cannot be read is still an agent; `read` says what is wrong with it.
     const { name, description } =
       located.problem === undefined
-        ? await identityOf(located)
+        ? identityOf(located, await personaInfo(located.memoryDir))
         : { name: located.id, description: undefined };
     const title = description === undefined ? undefined : oneLine(description);
     refs.push({
@@ -282,8 +252,9 @@ export async function readLettaAgent(
     }
   }
 
-  const identity = await identityOf(located);
-  const description = identity.description === undefined ? undefined : oneLine(identity.description);
+  const identity = identityOf(located, memfs.persona ?? {});
+  const description =
+    identity.description === undefined ? undefined : oneLine(identity.description);
   const title = description === undefined ? undefined : truncate(description, MAX_TITLE_CHARS);
   const tags = Array.isArray(located.record?.tags)
     ? located.record.tags.filter((tag): tag is string => typeof tag === "string")

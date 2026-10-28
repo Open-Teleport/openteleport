@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { everyToCron } from "../../core/schedule.js";
 import { type Routine, RoutineSchema, ScheduleSchema } from "../../core/schema.js";
-import { oneLine, withoutMark } from "./memfs.js";
+import { isRecord, oneLine, text, withoutMark } from "./util.js";
 
 /** One entry of `tasks[]` in `crons.json`; the fields Letta keeps beyond these stay in it. */
 export type LettaCronTask = Record<string, unknown> & {
@@ -13,16 +13,6 @@ export type LettaCronTask = Record<string, unknown> & {
   prompt: string;
   status: string;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-blank string, or `undefined`. */
-function text(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
 
 /** A string field of a task as it is, `""` when it is not a string. */
 const stringOf = (value: unknown): string => (typeof value === "string" ? value : "");
@@ -173,7 +163,7 @@ export function taskWarnings(task: LettaCronTask): string[] {
     : [];
 }
 
-// -- Routine -> `letta cron add` ---------------------------------------------------------------------
+// -- Routine -> `letta cron add` --------------------------------------------------------------
 
 export type Shell = "sh" | "ps1";
 

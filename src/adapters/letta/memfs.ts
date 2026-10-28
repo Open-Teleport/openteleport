@@ -2,8 +2,7 @@
 // a git repository [L10]. Files in its root are core memory, loaded on every turn; `reference/`
 // has an index of its own and stays out of context until needed; `skills/<name>/SKILL.md` holds
 // the agent's skills [L13]. Reading it never touches the folder.
-import type { Dirent } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "yaml";
 import { isForbiddenPath, isSafeArchivePath } from "../../core/paths.js";
@@ -11,6 +10,7 @@ import type { Item } from "../../core/report.js";
 import type { Bundle, FileEntry, Note, Skill } from "../../core/schema.js";
 import { factsToProse } from "../../core/text.js";
 import { isSafeName, lstatIfAny } from "../fs.js";
+import { byCodeUnit, entriesOf, oneLine, truncate, withoutMark } from "./util.js";
 
 /** The files of the memory root that mean something of their own; any other `*.md` is a note. */
 export const RESERVED_ROOT = ["MEMORY.md", "persona.md", "human.md", "instructions.md"] as const;
@@ -39,24 +39,10 @@ export const REFERENCE_PREFIX = "reference--";
 const PERSONA_DESCRIPTION = "Who the agent is and how it behaves";
 const MAX_DESCRIPTION_CHARS = 120;
 
-const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 // The opening fence must be the first line; the closing one is the next line that is only `---`.
 const FRONTMATTER = /^---[ \t]*\n(?:([\s\S]*?)\n)?---[ \t]*(?:\n|$)/;
 
 const encoder = new TextEncoder();
-
-/** Plain code-unit order, so that the result does not depend on the locale. */
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-export const withoutMark = (text: string): string =>
-  text.startsWith(BYTE_ORDER_MARK) ? text.slice(1) : text;
-
-/** One line of text: every run of whitespace and control characters becomes one space. */
-export const oneLine = (text: string): string => text.replace(/[\p{Cc}\s]+/gu, " ").trim();
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
 /**
  * Splits a Markdown file into its YAML frontmatter (between `---` lines at the top) and the
@@ -99,18 +85,6 @@ function field(data: Record<string, unknown>, key: string): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const text = String(value).trim();
   return text === "" ? undefined : text;
-}
-
-/** The entries of `dir` in name order, or none when it does not exist. */
-async function entriesOf(dir: string): Promise<Dirent[]> {
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries.sort((a, b) => byCodeUnit(a.name, b.name));
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return [];
-    throw error;
-  }
 }
 
 const isReserved = (name: string): boolean => (RESERVED_ROOT as readonly string[]).includes(name);
@@ -263,7 +237,7 @@ export async function readMemFs(dir: string): Promise<MemFs> {
   return memfs;
 }
 
-// -- Bundle -> MemFS -------------------------------------------------------------------------------
+// -- Bundle -> MemFS --------------------------------------------------------------------------
 
 /** The name of a note read from `reference/`, with the prefix that marks it taken off. */
 const unprefixed = (name: string): string =>

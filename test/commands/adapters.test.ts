@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("adapters", () => {
-  it("prints one row per adapter: the three built in, then the extra one", async () => {
+  it("prints one row per adapter: the four built in, then the extra one", async () => {
     const result = await run(box, ["adapters"]);
     expect(result.exitCode).toBe(0);
     const names = result.stdout
@@ -29,7 +29,7 @@ describe("adapters", () => {
       .slice(1)
       .filter((line) => line.trim() !== "")
       .map((line) => line.split(/\s+/)[0]);
-    expect(names).toEqual(["folder", "openclaw", "claude-code", "memory"]);
+    expect(names).toEqual(["folder", "openclaw", "claude-code", "letta", "memory"]);
     const [header] = result.stdout.split(/\r?\n/);
     expect(header).toMatch(/^name\s+app\s+found\s+version\s+location\s+hint$/);
   });
@@ -38,14 +38,20 @@ describe("adapters", () => {
     const result = await run(box, ["adapters", "--json"]);
     expect(result.exitCode).toBe(0);
     const rows = json<Record<string, unknown>[]>(result);
-    expect(rows.map((row) => row.name)).toEqual(["folder", "openclaw", "claude-code", "memory"]);
+    expect(rows.map((row) => row.name)).toEqual([
+      "folder",
+      "openclaw",
+      "claude-code",
+      "letta",
+      "memory",
+    ]);
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual(
         ["displayName", "found", "hint", "location", "name", "version"].sort(),
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[3]).toEqual({
+    expect(rows[4]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -53,9 +59,15 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw or Claude Code lives in the sandbox home.
+    // Nothing of OpenClaw, Claude Code or Letta Code lives in the sandbox home.
     expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
     expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
+    expect(rows[3]).toMatchObject({
+      name: "letta",
+      displayName: "Letta Code",
+      found: false,
+      hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
+    });
   });
 
   it("lists only the built-in adapters without an extra one", async () => {
@@ -65,6 +77,7 @@ describe("adapters", () => {
       "folder",
       "openclaw",
       "claude-code",
+      "letta",
     ]);
   });
 });
