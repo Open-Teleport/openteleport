@@ -358,7 +358,11 @@ describe("move", () => {
       { field: "avatar", detail: "In-memory dst does not support avatar" },
       { field: "skill:web-brief", detail: "scripts are not supported" },
     ]);
-    expect(report.warnings).toEqual(["SOUL.md not found", "Restart the app to load the agent"]);
+    expect(report.warnings).toEqual([
+      "SOUL.md not found",
+      "files/ may contain personal data; review before sharing",
+      "Restart the app to load the agent",
+    ]);
   });
 
   it("passes the write options through and never changes the bundle it read", async () => {
@@ -631,6 +635,62 @@ describe("the context each side gets", () => {
     const given = both();
     await move({ from: source(), to: target(), agent: "ada", ctx: given, write: WRITE });
     expect(given).toMatchObject({ sourceDir: "/from/here", targetDir: "/to/there" });
+  });
+});
+
+describe("warnings about files/", () => {
+  const PERSONAL = "files/ may contain personal data; review before sharing";
+  const blank = (size: number): Uint8Array => new Uint8Array(size).fill(0x20);
+  const BIG = 2 * 1024 * 1024 + 1;
+
+  it("warns about personal data when an export carries files", async () => {
+    const carried = await exportBundle({ from: source(), agent: "ada", ctx, includeFiles: true });
+    const left = await exportBundle({ from: source(), agent: "ada", ctx, includeFiles: false });
+    const none = await exportBundle({
+      from: source(fullAgent({ files: [] })),
+      agent: "ada",
+      ctx,
+      includeFiles: true,
+    });
+
+    expect(carried.report.warnings).toContain(PERSONAL);
+    expect(left.report.warnings).not.toContain(PERSONAL);
+    expect(none.report.warnings).not.toContain(PERSONAL);
+  });
+
+  it("warns about personal data when a move or an import delivers files", async () => {
+    const moved = await move({ from: source(), to: target(), agent: "ada", ctx, write: WRITE });
+    const kept = await move({
+      from: source(),
+      to: target({ files: false }),
+      agent: "ada",
+      ctx,
+      write: WRITE,
+    });
+    const imported = await importBundle({ to: target(), bundle: fullAgent(), ctx, write: WRITE });
+
+    expect(moved.warnings).toContain(PERSONAL);
+    expect(kept.warnings).not.toContain(PERSONAL);
+    expect(imported.warnings).toContain(PERSONAL);
+  });
+
+  it("says how many carried files were too large to scan for secrets", async () => {
+    const one = fullAgent({ files: [{ path: "big.bin", bytes: blank(BIG) }] });
+    const two = fullAgent({
+      files: [
+        { path: "big.bin", bytes: blank(BIG) },
+        { path: "small.txt", bytes: blank(10) },
+        { path: "logs/huge.log", bytes: blank(BIG) },
+      ],
+    });
+
+    const single = await exportBundle({ from: source(one), agent: "ada", ctx, includeFiles: true });
+    const double = await move({ from: source(two), to: target(), agent: "ada", ctx, write: WRITE });
+    const left = await exportBundle({ from: source(two), agent: "ada", ctx, includeFiles: false });
+
+    expect(single.report.warnings).toContain("1 file over 2 MiB was not scanned for secrets");
+    expect(double.warnings).toContain("2 files over 2 MiB were not scanned for secrets");
+    expect(left.report.warnings.join("\n")).not.toContain("not scanned");
   });
 });
 

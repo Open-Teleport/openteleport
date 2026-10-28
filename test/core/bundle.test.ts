@@ -945,6 +945,32 @@ describe("size limits", () => {
       expect(bundle.unknownPaths).toEqual(["junk.bin", "memory/call.wav"]);
     });
 
+    it("names the five largest files when files/ is over the limit", async () => {
+      const folder = await agentFolder();
+      const MiB = 1024 * 1024;
+      const sizes: [string, number][] = [
+        ["e.bin", 15],
+        ["a.bin", 30],
+        ["g.bin", 5],
+        ["c/d.bin", 20],
+        ["b.bin", 25],
+        ["f.bin", 10],
+      ];
+      for (const [path, size] of sizes) {
+        await grow(join(folder, "files", ...path.split("/")), size * MiB);
+      }
+
+      const failure = readBundle(folder, { requireManifest: false });
+
+      await expect(failure).rejects.toThrow(
+        `files/ is ${105 * MiB} bytes, over the ${MAX_FILES_BYTES} byte limit; the largest: ` +
+          `files/a.bin (${30 * MiB} bytes), files/b.bin (${25 * MiB} bytes), ` +
+          `files/c/d.bin (${20 * MiB} bytes), files/e.bin (${15 * MiB} bytes), ` +
+          `files/f.bin (${10 * MiB} bytes)`,
+      );
+      await expect(failure).rejects.not.toThrow(/g\.bin/);
+    });
+
     it("rejects a folder whose layout entries add up to too much, judging by size alone", async () => {
       const folder = await agentFolder();
       await grow(join(folder, "files", "big.bin"), MAX_FILES_BYTES);

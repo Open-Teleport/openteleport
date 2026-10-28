@@ -103,6 +103,7 @@ function classify(path: string): Classified {
 function validateListing(listing: readonly Listing[]): void {
   const seen = new Set<string>();
   const skillNames = new Set<string>();
+  const files: Listing[] = [];
   let routineCount = 0;
   let filesBytes = 0;
   let totalBytes = 0;
@@ -116,6 +117,7 @@ function validateListing(listing: readonly Listing[]): void {
     const found = classify(path);
     if (found.kind === "file") {
       filesBytes += size;
+      files.push({ path, size });
     } else if (found.kind === "avatar") {
       if (size > MAX_AVATAR_BYTES) {
         throw new Error(`${path} is ${size} bytes, over the ${MAX_AVATAR_BYTES} byte limit`);
@@ -138,7 +140,16 @@ function validateListing(listing: readonly Listing[]): void {
     throw new Error(`too many routines: ${routineCount} (the limit is ${MAX_ROUTINES})`);
   }
   if (filesBytes > MAX_FILES_BYTES) {
-    throw new Error(`files/ is ${filesBytes} bytes, over the ${MAX_FILES_BYTES} byte limit`);
+    // What to delete first: the five largest files, the largest first.
+    const largest = files
+      .sort((a, b) => b.size - a.size || byCodeUnit(a.path, b.path))
+      .slice(0, 5)
+      .map(({ path, size }) => `${path} (${size} bytes)`)
+      .join(", ");
+    throw new Error(
+      `files/ is ${filesBytes} bytes, over the ${MAX_FILES_BYTES} byte limit; the largest: ` +
+        largest,
+    );
   }
   if (totalBytes > MAX_ARCHIVE_BYTES) {
     throw new Error(

@@ -109,7 +109,7 @@ For an app in Docker or on a network drive, point `--source-dir` or `--target-di
 - **Routines land disabled,** so the same task never runs in two apps without you knowing. `--enable-routines` keeps them as they were.
 - **The source is never modified.** `move` reads a snapshot and writes a copy; nothing is deleted from the app it came from.
 - **Nothing is overwritten by surprise.** An agent of the same name in the target is updated in place only when it is the same agent (same id); otherwise the new one is written next to it as `<name>-2`. `--copy` always writes next to it. `--replace` overwrites it after asking for confirmation, or with `--yes` when there is no terminal to ask in. A `folder` target that already holds files but no earlier export (no `jetpack.json`) is never written into: use `--copy`, or point `--target-dir` at an empty folder. Updating an earlier export replaces its layout (`AGENTS.md`, `skills/`, `memory/`...) and the report names every part it removed; other files in the folder stay.
-- **Workspace files stay behind** unless you pass `--include-files`, and then only up to 100 MB.
+- **Workspace files stay behind** unless you pass `--include-files`, and then only up to 100 MB; over that, the error names the five largest files. With files on board, the report warns that they may hold personal data, so review them before you share the bundle, and says how many files over 2 MiB were too large to scan for secrets.
 
 ## Contributing an adapter
 

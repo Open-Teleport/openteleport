@@ -4,10 +4,13 @@ import { writeBundle } from "./bundle.js";
 import { ensureId } from "./ids.js";
 import type { Item, MoveReport } from "./report.js";
 import type { Bundle } from "./schema.js";
-import { type SecretFinding, scanSecrets } from "./secrets.js";
+import { MAX_TEXT_ENTRY_BYTES } from "./paths.js";
+import { type SecretFinding, scanSecrets, unscannedFiles } from "./secrets.js";
 
 /** The `source.app` of a report for an import: the agent came from a bundle, not from an app. */
 const BUNDLE_SOURCE = "jetpack";
+
+const PERSONAL_DATA_WARNING = "files/ may contain personal data; review before sharing";
 
 /**
  * Thrown before anything is written when the Bundle holds what looks like a credential. The
@@ -230,6 +233,25 @@ const filesIf = (bundle: Bundle, includeFiles: boolean): Bundle =>
   includeFiles ? bundle : { ...bundle, files: [] };
 
 /**
+ * What the report says about the files a Bundle carries: that they may hold personal data, so
+ * the promise that a bundle is safe to send holds only without them, and how many were too
+ * large for the secret scan to read.
+ */
+function filesWarnings(bundle: Bundle): string[] {
+  const warnings = bundle.files.length > 0 ? [PERSONAL_DATA_WARNING] : [];
+  const unscanned = unscannedFiles(bundle).length;
+  if (unscanned > 0) {
+    const limit = `${MAX_TEXT_ENTRY_BYTES / (1024 * 1024)} MiB`;
+    warnings.push(
+      unscanned === 1
+        ? `1 file over ${limit} was not scanned for secrets`
+        : `${unscanned} files over ${limit} were not scanned for secrets`,
+    );
+  }
+  return warnings;
+}
+
+/**
  * The part of a move after the Bundle has its id: leave `files/` behind unless asked for, refuse
  * secrets in what is left, fit the Bundle to the target, write it and report. Read warnings come
  * before the target's warnings.
@@ -260,7 +282,7 @@ async function deliver(opts: {
     moved: movedItems(bundle, result.items.skipped),
     approximated: [...result.items.approximated],
     skipped: [...skipped, ...result.items.skipped],
-    warnings: [...opts.readWarnings, ...result.items.warnings],
+    warnings: [...opts.readWarnings, ...filesWarnings(bundle), ...result.items.warnings],
   };
 }
 
@@ -314,7 +336,7 @@ export async function exportBundle(opts: {
       moved: movedItems(bundle),
       approximated: [],
       skipped: [],
-      warnings: [...read.warnings],
+      warnings: [...read.warnings, ...filesWarnings(bundle)],
     },
   };
 }

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MAX_TEXT_ENTRY_BYTES } from "../../src/core/paths.js";
 import { type Bundle, type FileEntry, parseManifest } from "../../src/core/schema.js";
-import { SECRET_PATTERNS, type SecretFinding, scanSecrets } from "../../src/core/secrets.js";
+import {
+  SECRET_PATTERNS,
+  type SecretFinding,
+  scanSecrets,
+  unscannedFiles,
+} from "../../src/core/secrets.js";
 
 const encoder = new TextEncoder();
 
@@ -378,6 +383,49 @@ describe("scanSecrets: where it looks", () => {
     ]);
   });
 
+  it("scans the manifest name and every x-<vendor> value as jetpack.json, without a line", () => {
+    const manifest = parseManifest({
+      ...MANIFEST,
+      name: `Ada ${GITHUB_TOKEN}`,
+      "x-acme": { token: OPENAI_KEY, nested: { list: [AWS_KEY] } },
+      "x-other": `two\nlines ${JWT}`,
+    });
+
+    expect(scanSecrets(bundleWith({ manifest }))).toStrictEqual([
+      { path: "jetpack.json", kind: "github-token", preview: "ghp_a1…" },
+      { path: "jetpack.json", kind: "openai-api-key", preview: "sk-pro…" },
+      { path: "jetpack.json", kind: "aws-access-key", preview: "AKIAIO…" },
+      { path: "jetpack.json", kind: "jwt", preview: "eyJhbG…" },
+    ]);
+  });
+
+  it("finds nothing in the x-<vendor> values apps really write", () => {
+    const manifest = parseManifest({
+      ...MANIFEST,
+      "x-claude-code": { tools: ["Read", "mcp__claude-in-chrome__navigate"], scope: "project" },
+      "x-openclaw": { identity: { name: "Ada", emoji: "🔎", avatar: "avatars/ada.png" } },
+    });
+
+    expect(scanSecrets(bundleWith({ manifest }))).toStrictEqual([]);
+  });
+
+  it("scans the name of a routine as routines/<name>.json, the match masked in the path", () => {
+    const routines: Bundle["routines"] = [
+      {
+        name: `Ping ${AWS_KEY}`,
+        instruction: `Ping with ${OPENAI_KEY}`,
+        enabled: true,
+        timezone: "UTC",
+        schedule: { kind: "every", every: "1h" },
+      },
+    ];
+
+    expect(scanSecrets(bundleWith({ routines }))).toStrictEqual([
+      { path: "routines/Ping AKIAIO….json", kind: "aws-access-key", preview: "AKIAIO…" },
+      { path: "routines/Ping AKIAIO….json", kind: "openai-api-key", preview: "sk-pro…" },
+    ]);
+  });
+
   it("scans every file of a skill as skills/<skill>/<file>", () => {
     const skills = [
       {
@@ -560,6 +608,23 @@ describe("scanSecrets: binary and large files", () => {
 
   it("scans an empty file without a finding", () => {
     expect(scanSecrets(bundleWith({ files: [file("empty.txt", "")] }))).toStrictEqual([]);
+  });
+});
+
+describe("unscannedFiles", () => {
+  it("names the files too large to scan, and nothing else", () => {
+    const blank = (size: number): Uint8Array => new Uint8Array(size).fill(0x20);
+    const bundle = bundleWith({
+      files: [
+        file("huge.txt", blank(MAX_TEXT_ENTRY_BYTES + 1)),
+        file("edge.txt", blank(MAX_TEXT_ENTRY_BYTES)),
+        file("blob.bin", new Uint8Array(64)),
+        file("logs/big.log", blank(MAX_TEXT_ENTRY_BYTES * 2)),
+      ],
+    });
+
+    expect(unscannedFiles(bundle)).toEqual(["files/huge.txt", "files/logs/big.log"]);
+    expect(unscannedFiles(bundleWith())).toEqual([]);
   });
 });
 

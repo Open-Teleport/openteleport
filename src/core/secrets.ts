@@ -96,29 +96,51 @@ function scanWhole(path: string, text: string, findings: SecretFinding[]): void 
   for (const hit of findHits(text)) findings.push({ path, ...hit });
 }
 
+/** Too large to scan: over the text-entry limit. */
+const isTooLarge = ({ bytes }: FileEntry): boolean => bytes.byteLength > MAX_TEXT_ENTRY_BYTES;
+
 /** Scans a file's bytes as UTF-8 text, unless it is too large or looks binary. */
 function scanFile(path: string, entry: FileEntry, findings: SecretFinding[]): void {
   const { bytes } = entry;
-  if (bytes.byteLength > MAX_TEXT_ENTRY_BYTES) return;
+  if (isTooLarge(entry)) return;
   if (bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return;
   scanLines(path, decoder.decode(bytes), findings);
 }
 
+/** `text` with every match of every pattern cut to its preview, so that it can be shown. */
+function masked(text: string): string {
+  let shown = text;
+  for (const { regex } of SECRET_PATTERNS) {
+    const every = new RegExp(regex.source, `${regex.flags}g`);
+    shown = shown.replace(every, (match) => `${match.slice(0, PREVIEW_CHARS)}…`);
+  }
+  return shown;
+}
+
 /**
- * Looks for credentials in everything a Bundle would write out: the manifest's `title` and
- * `description`, the instructions and persona, skills, routine instructions, memory and the
- * extra files. Findings come in that order, with `path` as it would appear in an archive.
+ * Looks for credentials in everything a Bundle would write out: the manifest's `name`, `title`,
+ * `description` and every `x-<vendor>` value (as its JSON), the instructions and persona, skills,
+ * routine names and instructions, memory and the extra files. Findings come in that order, with
+ * `path` as it would appear in an archive; a routine is `routines/<name>.json`, with any match in
+ * the name cut to its preview, so that a path never shows a secret either.
  *
- * Files over the text-entry limit and files with a NUL byte in their first 8 KB are skipped
- * without a finding, as are the avatar and the names of paths. A pure function: it reads nothing
- * but its argument and keeps nothing between calls.
+ * Files over the text-entry limit (see `unscannedFiles`) and files with a NUL byte in their first
+ * 8 KB are skipped without a finding, as are the avatar and the names of paths. A pure function:
+ * it reads nothing but its argument and keeps nothing between calls.
  */
 export function scanSecrets(bundle: Bundle): SecretFinding[] {
   const findings: SecretFinding[] = [];
 
-  const { title, description } = bundle.manifest;
+  const { name, title, description } = bundle.manifest;
+  scanWhole("jetpack.json", name, findings);
   if (title !== undefined) scanWhole("jetpack.json", title, findings);
   if (description !== undefined) scanWhole("jetpack.json", description, findings);
+  for (const [key, value] of Object.entries(bundle.manifest)) {
+    if (!key.startsWith("x-")) continue;
+    // JSON escapes a line break as `\n`, which the token boundary allows before a token.
+    const json = JSON.stringify(value);
+    if (json !== undefined) scanWhole("jetpack.json", json, findings);
+  }
 
   scanLines("AGENTS.md", bundle.instructions, findings);
   if (bundle.persona !== undefined) scanLines("SOUL.md", bundle.persona, findings);
@@ -130,7 +152,9 @@ export function scanSecrets(bundle: Bundle): SecretFinding[] {
   }
 
   for (const routine of bundle.routines) {
-    scanWhole(`routines/${routine.name}.json`, routine.instruction, findings);
+    const path = `routines/${masked(routine.name)}.json`;
+    scanWhole(path, routine.name, findings);
+    scanWhole(path, routine.instruction, findings);
   }
 
   // A fact's position in `facts` is its line number: facts keep their order in `MEMORY.md`.
@@ -147,4 +171,17 @@ export function scanSecrets(bundle: Bundle): SecretFinding[] {
   for (const entry of bundle.files) scanFile(`files/${entry.path}`, entry, findings);
 
   return findings;
+}
+
+/**
+ * The skill files and files `scanSecrets` skips for their size (over the text-entry limit,
+ * 2 MiB), as it would name them: what a scan without findings does not vouch for.
+ */
+export function unscannedFiles(bundle: Bundle): string[] {
+  return [
+    ...bundle.skills.flatMap((skill) =>
+      skill.files.filter(isTooLarge).map((entry) => `skills/${skill.name}/${entry.path}`),
+    ),
+    ...bundle.files.filter(isTooLarge).map((entry) => `files/${entry.path}`),
+  ];
 }
