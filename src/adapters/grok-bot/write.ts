@@ -2,15 +2,14 @@
 // this Bot, one file for each kind of thing, and a README with the five steps. Grok Bot imports
 // nothing but memory (spec, section 7.2), so the Bot itself is made in the app, by hand, from
 // what is pasted into its chat.
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { ulid } from "ulid";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { describeSchedule, everyToMs } from "../../core/schedule.js";
 import type { Bundle, FileEntry, Manifest, Routine, Skill } from "../../core/schema.js";
 import { factsToProse } from "../../core/text.js";
-import { isSafeName, lstatIfAny } from "../fs.js";
+import { isSafeName, lstatIfAny, replaceFile } from "../fs.js";
 import { MARKER_FILE, carriesMarker, readMarker, writeMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 
@@ -292,21 +291,6 @@ async function claimTarget(
 
 // -- Writing ----------------------------------------------------------------------------------
 
-/**
- * Replaces `path` in one step through a temporary sibling, so that it is never left half written
- * and a link in its place is replaced rather than written through.
- */
-async function replaceFile(path: string, data: Uint8Array): Promise<void> {
-  const temporary = `${path}.${ulid()}.tmp`;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporary, data, { flag: "wx" });
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
 
 function approximations(bundle: Bundle, pack: readonly FileEntry[]): Item[] {
   const items: Item[] = [];

@@ -2,13 +2,10 @@
 // names and values follow `create_job` in `cron/jobs.py`, so that a job written here is the one
 // `hermes cron create --paused` would have made.
 import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { ulid } from "ulid";
+import { readFile } from "node:fs/promises";
 import { describeSchedule, everyToMs, msToEvery, zonedToInstant } from "../../core/schedule.js";
 import type { Routine, Schedule } from "../../core/schema.js";
-import { lstatIfAny } from "../fs.js";
+import { backUp, lstatIfAny, replaceFile } from "../fs.js";
 
 /** A job record as far as the adapter needs it; everything else in it is kept as it is. */
 export type HermesJob = Record<string, unknown> & {
@@ -86,19 +83,6 @@ export async function readJobsFile(file: string): Promise<JobsFile | { error: st
   };
 }
 
-/** Copies `file` next to itself as `<file>.bak-<ISO time>`, never over an earlier backup. */
-async function backUp(file: string, now: Date): Promise<void> {
-  const stamp = now.toISOString().replace(/:/g, "-");
-  for (let n = 1; ; n += 1) {
-    const backup = `${file}.bak-${stamp}${n === 1 ? "" : `-${n}`}`;
-    try {
-      await copyFile(file, backup, constants.COPYFILE_EXCL);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-  }
-}
 
 /**
  * Writes `{ ...rest, jobs, updated_at }` to `file` in one step through a temporary sibling, so
@@ -120,21 +104,12 @@ export async function writeJobsFile(
   if (existing !== undefined && !existing.isFile()) {
     throw new Error(`${file} is not a regular file`);
   }
-  if (existing !== undefined) await backUp(file, now);
+  // The backup is `<file>.bak-<ISO time>`.
+  if (existing !== undefined) await backUp(file, now.toISOString().replace(/:/g, "-"));
 
   const mode = existing === undefined ? 0o600 : existing.mode & 0o777;
-  const temporary = join(dirname(file), `.jobs_${ulid()}.tmp`);
-  try {
-    await mkdir(dirname(file), { recursive: true });
-    const content = JSON.stringify({ ...rest, jobs, updated_at: iso(now) }, null, 2);
-    await writeFile(temporary, `${content}\n`, { encoding: "utf8", mode });
-    // The mode given to `writeFile` is narrowed by the umask; this sets it exactly.
-    await chmod(temporary, mode);
-    await rename(temporary, file);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  const content = JSON.stringify({ ...rest, jobs, updated_at: iso(now) }, null, 2);
+  await replaceFile(file, `${content}\n`, { mode });
 }
 
 /** A job id the way `create_job` makes one: twelve hexadecimal characters. */

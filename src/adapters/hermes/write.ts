@@ -5,16 +5,15 @@
 // records the id of the agent and what was written, so that moving the agent again updates the
 // profile in place and leaves what Hermes and the user added since.
 import { createHash } from "node:crypto";
-import { chmod, mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
-import { ulid } from "ulid";
 import { stringify } from "yaml";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
 import { mergeInstructions } from "../../core/text.js";
-import { isSafeName, lstatIfAny } from "../fs.js";
+import { isSafeName, lstatIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { placeSkill } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
@@ -185,32 +184,22 @@ async function blockedBy(
 }
 
 /**
- * Replaces `file` in one step through a temporary sibling, so that Hermes, which reads these
- * files while it runs, never sees half of one. The file keeps its mode.
+ * `replaceFile` for a file Hermes reads while it runs, which it never sees half written. The file
+ * keeps its mode.
  */
-async function replaceFile(file: string, content: string): Promise<void> {
+async function replaceKeepingMode(file: string, content: string): Promise<void> {
   const existing = await lstatIfAny(file);
-  const temporary = `${file}.${ulid()}.tmp`;
-  try {
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(temporary, content, "utf8");
-    // The mode given to `writeFile` is narrowed by the umask; this sets it exactly.
-    if (existing !== undefined) await chmod(temporary, existing.mode & 0o777);
-    await rename(temporary, file);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  await replaceFile(file, content, existing === undefined ? {} : { mode: existing.mode & 0o777 });
 }
 
 /**
- * `replaceFile` for `rel` below `root`. Returns why nothing was written (see `blockedBy`), or
+ * `replaceKeepingMode` for `rel` below `root`. Returns why nothing was written (see `blockedBy`), or
  * `undefined` when the file was written.
  */
 async function putFile(root: string, rel: string, content: string): Promise<string | undefined> {
   const blocked = await blockedBy(root, rel, "file");
   if (blocked !== undefined) return blocked;
-  await replaceFile(join(root, ...rel.split("/")), content);
+  await replaceKeepingMode(join(root, ...rel.split("/")), content);
   return undefined;
 }
 
@@ -658,7 +647,7 @@ async function writeMemory(
   const unchanged =
     next.length === existing.length && next.every((entry, i) => entry === existing[i]);
   if (current === undefined ? next.length > 0 : !unchanged) {
-    await replaceFile(join(dir, ...rel.split("/")), renderEntries(next));
+    await replaceKeepingMode(join(dir, ...rel.split("/")), renderEntries(next));
   }
   return added;
 }

@@ -1,8 +1,18 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isSafeName, lstatIfAny } from "../../src/adapters/fs.js";
+import { backUp, isSafeName, lstatIfAny, replaceFile } from "../../src/adapters/fs.js";
 
 /** An error the file system is made to give, for the test that needs one a machine cannot give. */
 const injected = vi.hoisted(() => ({ lstat: undefined as Error | undefined }));
@@ -118,5 +128,100 @@ describe("isSafeName", () => {
     ["a Windows device name with an extension", "com1.txt"],
   ])("refuses %s", (_what, name) => {
     expect(isSafeName(name)).toBe(false);
+  });
+});
+
+describe("replaceFile", () => {
+  it("writes text and bytes, and creates the folders on the way", async () => {
+    const text = join(root, "deep", "er", "note.txt");
+    const bytes = join(root, "deep", "avatar.bin");
+
+    await replaceFile(text, "naïve\n");
+    await replaceFile(bytes, new Uint8Array([0, 255, 7]));
+
+    expect(await readFile(text, "utf8")).toBe("naïve\n");
+    expect([...(await readFile(bytes))]).toEqual([0, 255, 7]);
+  });
+
+  it("replaces what is there in one file and leaves no temporary file", async () => {
+    const file = join(root, "ids.json");
+    await writeFile(file, "OLD\n");
+
+    await replaceFile(file, "NEW\n");
+    await replaceFile(file, "NEWER\n");
+
+    expect(await readFile(file, "utf8")).toBe("NEWER\n");
+    expect(await readdir(root)).toEqual(["ids.json"]);
+  });
+
+  it.skipIf(!canSymlink)("replaces a symbolic link instead of writing through it", async () => {
+    const real = join(root, "elsewhere.json");
+    await writeFile(real, "KEEP\n");
+    await symlink(real, join(root, "ids.json"), "file");
+
+    await replaceFile(join(root, "ids.json"), "NEW\n");
+
+    expect(await readFile(real, "utf8")).toBe("KEEP\n");
+    expect((await lstat(join(root, "ids.json"))).isFile()).toBe(true);
+    expect(await readFile(join(root, "ids.json"), "utf8")).toBe("NEW\n");
+  });
+
+  it("removes its temporary file and throws when the file cannot be replaced", async () => {
+    // A folder where the file should be: the rename fails after the content was written.
+    await mkdir(join(root, "taken"));
+    await writeFile(join(root, "taken", "inside"), "x");
+
+    await expect(replaceFile(join(root, "taken"), "NEW\n")).rejects.toThrow();
+
+    expect(await readdir(root)).toEqual(["taken"]);
+    expect(await readdir(join(root, "taken"))).toEqual(["inside"]);
+  });
+
+  it("throws when a file is where the folder should be", async () => {
+    await writeFile(join(root, "project"), "");
+
+    await expect(replaceFile(join(root, "project", "ids.json"), "x")).rejects.toThrow();
+
+    expect(await readdir(root)).toEqual(["project"]);
+  });
+
+  it.skipIf(process.platform === "win32")("sets the mode exactly when given one", async () => {
+    const file = join(root, "openclaw.json");
+    await writeFile(file, "OLD\n", { mode: 0o644 });
+
+    await replaceFile(file, "NEW\n", { mode: 0o600 });
+
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("backUp", () => {
+  it("copies the file next to itself as <file>.bak-<stamp>", async () => {
+    const file = join(root, "jobs.json");
+    await writeFile(file, "ONE\n");
+
+    await backUp(file, "2026-10-28T10-00-00.000Z");
+
+    expect(await readFile(`${file}.bak-2026-10-28T10-00-00.000Z`, "utf8")).toBe("ONE\n");
+  });
+
+  it("never goes over an earlier backup of the same stamp", async () => {
+    const file = join(root, "jobs.json");
+    await writeFile(file, "ONE\n");
+    await backUp(file, "stamp");
+    await writeFile(file, "TWO\n");
+    await backUp(file, "stamp");
+    await writeFile(file, "THREE\n");
+    await backUp(file, "stamp");
+
+    expect(await readFile(`${file}.bak-stamp`, "utf8")).toBe("ONE\n");
+    expect(await readFile(`${file}.bak-stamp-2`, "utf8")).toBe("TWO\n");
+    expect(await readFile(`${file}.bak-stamp-3`, "utf8")).toBe("THREE\n");
+  });
+
+  it("throws when there is nothing to copy", async () => {
+    await expect(backUp(join(root, "nothing.json"), "stamp")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });

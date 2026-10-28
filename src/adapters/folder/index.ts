@@ -1,12 +1,13 @@
 // The universal adapter: an agent that lives in a plain folder, in the same layout a `.jetpack`
 // archive uses (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/`, ...). It reads any folder with an
 // `AGENTS.md`, with or without a `jetpack.json`, and writes the full layout, `jetpack.json` too.
-import { lstat, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
 import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle } from "../../core/schema.js";
+import { lstatIfAny } from "../fs.js";
 import type {
   Adapter,
   AdapterCapabilities,
@@ -49,16 +50,6 @@ const isMissing = (error: unknown): boolean =>
 async function statOrUndefined(path: string): Promise<Stats | undefined> {
   try {
     return await stat(path);
-  } catch (error) {
-    if (isMissing(error)) return undefined;
-    throw error;
-  }
-}
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is there. */
-async function lstatOrUndefined(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
   } catch (error) {
     if (isMissing(error)) return undefined;
     throw error;
@@ -215,7 +206,7 @@ async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
  * or junction) is never free, wherever it leads: nothing is written through one.
  */
 async function isFree(path: string): Promise<boolean> {
-  const info = await lstatOrUndefined(path);
+  const info = await lstatIfAny(path);
   if (info === undefined) return true;
   return info.isDirectory() && (await namesIn(path)).length === 0;
 }
@@ -246,7 +237,7 @@ async function numberedSiblings(wanted: string): Promise<string[]> {
  */
 async function sameAgentSibling(wanted: string, id: string): Promise<string | undefined> {
   for (const sibling of await numberedSiblings(wanted)) {
-    const info = await lstatOrUndefined(sibling);
+    const info = await lstatIfAny(sibling);
     if (info?.isDirectory() && (await manifestId(sibling)) === id) return sibling;
   }
   return undefined;
@@ -289,7 +280,7 @@ async function claimTarget(
   if (await isFree(wanted)) return { target: wanted };
   if (onConflict === "copy") return { target: await freeSibling(wanted) };
 
-  const info = await lstatOrUndefined(wanted);
+  const info = await lstatIfAny(wanted);
   if (info?.isSymbolicLink()) {
     // A link leads somewhere else: what it holds is never read, and nothing is written through it.
     if (onConflict === "replace") {

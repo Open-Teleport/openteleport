@@ -1,9 +1,8 @@
 // What an adapter leaves in the folders it writes so that a later move of the same agent updates
 // them in place: the marker file of an agent folder, and the map of ids kept beside a project.
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { ulid } from "ulid";
-import { lstatIfAny } from "./fs.js";
+import { lstat, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { lstatIfAny, replaceFile } from "./fs.js";
 
 /** Left in a folder an adapter wrote, with the manifest id of the agent it wrote there. */
 export const MARKER_FILE = ".openteleport.json";
@@ -65,26 +64,9 @@ export function renderMarker(marker: Marker): string {
 }
 
 /**
- * Replaces `path` in one step through a temporary sibling, so that it is never left half written
- * and a link in its place is replaced rather than written through. The folder is created when it
- * is not there.
- */
-async function replaceFile(path: string, content: string): Promise<void> {
-  const temporary = `${path}.${ulid()}.tmp`;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporary, content, "utf8");
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
-
-/**
  * Writes the marker into `dir`, creating the folder when needed. The file is replaced in one
- * step. Throws when `<dir>/.openteleport.json` is there and is not a regular file (a link or a
- * folder): nothing is written then.
+ * step (`replaceFile`). Throws when `<dir>/.openteleport.json` is there and is not a regular file
+ * (a link or a folder): nothing is written then.
  */
 export async function writeMarker(dir: string, marker: Marker): Promise<void> {
   const file = join(dir, MARKER_FILE);

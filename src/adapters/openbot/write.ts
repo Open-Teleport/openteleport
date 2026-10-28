@@ -1,13 +1,12 @@
 // Writes a Bundle for OpenBot as an `openbot-agent-import` archive to hand over. OpenBot takes it
 // under Server settings, Import; its local Team API, the one other way in, is only up while a
 // host service runs and asks for a member's sign-in, so it is not used.
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { ulid } from "ulid";
 import type { Bundle } from "../../core/schema.js";
 import { readOpenBotZip, writeOpenBotImportZip } from "../../formats/openbot-zip.js";
 import { VERSION } from "../../version.js";
-import { lstatIfAny } from "../fs.js";
+import { lstatIfAny, replaceFile } from "../fs.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 
 const MAX_SLUG_CHARS = 64;
@@ -129,22 +128,6 @@ async function claimTarget(
   return path;
 }
 
-/**
- * Creates `path` in one step through a temporary sibling, so that it is never left half written
- * and what stood there (a link included) is replaced, not written through. The folder is made
- * when it is not there.
- */
-async function writeAtomically(path: string, bytes: Uint8Array): Promise<void> {
-  const temporary = `${path}.${ulid()}.tmp`;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporary, bytes, { flag: "wx" });
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
 
 // -- Writing ----------------------------------------------------------------------------------
 
@@ -174,7 +157,7 @@ export async function writeOpenBotAgent(
   const folder = resolve(ctx.cwd, ctx.targetDir ?? ".");
   const stem = join(folder, `${slugOf(bundle.manifest.name)}${ARTIFACT_SUFFIX}`);
   const path = await claimTarget(stem, bundle.manifest.id, opts.onConflict, items.warnings);
-  await writeAtomically(path, bytes);
+  await replaceFile(path, bytes);
 
   return {
     outcome: "handoff",

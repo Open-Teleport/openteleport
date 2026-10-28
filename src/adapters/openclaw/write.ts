@@ -1,21 +1,9 @@
 // Writes a Bundle into an OpenClaw install. The agent is created (or found) and configured
 // through the `openclaw` CLI; its workspace files are written directly, since they are plain
 // files that OpenClaw reads as they are.
-import { constants } from "node:fs";
-import {
-  chmod,
-  copyFile,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import JSON5 from "json5";
-import { ulid } from "ulid";
 import { SecretsFoundError } from "../../core/engine.js";
 import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
@@ -23,7 +11,7 @@ import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
 import { factsToProse } from "../../core/text.js";
-import { lstatIfAny } from "../fs.js";
+import { backUp, lstatIfAny, replaceFile } from "../fs.js";
 import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
@@ -355,28 +343,13 @@ async function writeWorkspace(workspace: string, bundle: Bundle, items: Items): 
 
 // -- Config ------------------------------------------------------------------------------------
 
-/** Copies `file` next to itself as `<file>.bak-<timestamp>`, never over an earlier backup. */
-async function backUp(file: string): Promise<void> {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (let n = 1; ; n += 1) {
-    const backup = `${file}.bak-${stamp}${n === 1 ? "" : `-${n}`}`;
-    try {
-      await copyFile(file, backup, constants.COPYFILE_EXCL);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-  }
-}
-
 /**
- * Replaces `file` in one step, as `replaceCache` in `core/ids.ts` does: the content goes to a
- * sibling temporary file, which is then renamed over it, so a crash or a full disk leaves the
- * old file or the new one, never a truncated one, and a running Gateway never reads half of it.
- * The file keeps its mode (`openclaw.json` holds credentials; a new one is owner-only), and a
- * symbolic link stays one: the file it points to is replaced.
+ * Replaces `file` in one step (`replaceFile`), so a crash or a full disk leaves the old file or
+ * the new one, never a truncated one, and a running Gateway never reads half of it. The file
+ * keeps its mode (`openclaw.json` holds credentials; a new one is owner-only), and a symbolic
+ * link stays one: the file it points to is replaced.
  */
-async function replaceFile(file: string, content: string): Promise<void> {
+async function replaceConfigFile(file: string, content: string): Promise<void> {
   let real = file;
   try {
     real = await realpath(file);
@@ -389,16 +362,7 @@ async function replaceFile(file: string, content: string): Promise<void> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const temporary = `${real}.${ulid()}.tmp`;
-  try {
-    await writeFile(temporary, content, { encoding: "utf8", mode });
-    // The mode given to `writeFile` is narrowed by the umask; this sets it exactly.
-    await chmod(temporary, mode);
-    await rename(temporary, real);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  await replaceFile(real, content, { mode });
 }
 
 /**
@@ -438,8 +402,8 @@ async function rewriteConfig(
   }
   Object.assign(entry, values);
 
-  if (source !== undefined) await backUp(file);
-  await replaceFile(file, `${JSON.stringify(config, null, 2)}\n`);
+  if (source !== undefined) await backUp(file, new Date().toISOString().replace(/[:.]/g, "-"));
+  await replaceConfigFile(file, `${JSON.stringify(config, null, 2)}\n`);
   return source !== undefined;
 }
 

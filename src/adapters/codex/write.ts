@@ -1,13 +1,12 @@
 // Writes a Bundle into Codex as a custom agent: one `agents/<slug>.toml`. The user's `config.toml`
 // and `AGENTS.md` are never written, since that would replace their global setup with one move.
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { stringify } from "smol-toml";
-import { ulid } from "ulid";
 import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle, ModelPref } from "../../core/schema.js";
 import { factsToProse, mergeInstructions } from "../../core/text.js";
-import { lstatIfAny } from "../fs.js";
+import { lstatIfAny, replaceFile } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
@@ -299,21 +298,6 @@ function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown
   return renderAgentToml(agent, rest);
 }
 
-/**
- * Replaces `path` in one step through a temporary sibling, so that it is never left half written.
- * The folder is created when it is not there.
- */
-async function writeAtomically(path: string, content: string): Promise<void> {
-  const temporary = `${path}.${ulid()}.tmp`;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporary, content, "utf8");
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
 
 /**
  * Writes a Bundle as a custom agent of the Codex home (`ctx.targetDir`, `CODEX_HOME` or
@@ -344,7 +328,7 @@ export async function writeCodexAgent(
   if (bundle.skills.length > 0) {
     items.warnings.push("Codex skills are shared by every tool reading ~/.agents/skills");
   }
-  await writeAtomically(path, text);
+  await replaceFile(path, text);
   await recordId(idsFile, slug, bundle.manifest.id, items);
   items.warnings.push(
     `Use the agent in Codex as @${slug} (custom agents need \`agents.enabled\`, on by default)`,
