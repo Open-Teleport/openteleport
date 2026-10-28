@@ -379,6 +379,7 @@ describe("OpenClawCli", () => {
     await cli.setIdentity("ada", { name: "Ada" });
     expect(await cli.automationsAdd(["--name", "Morning digest", "--every", "30m"])).toEqual({
       id: "job-9",
+      disabled: false,
     });
     await cli.automationsDisable("job-9");
     expect(await cli.configSet("agents.entries.ada.model", "anthropic/claude-opus-5-5")).toBe(
@@ -526,7 +527,10 @@ describe("OpenClawCli", () => {
   });
 
   it("reads the job id from automations add tolerantly and fails without one", async () => {
-    expect(await cliWith(() => '{"job":{"id":"j1"}}').automationsAdd([])).toEqual({ id: "j1" });
+    expect(await cliWith(() => '{"job":{"id":"j1"}}').automationsAdd([])).toEqual({
+      id: "j1",
+      disabled: false,
+    });
     await expect(cliWith(() => '{"ok":true}').automationsAdd([])).rejects.toThrow(
       /openclaw automations add printed no job id/,
     );
@@ -1191,17 +1195,6 @@ describe("openclawAdapter", () => {
     const { bundle, warnings } = await openclawAdapter.read(ctx, "ada");
     expect(bundle).toStrictEqual(await expectedAda(stateDir));
     expect(warnings).toEqual(ADA_WARNINGS);
-  });
-
-  it("leaves writing to a later task", async () => {
-    const { bundle } = await openclawAdapter.read(ctx, "bare");
-    await expect(
-      openclawAdapter.write(ctx, bundle, {
-        enableRoutines: false,
-        includeFiles: false,
-        onConflict: "copy",
-      }),
-    ).rejects.toThrow("OpenClaw write is implemented in a later task");
   });
 
   describe("detect", () => {

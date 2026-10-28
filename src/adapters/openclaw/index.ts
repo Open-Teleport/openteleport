@@ -3,6 +3,7 @@ import type { Adapter, AdapterCapabilities, Ctx } from "../types.js";
 import { OpenClawCli } from "./cli.js";
 import { openclawPaths } from "./paths.js";
 import { listOpenClawAgents, readOpenClawAgent } from "./read.js";
+import { writeOpenClawAgent } from "./write.js";
 
 const CAPABILITIES: AdapterCapabilities = {
   persona: true,
@@ -46,9 +47,7 @@ export const openclawAdapter: Adapter = {
   detect,
   list: listOpenClawAgents,
   read: readOpenClawAgent,
-  async write() {
-    throw new Error("OpenClaw write is implemented in a later task");
-  },
+  write: writeOpenClawAgent,
 };
 
 export default openclawAdapter;

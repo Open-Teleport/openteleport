@@ -1,11 +1,33 @@
 // The OpenClaw command line, as the adapter drives it.
 //
-// Since 2026.6 OpenClaw keeps automations (cron jobs) in its state database, so they are read and
-// written through the CLI rather than through files. Its JSON output is not documented. What this
-// module assumes, to be confirmed or corrected against a real install (Task 13):
+// OpenClaw keeps scheduled jobs in its state database, so they are read and written through the
+// CLI rather than through files. Their command family depends on the version: 2026.5.28 has
+// `openclaw cron`, while the docs for 2026.6 and later call it `openclaw automations`. Each
+// `OpenClawCli` settles this once, on its first job command: when
+// `openclaw automations list --all --json` fails with "Unknown command" the family is `cron`,
+// otherwise `automations`.
 //
-// - `openclaw automations list --all --json` prints the jobs as a bare array or under `jobs` or
-//   `automations`, one row per job:
+// Commands checked against `--help` of OpenClaw 2026.5.28:
+// - `agents add <id> --workspace <dir> --non-interactive --json`
+// - `agents set-identity --agent <id> --name <n> --emoji <e> --avatar <path> --theme <t> --json`
+// - `agents list --json`
+// - `config set <path> <value>`, without `--json`; `--strict-json` reads the value as JSON.
+// - `gateway status --json`
+// - `cron add --name <n> (--cron <expr> --tz <tz> | --every <dur> | --at <iso> --tz <tz>)
+//   --message <prompt> --agent <id> --session isolated [--disabled] --json`
+// - `cron list --all --json [--agent <id>]` and `cron rm <id> --json`; `cron disable <id>` and
+//   `cron enable <id>` take no `--json`. Jobs go through the Gateway, so these fail while it is
+//   not running.
+//
+// Not checked, taken from the docs on main: the `automations` family, with `list --all`, `add`
+// with the flags of `cron add` but without `--disabled` (a job is disabled after it is added),
+// `disable <id>` and `remove <id>`, each with `--json`.
+//
+// The JSON these commands print is not documented. What this module assumes, to be confirmed or
+// corrected against a real install (Task 13):
+//
+// - Listing the jobs prints them as a bare array or under `jobs` or `automations`, one row per
+//   job:
 //     { id, name, agentId, disabled: boolean,
 //       schedule: { kind: "cron", expr, tz? } | { kind: "every", everyMs } | { kind: "at", at }
 //               | { kind: "on-exit" | "stream", ... },
@@ -16,14 +38,22 @@
 //   the Gateway host's local zone. A row that is not an object or has no id is skipped, with a
 //   warning naming it.
 // - `openclaw agents list --json` prints `{ id, name?, workspace? }` rows, bare or under `agents`.
-// - `openclaw automations add ... --json` prints the new job's id as `id`, `job.id` or
-//   `automation.id`.
+// - Adding a job prints the new job's id as `id`, `job.id` or `automation.id`.
+// - `openclaw gateway status --json` prints an object with `running: true` or
+//   `status: "running"` while the Gateway runs.
 // - Output may start with log lines; the JSON document is the rest, from the first line that
 //   opens an array or an object.
-// - `--json` asks a command for JSON output. `config set` is the exception: there `--json` may
-//   mean "parse the value as JSON5", so `configSet` runs without it and passes the value as
-//   written.
+// - `--json` asks a command for JSON output. `config set`, `cron disable` and `cron enable` are
+//   the exceptions and run without it.
 // - A command this OpenClaw does not have fails with "unknown command" on stderr.
+//
+// On Windows npm installs `openclaw` as an `openclaw.cmd` shim, and running a `.cmd` file goes
+// through `cmd.exe`, which ends a command line at its first line break: a multi-line routine
+// instruction would lose every argument after its first line. So the shim is read and the
+// script it starts is run with this node directly. When that is not possible, an argument with a
+// line break is refused rather than cut.
+import { readFile, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { Ctx } from "../types.js";
 
 /** A job as `openclaw automations list` reports it, normalised; `schedule` is passed on raw. */
@@ -38,6 +68,9 @@ export type JobRow = {
 
 /** An agent as `openclaw agents list` reports it. */
 export type AgentRow = { id: string; name?: string; workspace?: string };
+
+/** The command family for jobs: `cron` up to 2026.5, `automations` from 2026.6. */
+export type JobCommand = "automations" | "cron";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -117,6 +150,99 @@ function toJobRow(raw: unknown, index: number): JobRow | { skipped: string } {
 
 const UNKNOWN_COMMAND = /unknown (?:sub)?command|no such command/i;
 
+/** What a failed command said: its stderr, then the error message. */
+function errorOutput(error: unknown): string {
+  const { message, stderr } = error as { message?: unknown; stderr?: unknown };
+  return `${String(stderr ?? "")}\n${String(message ?? "")}`;
+}
+
+// -- Starting `openclaw` -----------------------------------------------------------------------
+
+/** How `openclaw` is started. */
+export type OpenClawCommand = {
+  /** The program to run. */
+  file: string;
+  /** Arguments that go before OpenClaw's own: the script, when node runs it directly. */
+  prefix: string[];
+  /** The arguments pass through `cmd.exe`, which ends a command line at its first line break. */
+  viaShell: boolean;
+};
+
+/** Refused instead of run: a line break would cut the command line short in `cmd.exe`. */
+export class ShimLineBreakError extends Error {
+  constructor() {
+    super("multi-line instructions cannot be passed through the Windows shim");
+    this.name = "ShimLineBreakError";
+  }
+}
+
+/** An environment variable by name in any case, as Windows looks them up. */
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === name);
+  return key === undefined ? undefined : env[key];
+}
+
+const isFile = (path: string): Promise<boolean> =>
+  stat(path).then(
+    (info) => info.isFile(),
+    () => false,
+  );
+
+// The line of an npm `cmd-shim` that starts the package: `"%dp0%\node_modules\...\x.mjs"`, or
+// `"%~dp0\..."` in older shims, the directory of the shim followed by the script's path.
+const SHIM_TARGET = /"%~?dp0%?\\([^"%]+?\.(?:c?js|mjs))"/i;
+
+/** The script an npm `.cmd` shim runs with node, when the shim names one that exists. */
+async function shimTarget(shim: string): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await readFile(shim, "utf8");
+  } catch {
+    return undefined;
+  }
+  const relative = SHIM_TARGET.exec(text)?.[1];
+  if (relative === undefined) return undefined;
+  const target = join(dirname(shim), ...relative.split("\\"));
+  return (await isFile(target)) ? target : undefined;
+}
+
+/**
+ * How to start `openclaw` with the `PATH` of `env`. Outside Windows, by name. On Windows the
+ * first `openclaw<ext>` on `PATH` (extensions from `PATHEXT`) decides: an `.exe` or `.com` runs
+ * as it is; an npm `.cmd` or `.bat` shim is replaced by this node running the script the shim
+ * names. Anything else, or nothing found, runs by name, through `cmd.exe` if it is a shim.
+ */
+export async function resolveOpenClawCommand(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): Promise<OpenClawCommand> {
+  const byName: OpenClawCommand = { file: "openclaw", prefix: [], viaShell: false };
+  if (platform !== "win32") return byName;
+  const throughShell: OpenClawCommand = { ...byName, viaShell: true };
+  const dirs = (envValue(env, "PATH") ?? "")
+    .split(";")
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, "$1"))
+    .filter((dir) => dir !== "");
+  const extensions = (envValue(env, "PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim().toLowerCase())
+    .filter((extension) => extension.startsWith("."));
+  for (const dir of dirs) {
+    for (const extension of extensions) {
+      const candidate = join(dir, `openclaw${extension}`);
+      if (!(await isFile(candidate))) continue;
+      if (extension === ".exe" || extension === ".com") {
+        return { file: candidate, prefix: [], viaShell: false };
+      }
+      if (extension !== ".cmd" && extension !== ".bat") return throughShell;
+      const target = await shimTarget(candidate);
+      if (target === undefined) return throughShell;
+      return { file: process.execPath, prefix: [target], viaShell: false };
+    }
+  }
+  return throughShell;
+}
+
 /**
  * Runs `openclaw` for one install. Every command runs with `OPENCLAW_STATE_DIR` and
  * `OPENCLAW_CONFIG_PATH` set to that install's state directory and config file, on top of
@@ -127,17 +253,44 @@ export class OpenClawCli {
   private readonly ctx: Ctx;
   private readonly stateDir: string;
   private readonly configFile: string;
+  private readonly platform: NodeJS.Platform;
+  /** Settled by the first job command; see `jobCommand`. */
+  private jobFamily: JobCommand | undefined;
+  /** Found by the first command; see `command`. */
+  private resolved: Promise<OpenClawCommand> | undefined;
 
-  constructor(ctx: Ctx, stateDir: string, configFile: string) {
+  constructor(
+    ctx: Ctx,
+    stateDir: string,
+    configFile: string,
+    options: { platform?: NodeJS.Platform } = {},
+  ) {
     this.ctx = ctx;
     this.stateDir = stateDir;
     this.configFile = configFile;
+    this.platform = options.platform ?? process.platform;
+  }
+
+  /** How `openclaw` is started (see `resolveOpenClawCommand`); found once and kept. */
+  command(): Promise<OpenClawCommand> {
+    this.resolved ??= resolveOpenClawCommand(this.ctx.env, this.platform);
+    return this.resolved;
+  }
+
+  /**
+   * Runs OpenClaw with `args`. Through the Windows shim, an argument with a line break is
+   * refused with a `ShimLineBreakError`, since `cmd.exe` would drop everything after it.
+   */
+  private async exec(args: readonly string[]): Promise<string> {
+    const command = await this.command();
+    if (command.viaShell && args.some((arg) => /[\r\n]/.test(arg))) throw new ShimLineBreakError();
+    const argv = [...command.prefix, ...args];
+    const { stdout } = await this.ctx.exec(command.file, argv, { env: this.env() });
+    return stdout;
   }
 
   private async run(args: readonly string[], json = true): Promise<string> {
-    const argv = json ? [...args, "--json"] : [...args];
-    const { stdout } = await this.ctx.exec("openclaw", argv, { env: this.env() });
-    return stdout;
+    return this.exec(json ? [...args, "--json"] : args);
   }
 
   private env(): NodeJS.ProcessEnv {
@@ -146,6 +299,34 @@ export class OpenClawCli {
       OPENCLAW_STATE_DIR: this.stateDir,
       OPENCLAW_CONFIG_PATH: this.configFile,
     };
+  }
+
+  /**
+   * Runs `automations list --all --json` to settle the job command family: `cron` when OpenClaw
+   * answers "Unknown command", otherwise `automations`. Returns the listing when it ran; throws
+   * when it failed for another reason.
+   */
+  private async probeJobCommand(): Promise<string | undefined> {
+    try {
+      const stdout = await this.run(["automations", "list", "--all"]);
+      this.jobFamily = "automations";
+      return stdout;
+    } catch (error) {
+      const unknown = /unknown command/i.test(errorOutput(error));
+      this.jobFamily = unknown ? "cron" : "automations";
+      if (!unknown) throw error;
+      return undefined;
+    }
+  }
+
+  /**
+   * The command family this OpenClaw has for jobs, found on first use and kept for the life of
+   * this object. A probe that fails for a reason other than an unknown command leaves it at
+   * `automations`.
+   */
+  async jobCommand(): Promise<JobCommand> {
+    if (this.jobFamily === undefined) await this.probeJobCommand().catch(() => undefined);
+    return this.jobFamily ?? "automations";
   }
 
   /** The agents OpenClaw knows. A row without an id is left out and logged. */
@@ -175,8 +356,13 @@ export class OpenClawCli {
    * why, naming the job; `warn` defaults to `ctx.logger`.
    */
   async automationsList(warn: (message: string) => void = this.ctx.logger): Promise<JobRow[]> {
-    const command = "automations list";
-    const json = parseJson(await this.run(["automations", "list", "--all"]), command);
+    // The probe is itself an `automations` listing: when it settles on that family, its output
+    // is the list.
+    const probed = this.jobFamily === undefined ? await this.probeJobCommand() : undefined;
+    const family = await this.jobCommand();
+    const command = `${family} list`;
+    const stdout = probed ?? (await this.run([family, "list", "--all"]));
+    const json = parseJson(stdout, command);
     const jobs: JobRow[] = [];
     rowsOf(json, ["jobs", "automations"], command).forEach((raw, index) => {
       const row = toJobRow(raw, index);
@@ -192,7 +378,7 @@ export class OpenClawCli {
 
   async setIdentity(
     agent: string,
-    identity: { name: string; emoji?: string; avatar?: string },
+    identity: { name: string; emoji?: string; avatar?: string; theme?: string },
   ): Promise<void> {
     await this.run([
       "agents",
@@ -203,37 +389,77 @@ export class OpenClawCli {
       identity.name,
       ...(identity.emoji === undefined ? [] : ["--emoji", identity.emoji]),
       ...(identity.avatar === undefined ? [] : ["--avatar", identity.avatar]),
+      ...(identity.theme === undefined ? [] : ["--theme", identity.theme]),
     ]);
   }
 
-  /** Adds a job; `args` are the flags after `automations add`. Returns the new job's id. */
-  async automationsAdd(args: string[]): Promise<{ id: string }> {
-    const command = "automations add";
-    const json = parseJson(await this.run(["automations", "add", ...args]), command);
+  /**
+   * Adds a job; `args` are the flags after `add`. With `disabled`, a `cron` job is created
+   * disabled (`--disabled`); an `automations` job cannot be, so the result's `disabled` says
+   * whether the job already is or the caller still has to disable it. Returns the new job's id.
+   *
+   * `--message` and its value go last, after `--disabled` and `--json`: should the command line
+   * ever be cut inside the message, every other flag has still been passed.
+   */
+  async automationsAdd(
+    args: string[],
+    opts: { disabled?: boolean } = {},
+  ): Promise<{ id: string; disabled: boolean }> {
+    const family = await this.jobCommand();
+    const disabled = family === "cron" && opts.disabled === true;
+    const command = `${family} add`;
+    const at = args.indexOf("--message");
+    const message = at === -1 ? [] : args.slice(at, at + 2);
+    const flags = at === -1 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+    const argv = [family, "add", ...flags, ...(disabled ? ["--disabled"] : []), "--json"];
+    const json = parseJson(await this.run([...argv, ...message], false), command);
     const record = isRecord(json) ? json : {};
     const nested = [record, record.job, record.automation].find(
       (candidate) => isRecord(candidate) && idOf(candidate.id) !== undefined,
     ) as Record<string, unknown> | undefined;
     const id = nested === undefined ? undefined : idOf(nested.id);
     if (id === undefined) throw new Error(`openclaw ${command} printed no job id`);
-    return { id };
+    return { id, disabled };
   }
 
+  /** `cron disable` takes no `--json`. */
   async automationsDisable(id: string): Promise<void> {
-    await this.run(["automations", "disable", id]);
+    if ((await this.jobCommand()) === "cron") await this.run(["cron", "disable", id], false);
+    else await this.run(["automations", "disable", id]);
+  }
+
+  async automationsRemove(id: string): Promise<void> {
+    const family = await this.jobCommand();
+    await this.run([family, family === "cron" ? "rm" : "remove", id]);
+  }
+
+  /**
+   * Whether the Gateway runs: `running: true`, or a `status` of `running` in any case. Throws
+   * when the command fails or prints no JSON.
+   */
+  async gatewayStatus(): Promise<{ running: boolean }> {
+    const json = parseJson(await this.run(["gateway", "status"]), "gateway status");
+    const record = isRecord(json) ? json : {};
+    const status = label(record.status)?.toLowerCase();
+    return { running: record.running === true || status === "running" };
   }
 
   /**
    * Sets a config value. `false` when this OpenClaw has no such command; other failures throw.
-   * Runs without `--json`, which `config set` may read as "parse the value as JSON5".
+   * Runs without `--json`, which `config set` may read as "parse the value as JSON5"; with
+   * `strictJson` the value is passed as JSON (`--strict-json`).
    */
-  async configSet(path: string, value: string): Promise<boolean> {
+  async configSet(
+    path: string,
+    value: string,
+    opts: { strictJson?: boolean } = {},
+  ): Promise<boolean> {
     try {
-      await this.run(["config", "set", path, value], false);
+      const flags = opts.strictJson === true ? ["--strict-json"] : [];
+      await this.run(["config", "set", path, value, ...flags], false);
       return true;
     } catch (error) {
-      const { message, stderr } = error as { message?: unknown; stderr?: unknown };
-      if (UNKNOWN_COMMAND.test(`${String(stderr ?? "")}\n${String(message ?? "")}`)) return false;
+      if (UNKNOWN_COMMAND.test(errorOutput(error))) return false;
       throw error;
     }
   }
@@ -244,8 +470,7 @@ export class OpenClawCli {
    */
   async version(): Promise<string | undefined> {
     try {
-      const { stdout } = await this.ctx.exec("openclaw", ["--version"], { env: this.env() });
-      const text = firstLine(stdout);
+      const text = firstLine(await this.run(["--version"], false));
       return /\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?/.exec(text)?.[0] ?? label(text);
     } catch {
       return undefined;
