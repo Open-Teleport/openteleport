@@ -470,7 +470,8 @@ export function writeOptsOf(opts: WriteFlags, onConflict: WriteOpts["onConflict"
 
 /**
  * Runs a write and, when an adapter refuses to replace something (`Refusing to replace ...`),
- * adds what the user can do instead.
+ * adds what the user can do instead. Updating in place is not offered: a folder that is not an
+ * earlier export is refused by an update too.
  */
 export async function withReplaceHint<T>(
   onConflict: WriteOpts["onConflict"],
@@ -481,11 +482,9 @@ export async function withReplaceHint<T>(
   } catch (error) {
     const refused = error instanceof Error && /^Refusing to replace /.test(error.message);
     if (onConflict === "replace" && refused) {
-      throw new Error(
-        `${error.message} Run without --replace to update it in place, or use --copy to ` +
-          "write next to it.",
-        { cause: error },
-      );
+      throw new Error(`${error.message} Use --copy, or point --target-dir at an empty folder.`, {
+        cause: error,
+      });
     }
     throw error;
   }

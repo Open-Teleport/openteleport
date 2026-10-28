@@ -311,7 +311,8 @@ async function claimTarget(
   if (!(await namesIn(wanted)).includes(MANIFEST_FILE)) {
     throw new Error(
       `${wanted} is not empty and holds no ${MANIFEST_FILE}, so it is not an agent folder ` +
-        "OpenTeleport wrote. Delete it yourself, or use --copy to write next to it.",
+        "OpenTeleport wrote. Use --copy to write next to it, or point --target-dir at an empty " +
+        "folder.",
     );
   }
   if (onConflict === "replace") {
@@ -384,9 +385,11 @@ export const folderAdapter: Adapter = {
     const prepared = prepareBundle(bundle, opts);
     const wanted = resolve(ctx.cwd, ctx.targetDir ?? join(ctx.cwd, slug(bundle.manifest.name)));
     const { target, warning } = await claimTarget(ctx, wanted, opts.onConflict, prepared);
-    await writeBundle(prepared, target, { asDirectory: true });
+    const { removed } = await writeBundle(prepared, target, { asDirectory: true });
 
     const warnings = warning === undefined ? [] : [warning];
+    // Updating an earlier export clears its layout; what this Bundle no longer has is named.
+    for (const path of removed) warnings.push(`removed stale ${path}`);
     if (prepared.routines.length > 0) warnings.push(ROUTINES_WARNING);
     return {
       outcome: "done",

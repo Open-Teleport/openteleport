@@ -303,6 +303,19 @@ describe("folder adapter: read", () => {
     expect(warnings).toEqual(["SOUL.md not found", "MEMORY.md not found"]);
   });
 
+  it("reads an agent folder that is a git repository with installed packages", async () => {
+    const dir = join(root, "ada");
+    await put(join(dir, "AGENTS.md"), "Be brief.\n");
+    await put(join(dir, ".git", "HEAD"), "ref: refs/heads/main\n");
+    await put(join(dir, "node_modules", "pkg", "index.js"));
+    await put(join(dir, ".env"), "KEY=value\n");
+
+    const { bundle } = await folderAdapter.read({ ...ctx, sourceDir: dir }, ".");
+
+    expect(bundle.instructions).toBe("Be brief.\n");
+    expect(bundle.unknownPaths).toEqual([".env", ".git", "node_modules"]);
+  });
+
   it("has no warnings for a complete agent", async () => {
     const { bundle, warnings } = await folderAdapter.read({ ...ctx, sourceDir: ADA_DIR }, ".");
     expect(bundle.manifest.id).toBe(ADA_ID);
@@ -575,6 +588,21 @@ describe("folder adapter: write", () => {
       expect(result.targetAgentId).toBe(target);
       expect(await text(join(target, "AGENTS.md"))).toBe("Fresh instructions.\n");
       expect(await text(join(target, "notes.txt"))).toBe("mine\n");
+      expect(await exists(join(target, "skills"))).toBe(false);
+    });
+
+    it("update names each part of the earlier export it removed", async () => {
+      const target = join(root, "out");
+      const source = await ada();
+      await folderAdapter.write({ ...ctx, targetDir: target }, source, WRITE);
+
+      const updated: Bundle = { ...source, skills: [], routines: [] };
+      const result = await folderAdapter.write({ ...ctx, targetDir: target }, updated, WRITE);
+
+      expect(result.items.warnings).toEqual([
+        "removed stale routines/morning-digest.json",
+        "removed stale skills/web-brief",
+      ]);
       expect(await exists(join(target, "skills"))).toBe(false);
     });
 

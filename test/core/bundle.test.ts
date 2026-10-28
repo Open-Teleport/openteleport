@@ -361,6 +361,43 @@ describe("writeBundle into a directory", () => {
     expect(reread.unknownPaths).toEqual(["notes.txt", "scratch/todo.txt"]);
   });
 
+  it("names each entry of the previous export that the new Bundle no longer has", async () => {
+    const target = join(tmp, "ada");
+    const ada: Bundle = {
+      ...(await readBundle(ADA_DIR)),
+      files: [
+        { path: "data/table.csv", bytes: bytes("a,b\n") },
+        { path: "readme.txt", bytes: bytes("hi\n") },
+      ],
+    };
+    expect(await writeBundle(ada, target, { asDirectory: true })).toEqual({ removed: [] });
+
+    const slimmer: Bundle = {
+      ...ada,
+      persona: undefined,
+      skills: [],
+      routines: [],
+      notes: ada.notes.filter((note) => note.name === "MEMORY-prose"),
+      files: [{ path: "readme.txt", bytes: bytes("hi again\n") }],
+      avatar: undefined,
+    };
+    const { removed } = await writeBundle(slimmer, target, { asDirectory: true });
+
+    // What is written again (AGENTS.md, MEMORY.md, files/readme.txt) is not named.
+    expect(removed).toEqual([
+      "SOUL.md",
+      "avatar.png",
+      "files/data",
+      "memory/2026-10-20.md",
+      "routines/morning-digest.json",
+      "skills/web-brief",
+    ]);
+  });
+
+  it("removes nothing from a zip target", async () => {
+    expect(await writeBundle(sampleBundle(), join(tmp, "ada.jetpack"))).toEqual({ removed: [] });
+  });
+
   it("leaves a previous export alone when the new Bundle is invalid", async () => {
     const target = join(tmp, "ada");
     await writeBundle(sampleBundle(), target, { asDirectory: true });
@@ -453,14 +490,53 @@ describe("forbidden and unsafe paths", () => {
     await expect(readBundle(archive)).rejects.toThrow(`forbidden path: ${path}`);
   });
 
-  it("rejects a forbidden path in a directory before reading the rest", async () => {
+  it("reads a folder that is a git repository, reporting what lies outside the layout", async () => {
     const folder = join(tmp, "agent");
-    await mkdir(join(folder, "node_modules", "pkg"), { recursive: true });
-    await writeFile(join(folder, "node_modules", "pkg", "index.js"), "x");
+    const put = async (path: string, content = "x"): Promise<void> => {
+      await mkdir(join(folder, ...path.split("/").slice(0, -1)), { recursive: true });
+      await writeFile(join(folder, ...path.split("/")), content);
+    };
+    await put(".git/HEAD", "ref: refs/heads/main\n");
+    await put(".git/refs/heads/main", "0123456789abcdef\n");
+    await put("node_modules/pkg/index.js");
+    await put(".env", "KEY=value\n");
+    await put(".github/workflows/ci.yml", "on: push\n");
+    await put("backup.zip");
+    await put("docs/guide.md", "Read me.\n");
+    await put("docs/.DS_Store");
+    await put("docs/drafts/old.tgz");
+    await put("AGENTS.md", "Be brief.");
+
+    const bundle = await readBundle(folder, { requireManifest: false });
+
+    expect(bundle.instructions).toBe("Be brief.");
+    // Forbidden and dot entries are named once, never descended into.
+    expect(bundle.unknownPaths).toEqual([
+      ".env",
+      ".git",
+      ".github",
+      "backup.zip",
+      "docs/.DS_Store",
+      "docs/drafts/old.tgz",
+      "docs/guide.md",
+      "node_modules",
+    ]);
+  });
+
+  it.each([
+    ["files/.env", "files/.env"],
+    ["files/node_modules/pkg/index.js", "files/node_modules"],
+    ["skills/web-brief/.env.local", "skills/web-brief/.env.local"],
+    ["memory/.git/HEAD", "memory/.git"],
+    ["routines/backup.zip", "routines/backup.zip"],
+  ])("still refuses %s inside the layout of a folder", async (path, forbidden) => {
+    const folder = join(tmp, "agent");
+    await mkdir(join(folder, ...path.split("/").slice(0, -1)), { recursive: true });
+    await writeFile(join(folder, ...path.split("/")), "x");
     await writeFile(join(folder, "AGENTS.md"), "Be brief.");
 
     await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(
-      /forbidden path: node_modules/,
+      `forbidden path: ${forbidden}`,
     );
   });
 
@@ -853,11 +929,28 @@ describe("size limits", () => {
       );
     });
 
-    it("rejects a folder whose entries add up to too much, judging by size alone", async () => {
+    const grow = async (path: string, size: number): Promise<void> => {
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, "");
+      await truncate(path, size);
+    };
+
+    it("does not count paths outside the layout toward the size limits", async () => {
       const folder = await agentFolder();
-      const junk = join(folder, "junk.bin");
-      await writeFile(junk, "");
-      await truncate(junk, MAX_ARCHIVE_BYTES + 1);
+      await grow(join(folder, "junk.bin"), MAX_ARCHIVE_BYTES + 1);
+      await grow(join(folder, "memory", "call.wav"), MAX_ARCHIVE_BYTES + 1);
+
+      const bundle = await readBundle(folder, { requireManifest: false });
+
+      expect(bundle.unknownPaths).toEqual(["junk.bin", "memory/call.wav"]);
+    });
+
+    it("rejects a folder whose layout entries add up to too much, judging by size alone", async () => {
+      const folder = await agentFolder();
+      await grow(join(folder, "files", "big.bin"), MAX_FILES_BYTES);
+      for (let n = 1; n <= 6; n += 1) {
+        await grow(join(folder, "memory", `note-${n}.md`), MAX_TEXT_ENTRY_BYTES);
+      }
 
       await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(
         /entries add up to \d+ bytes/,
@@ -1312,19 +1405,52 @@ describe("writing entries", () => {
 });
 
 describe("special directory entries", () => {
-  it("rejects a symbolic link in a folder", async (context) => {
+  it("rejects a symbolic link inside the layout of a folder", async (context) => {
     const folder = join(tmp, "agent");
-    await mkdir(folder);
+    await mkdir(join(folder, "memory"), { recursive: true });
     await writeFile(join(folder, "AGENTS.md"), "Be brief.");
     await writeFile(join(tmp, "outside.md"), "secret");
     try {
-      await symlink(join(tmp, "outside.md"), join(folder, "link.md"), "file");
+      await symlink(join(tmp, "outside.md"), join(folder, "memory", "link.md"), "file");
     } catch {
       // Creating symbolic links needs a privilege that Windows accounts often lack.
       context.skip();
     }
 
     await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(/symbolic link/);
+  });
+
+  it("rejects a linked skill folder", async (context) => {
+    const folder = join(tmp, "agent");
+    await mkdir(join(folder, "skills"), { recursive: true });
+    await writeFile(join(folder, "AGENTS.md"), "Be brief.");
+    await mkdir(join(tmp, "elsewhere"));
+    await writeFile(join(tmp, "elsewhere", "SKILL.md"), "A skill.");
+    try {
+      // A junction needs no privilege on Windows.
+      await symlink(join(tmp, "elsewhere"), join(folder, "skills", "web-brief"), "junction");
+    } catch {
+      context.skip();
+    }
+
+    await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(/symbolic link/);
+  });
+
+  it("names a link outside the layout without following it", async (context) => {
+    const folder = join(tmp, "agent");
+    await mkdir(folder);
+    await writeFile(join(folder, "AGENTS.md"), "Be brief.");
+    await mkdir(join(tmp, "elsewhere"));
+    await writeFile(join(tmp, "elsewhere", "SKILL.md"), "Not ours.");
+    try {
+      await symlink(join(tmp, "elsewhere"), join(folder, "shared"), "junction");
+    } catch {
+      context.skip();
+    }
+
+    const bundle = await readBundle(folder, { requireManifest: false });
+
+    expect(bundle.unknownPaths).toEqual(["shared"]);
   });
 
   it("ignores directory entries inside a zip", async () => {

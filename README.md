@@ -62,7 +62,7 @@ Exit codes: `0` success, `1` an invalid bundle, a secret found or another failur
 
 | Adapter | Read | Write | Notes |
 | --- | --- | --- | --- |
-| `folder` | yes | yes | Any folder with an `AGENTS.md`, with or without `jetpack.json`, in the layout below. That covers every tool that works from `AGENTS.md` and `skills/`, such as Codex, Cursor, Gemini CLI and Cline. Routines are kept in the folder; nothing runs them from there. |
+| `folder` | yes | yes | Any folder with an `AGENTS.md`, with or without `jetpack.json`, in the layout below. That covers every tool that works from `AGENTS.md` and `skills/`, such as Codex, Cursor, Gemini CLI and Cline. A git repository or project folder is fine: only the layout is read, and everything else (`.git`, `node_modules`, `src/`...) is left out and listed by `inspect`. Routines are kept in the folder; nothing runs them from there. |
 | `openclaw` | yes | yes | The state directory (`~/.openclaw`) and the `openclaw` CLI: agent, identity, workspace files, memory, skills and model. Routines become `openclaw cron` jobs (`openclaw automations` from 2026.6), which go through the Gateway. `files/` is not carried. |
 | `claude-code` | yes | yes | Subagents in `.claude/agents/<name>.md` (or `~/.claude/agents/`), the project's skills in `.claude/skills/` and its memory in `~/.claude/projects/<project>/memory/`. Routines (cloud tasks) and avatars are skipped, and the report says so. |
 
@@ -108,7 +108,7 @@ For an app in Docker or on a network drive, point `--source-dir` or `--target-di
 - **Secrets block exports.** Before anything is written, the bundle is scanned for credentials of known shapes (OpenAI, Anthropic, GitHub, Slack, AWS and Google keys, JWTs, bearer tokens, private keys). A finding stops the command with exit code 1 and names the file and line, never the secret. `.env*` files, `.git`, `node_modules` and nested archives are never packed. Run `validate` on a file you were sent.
 - **Routines land disabled,** so the same task never runs in two apps without you knowing. `--enable-routines` keeps them as they were.
 - **The source is never modified.** `move` reads a snapshot and writes a copy; nothing is deleted from the app it came from.
-- **Nothing is overwritten by surprise.** An agent of the same name in the target is updated in place only when it is the same agent (same id); otherwise the new one is written next to it as `<name>-2`. `--copy` always writes next to it. `--replace` overwrites it after asking for confirmation, or with `--yes` when there is no terminal to ask in.
+- **Nothing is overwritten by surprise.** An agent of the same name in the target is updated in place only when it is the same agent (same id); otherwise the new one is written next to it as `<name>-2`. `--copy` always writes next to it. `--replace` overwrites it after asking for confirmation, or with `--yes` when there is no terminal to ask in. A `folder` target that already holds files but no earlier export (no `jetpack.json`) is never written into: use `--copy`, or point `--target-dir` at an empty folder. Updating an earlier export replaces its layout (`AGENTS.md`, `skills/`, `memory/`...) and the report names every part it removed; other files in the folder stay.
 - **Workspace files stay behind** unless you pass `--include-files`, and then only up to 100 MB.
 
 ## Contributing an adapter

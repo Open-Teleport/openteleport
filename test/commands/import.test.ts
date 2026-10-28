@@ -189,7 +189,8 @@ describe("import", () => {
     ]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("it is the working folder");
-    expect(result.stderr).toContain("Run without --replace to update it in place");
+    expect(result.stderr).toContain("Use --copy, or point --target-dir at an empty folder.");
+    expect(result.stderr).not.toContain("Run without --replace");
   });
 
   it("exits 2 for a bundle that does not exist", async () => {

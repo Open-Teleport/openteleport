@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import { ZodError } from "zod";
@@ -463,42 +463,77 @@ const toBytes = (buffer: Buffer): Uint8Array =>
 
 type DiskFile = Listing & { absolute: string };
 
+/** The top-level names of the layout: its files, the avatar and its directories. */
+const isLayoutName = (name: string): boolean =>
+  LAYOUT_NAMES.has(name) || name === MANIFEST_PATH || AVATAR_PATTERN.test(name);
+
+/** A name outside the layout that is named but never descended into. */
+const isHiddenName = (name: string): boolean => name.startsWith(".") || isForbiddenPath(name);
+
+type DirentLike = { name: string; isDirectory(): boolean; isFile(): boolean };
+
 /**
- * Lists every file below `root` with `/`-separated relative paths. A forbidden path stops the
- * walk at once, so a stray `node_modules` is never descended into.
+ * Lists the files of an agent folder with `/`-separated relative paths. Below a top-level name
+ * of the layout (`AGENTS.md`, `skills/`, `files/`...) every file is listed, and a forbidden path,
+ * a link or a special file is an error. Anything else is outside the layout: it is only named in
+ * `outside`, never read, so that an agent kept in a git repository or a project can be read. A
+ * forbidden name, a name that starts with a dot and a link are named once there and never
+ * descended into, so a `.git` or a `node_modules` is not walked.
  */
-async function listDirectory(root: string): Promise<DiskFile[]> {
-  const found: DiskFile[] = [];
-  async function walk(directory: string, prefix: string): Promise<void> {
-    for (const dirent of await readdir(directory, { withFileTypes: true })) {
-      const path = prefix === "" ? dirent.name : `${prefix}/${dirent.name}`;
-      if (isForbiddenPath(path)) throw new Error(`forbidden path: ${path}`);
-      const absolute = join(directory, dirent.name);
-      if (dirent.isDirectory()) {
-        await walk(absolute, path);
-      } else if (dirent.isFile()) {
-        found.push({ path, absolute, size: (await stat(absolute)).size });
-      } else {
-        throw new Error(`unsupported file type (symbolic link or special file): ${path}`);
+async function listDirectory(root: string): Promise<{ layout: DiskFile[]; outside: string[] }> {
+  const layout: DiskFile[] = [];
+  const outside: string[] = [];
+
+  async function visitLayout(absolute: string, path: string, dirent: DirentLike): Promise<void> {
+    if (isForbiddenPath(path)) throw new Error(`forbidden path: ${path}`);
+    if (dirent.isDirectory()) {
+      for (const child of await readdir(absolute, { withFileTypes: true })) {
+        await visitLayout(join(absolute, child.name), `${path}/${child.name}`, child);
       }
+    } else if (dirent.isFile()) {
+      layout.push({ path, absolute, size: (await stat(absolute)).size });
+    } else {
+      throw new Error(`unsupported file type (symbolic link or special file): ${path}`);
     }
   }
-  await walk(root, "");
-  return found;
+
+  async function visitOutside(absolute: string, path: string, dirent: DirentLike): Promise<void> {
+    // Dirent types come from lstat, so a link is never a directory here.
+    if (isHiddenName(dirent.name) || !dirent.isDirectory()) {
+      outside.push(path);
+      return;
+    }
+    for (const child of await readdir(absolute, { withFileTypes: true })) {
+      await visitOutside(join(absolute, child.name), `${path}/${child.name}`, child);
+    }
+  }
+
+  for (const dirent of await readdir(root, { withFileTypes: true })) {
+    const visit = isLayoutName(dirent.name) ? visitLayout : visitOutside;
+    await visit(join(root, dirent.name), dirent.name, dirent);
+  }
+  return { layout, outside };
 }
 
 /** Content of a path outside the layout: it is only reported, so it is not read or inflated. */
 const unreadBytes = (): Uint8Array => new Uint8Array(0);
 
-async function readDirectoryEntries(root: string): Promise<FileEntry[]> {
-  const found = await listDirectory(root);
-  validateListing(found);
+/**
+ * The entries of an agent folder's layout, read once their paths and sizes pass the limits, and
+ * the paths outside the layout. Only a path the layout gives a meaning to counts toward the
+ * sizes: an unknown file under `memory/` or `skills/` is listed, but neither read nor counted.
+ */
+async function readDirectoryEntries(
+  root: string,
+): Promise<{ entries: FileEntry[]; outside: string[] }> {
+  const { layout, outside } = await listDirectory(root);
+  const known = (path: string): boolean => classify(path).kind !== "unknown";
+  validateListing(layout.map(({ path, size }) => ({ path, size: known(path) ? size : 0 })));
   const entries: FileEntry[] = [];
-  for (const { path, absolute } of found) {
-    const known = classify(path).kind !== "unknown";
-    entries.push({ path, bytes: known ? toBytes(await readFile(absolute)) : unreadBytes() });
+  for (const { path, absolute } of layout) {
+    entries.push({ path, bytes: known(path) ? toBytes(await readFile(absolute)) : unreadBytes() });
   }
-  return entries;
+  return { entries, outside };
 }
 
 function unzip<T>(source: string, run: () => T): T {
@@ -601,19 +636,32 @@ async function readZipEntries(source: string, archiveBytes: number): Promise<Fil
  *
  * Without `jetpack.json` and with `requireManifest: false` the manifest is synthesized from the
  * name of `source` (without a trailing `.jetpack`), with an empty `id` for the caller to fill in.
+ *
+ * In an archive a forbidden path (`.git`, `node_modules`, `.env*`, a nested archive) anywhere is
+ * an error. A directory is often a git repository or a project too, so there only the layout is
+ * held to that rule; what lies outside it is listed in `unknownPaths` (see `listDirectory`).
  */
 export async function readBundle(source: string, opts: ReadBundleOptions = {}): Promise<Bundle> {
   const info = await stat(source);
-  const entries = info.isDirectory()
-    ? await readDirectoryEntries(source)
-    : await readZipEntries(source, info.size);
-  return entriesToBundle(entries, {
-    requireManifest: opts.requireManifest,
-    fallbackName: basename(resolve(source)).replace(/\.jetpack$/i, ""),
-  });
+  const toBundle = (entries: FileEntry[]): Bundle =>
+    entriesToBundle(entries, {
+      requireManifest: opts.requireManifest,
+      fallbackName: basename(resolve(source)).replace(/\.jetpack$/i, ""),
+    });
+  if (!info.isDirectory()) return toBundle(await readZipEntries(source, info.size));
+
+  const { entries, outside } = await readDirectoryEntries(source);
+  const bundle = toBundle(entries);
+  bundle.unknownPaths = [...bundle.unknownPaths, ...outside].sort(byCodeUnit);
+  return bundle;
 }
 
-/** What an export puts at the top of a directory; the rest of a directory is not ours. */
+// Plain code-unit order, so that the result does not depend on the locale.
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** What an export puts at the top of a directory besides `jetpack.json` and the avatar. */
 const LAYOUT_NAMES: ReadonlySet<string> = new Set([
   INSTRUCTIONS_PATH,
   PERSONA_PATH,
@@ -625,53 +673,92 @@ const LAYOUT_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * What a previous export holds under the top-level names `layout` and `entries` do not write
+ * again, collapsed to the highest path that goes: `skills/web-brief` for a whole skill. A
+ * directory of the layout itself is never named, only what goes from inside it.
+ */
+async function staleEntries(
+  directory: string,
+  layout: readonly string[],
+  entries: readonly FileEntry[],
+): Promise<string[]> {
+  // Every path written, and every directory on the way to one.
+  const written = new Set<string>();
+  for (const { path } of entries) {
+    const segments = path.split("/");
+    for (let n = 1; n <= segments.length; n += 1) written.add(segments.slice(0, n).join("/"));
+  }
+  const stale: string[] = [];
+  async function collect(absolute: string, prefix: string): Promise<void> {
+    // Dirent types come from lstat: a link is named, never followed.
+    for (const dirent of await readdir(absolute, { withFileTypes: true })) {
+      const path = `${prefix}/${dirent.name}`;
+      if (!written.has(path)) stale.push(path);
+      else if (dirent.isDirectory()) await collect(join(absolute, dirent.name), path);
+    }
+  }
+  for (const name of layout) {
+    const absolute = join(directory, name);
+    if ((await lstat(absolute)).isDirectory()) await collect(absolute, name);
+    else if (!written.has(name)) stale.push(name);
+  }
+  return stale.sort(byCodeUnit);
+}
+
+/**
  * Makes room for an export. A missing or empty directory needs nothing. A directory with a
  * `jetpack.json` is a previous export: the parts of the layout are removed so that nothing the
  * new Bundle dropped lingers, and every other file stays. Any other directory is refused.
+ * Returns what was removed and is not written again (see `staleEntries`).
  */
-async function prepareDirectory(directory: string): Promise<void> {
+async function prepareDirectory(
+  directory: string,
+  entries: readonly FileEntry[],
+): Promise<string[]> {
   let names: string[];
   try {
     names = await readdir(directory);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  if (names.length === 0) return;
+  if (names.length === 0) return [];
   if (!names.includes(MANIFEST_PATH)) {
     throw new Error(
       `${directory} is not empty and holds no ${MANIFEST_PATH}, so it is not a previous export`,
     );
   }
-  for (const name of names) {
-    if (LAYOUT_NAMES.has(name) || AVATAR_PATTERN.test(name)) {
-      await rm(join(directory, name), { recursive: true, force: true });
-    }
-  }
+  const layout = names.filter((name) => LAYOUT_NAMES.has(name) || AVATAR_PATTERN.test(name));
+  const removed = await staleEntries(directory, layout, entries);
+  for (const name of layout) await rm(join(directory, name), { recursive: true, force: true });
+  return removed;
 }
 
 /**
  * Writes a Bundle as a zip archive at `target`, or with `asDirectory` as a directory tree. A
  * directory that already has content is only written into when it holds a `jetpack.json`; the
- * layout of that earlier export is replaced and any other file in it is left alone.
+ * layout of that earlier export is replaced and any other file in it is left alone. `removed`
+ * names, with `/` separators, what that earlier export held and the new one does not (`SOUL.md`,
+ * `skills/web-brief`, `memory/2026-10-20.md`...); it is empty for an archive.
  */
 export async function writeBundle(
   bundle: Bundle,
   target: string,
   opts: WriteBundleOptions = {},
-): Promise<void> {
+): Promise<{ removed: string[] }> {
   const entries = bundleToEntries(bundle);
 
   if (!opts.asDirectory) {
     const files = Object.fromEntries(entries.map(({ path, bytes }) => [path, bytes]));
     await writeFile(target, zipSync(files));
-    return;
+    return { removed: [] };
   }
 
-  await prepareDirectory(target);
+  const removed = await prepareDirectory(target, entries);
   for (const { path, bytes } of entries) {
     const file = join(target, ...path.split("/"));
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, bytes);
   }
+  return { removed };
 }

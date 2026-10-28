@@ -63,6 +63,33 @@ describe("export", () => {
     expect(result.stderr).toBe("");
   });
 
+  it("exports an agent folder that is a git repository, leaving .git and .env behind", async () => {
+    const ada = join(box.cwd, "ada");
+    await mkdir(join(ada, ".git", "refs"), { recursive: true });
+    await writeFile(join(ada, ".git", "HEAD"), "ref: refs/heads/main\n");
+    await mkdir(join(ada, "node_modules", "pkg"), { recursive: true });
+    await writeFile(join(ada, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
+    await writeFile(join(ada, ".env"), `ANTHROPIC_API_KEY=${FAKE_KEY}\n`);
+    await writeFile(join(ada, "AGENTS.md"), "Be brief.\n");
+
+    const result = await run(box, [
+      "export",
+      "--from",
+      "folder",
+      "--source-dir",
+      "ada",
+      "--agent",
+      ".",
+      "--out",
+      "ada.jetpack",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const bundle = await readBundle(join(box.cwd, "ada.jetpack"));
+    expect(bundle.instructions).toBe("Be brief.\n");
+    expect(bundle.unknownPaths).toEqual([]);
+  });
+
   it("keeps the id of an agent across exports", async () => {
     await run(box, ["export", "--from", "memory", "--agent", "ada", "--out", "one.jetpack"]);
     await run(box, ["export", "--from", "memory", "--agent", "ada", "--out", "two.jetpack"]);
