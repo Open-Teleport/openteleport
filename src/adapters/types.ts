@@ -76,6 +76,12 @@ export type Adapter = {
    * `detect` does not find ends the command with exit code 3. A source is always checked.
    */
   createsOnWrite?: boolean;
+  /**
+   * `true`: `write` never finishes the move itself. It prepares a file or a folder and returns
+   * `outcome: "handoff"` with the one step left to the user, so the wizard says so before it asks
+   * for a go-ahead. Left out or `false`, a `write` that succeeds is `done`.
+   */
+  handoff?: boolean;
   detect(ctx: Ctx): Promise<{ found: boolean; location?: string; version?: string; hint?: string }>;
   list(ctx: Ctx): Promise<AgentRef[]>;
   /** Never modifies the source. */

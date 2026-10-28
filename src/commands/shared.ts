@@ -385,9 +385,13 @@ class CancelledError extends Error {
   }
 }
 
+/** True when both ends, stdin and stdout, are a terminal. */
+export const hasTerminal = (): boolean =>
+  process.stdin.isTTY === true && process.stdout.isTTY === true;
+
 /** Prompts only when both ends are a terminal, and never under `--json`, which is for scripts. */
 export function isInteractive(opts: CommonOptions): boolean {
-  return opts.json !== true && process.stdin.isTTY === true && process.stdout.isTTY === true;
+  return opts.json !== true && hasTerminal();
 }
 
 const describeAgent = ({ id, name }: AgentRef): string =>
