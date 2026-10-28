@@ -207,24 +207,47 @@ async function isFree(path: string): Promise<boolean> {
   return info.isDirectory() && (await namesIn(path)).length === 0;
 }
 
+/** The first free `<wanted>-2`, `<wanted>-3`... */
+async function freeSibling(wanted: string): Promise<string> {
+  for (let n = 2; ; n += 1) {
+    const candidate = `${wanted}-${n}`;
+    if (await isFree(candidate)) return candidate;
+  }
+}
+
+/** The `id` in the `jetpack.json` of `folder`; `undefined` when none can be read. */
+async function manifestId(folder: string): Promise<string | undefined> {
+  try {
+    const manifest: unknown = JSON.parse(await readFile(join(folder, MANIFEST_FILE), "utf8"));
+    if (
+      typeof manifest === "object" &&
+      manifest !== null &&
+      "id" in manifest &&
+      typeof manifest.id === "string" &&
+      manifest.id !== ""
+    ) {
+      return manifest.id;
+    }
+  } catch {
+    // Without a readable id the folder cannot be shown to hold this agent: it is not updated.
+  }
+  return undefined;
+}
+
 /**
  * Settles where the agent goes when `wanted` is already taken, and makes the place ready.
- * Nothing is removed before the Bundle is known to be writable.
+ * `update` writes in place only over this very agent, the one with the Bundle's id; another
+ * agent of the same name keeps its folder and this one goes to the first free `-2`, `-3`...,
+ * with a warning that says why. Nothing is removed before the Bundle is known to be writable.
  */
 async function claimTarget(
   ctx: Ctx,
   wanted: string,
   onConflict: WriteOpts["onConflict"],
   bundle: Bundle,
-): Promise<string> {
-  if (await isFree(wanted)) return wanted;
-
-  if (onConflict === "copy") {
-    for (let n = 2; ; n += 1) {
-      const candidate = `${wanted}-${n}`;
-      if (await isFree(candidate)) return candidate;
-    }
-  }
+): Promise<{ target: string; warning?: string }> {
+  if (await isFree(wanted)) return { target: wanted };
+  if (onConflict === "copy") return { target: await freeSibling(wanted) };
 
   const info = await statOrUndefined(wanted);
   if (!info?.isDirectory()) throw new Error(`${wanted} exists and is not a folder`);
@@ -242,8 +265,17 @@ async function claimTarget(
   if (onConflict === "replace") {
     bundleToEntries(bundle); // throws for a Bundle that cannot be written, before anything is lost
     await rm(wanted, { recursive: true, force: true });
+    return { target: wanted };
   }
-  return wanted;
+
+  const id = await manifestId(wanted);
+  if (id === bundle.manifest.id) return { target: wanted };
+  const target = await freeSibling(wanted);
+  const whose = id === undefined ? "no readable id" : `id ${id}`;
+  return {
+    target,
+    warning: `${wanted} already holds a different agent (${whose}); written as ${target}`,
+  };
 }
 
 // -- The adapter ----------------------------------------------------------------------------
@@ -296,17 +328,15 @@ export const folderAdapter: Adapter = {
   async write(ctx, bundle, opts): Promise<WriteResult> {
     const prepared = prepareBundle(bundle, opts);
     const wanted = resolve(ctx.cwd, ctx.targetDir ?? join(ctx.cwd, slug(bundle.manifest.name)));
-    const target = await claimTarget(ctx, wanted, opts.onConflict, prepared);
+    const { target, warning } = await claimTarget(ctx, wanted, opts.onConflict, prepared);
     await writeBundle(prepared, target, { asDirectory: true });
 
+    const warnings = warning === undefined ? [] : [warning];
+    if (prepared.routines.length > 0) warnings.push(ROUTINES_WARNING);
     return {
       outcome: "done",
       targetAgentId: target,
-      items: {
-        approximated: [],
-        skipped: [],
-        warnings: prepared.routines.length > 0 ? [ROUTINES_WARNING] : [],
-      },
+      items: { approximated: [], skipped: [], warnings },
     };
   },
 };

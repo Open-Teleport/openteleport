@@ -36,6 +36,8 @@ const LINKS_WORK = canLink();
 const ADA_DIR = fileURLToPath(new URL("../fixtures/jetpack/ada", import.meta.url));
 const NO_MANIFEST_DIR = fileURLToPath(new URL("../fixtures/folder/no-manifest", import.meta.url));
 const ADA_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2T";
+/** Another agent that is also called Ada. */
+const OTHER_ID = "01J9ZT3Z9K8QGQ2M6Q4Y3V6B2V";
 const ROUTINES_WARNING = "routines are stored in the folder; no app runs them from here yet";
 
 const encoder = new TextEncoder();
@@ -564,6 +566,36 @@ describe("folder adapter: write", () => {
       expect(await text(join(target, "AGENTS.md"))).toBe("Fresh instructions.\n");
       expect(await text(join(target, "notes.txt"))).toBe("mine\n");
       expect(await exists(join(target, "skills"))).toBe(false);
+    });
+
+    it("update writes another agent of the same name next to it as -2, saying why", async () => {
+      const source = await ada();
+      const other: Bundle = { ...source, manifest: { ...source.manifest, id: OTHER_ID } };
+      const first = await folderAdapter.write(ctx, source, WRITE);
+      const second = await folderAdapter.write(ctx, other, WRITE);
+
+      const [taken, copy] = [join(ctx.cwd, "ada"), join(ctx.cwd, "ada-2")];
+      expect(first.targetAgentId).toBe(taken);
+      expect(second.targetAgentId).toBe(copy);
+      expect(second.items.warnings).toEqual([
+        `${taken} already holds a different agent (id ${ADA_ID}); written as ${copy}`,
+        ROUTINES_WARNING,
+      ]);
+      expect(JSON.parse(await text(join(taken, "jetpack.json"))).id).toBe(ADA_ID);
+      expect(JSON.parse(await text(join(copy, "jetpack.json"))).id).toBe(OTHER_ID);
+    });
+
+    it("update counts an earlier export without a readable id as a different agent", async () => {
+      const target = join(root, "out");
+      await put(join(target, "jetpack.json"), "{ not json\n");
+      await put(join(target, "AGENTS.md"), "mine\n");
+      const result = await folderAdapter.write({ ...ctx, targetDir: target }, await ada(), WRITE);
+
+      expect(result.targetAgentId).toBe(`${target}-2`);
+      expect(result.items.warnings[0]).toBe(
+        `${target} already holds a different agent (no readable id); written as ${target}-2`,
+      );
+      expect(await text(join(target, "AGENTS.md"))).toBe("mine\n");
     });
 
     it("update refuses a folder that is not an earlier export and points to --copy", async () => {
