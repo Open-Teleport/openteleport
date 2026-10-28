@@ -25,11 +25,17 @@ export const DEFAULT_PROFILE = "default";
 const nonBlank = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value;
 
+/** `~` alone or followed by a separator stands for the home directory (`~other` does not). */
+function expandHome(path: string, home: string): string {
+  return /^~(?=$|[\\/])/.test(path) ? join(home, path.slice(1)) : path;
+}
+
 /**
  * The Hermes home (`HERMES_HOME`): `sourceDir`, else `targetDir`, else `HERMES_HOME`, else
  * `%LOCALAPPDATA%\hermes` on Windows (`<home>\AppData\Local\hermes` without `LOCALAPPDATA`) and
- * `<home>/.hermes` elsewhere. A blank variable counts as unset, as it does for Hermes. The
- * result is absolute, against `ctx.cwd`.
+ * `<home>/.hermes` elsewhere. A blank variable counts as unset, as it does for Hermes. A leading
+ * `~` is expanded to `ctx.home`; `$VAR` is not expanded. The result is absolute, against
+ * `ctx.cwd`.
  */
 export function hermesHome(ctx: Ctx, platform: NodeJS.Platform = process.platform): string {
   const fallback =
@@ -37,7 +43,7 @@ export function hermesHome(ctx: Ctx, platform: NodeJS.Platform = process.platfor
       ? join(nonBlank(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local"), "hermes")
       : join(ctx.home, ".hermes");
   const home = ctx.sourceDir ?? ctx.targetDir ?? nonBlank(ctx.env.HERMES_HOME) ?? fallback;
-  return resolve(ctx.cwd, home);
+  return resolve(ctx.cwd, expandHome(home, ctx.home));
 }
 
 /**

@@ -88,6 +88,36 @@ describe("hermesHome", () => {
     const ctx = ctxOf({ sourceDir: "relative/hermes" });
     expect(hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "relative/hermes"));
   });
+
+  describe("a leading ~", () => {
+    it("stands for the home directory, alone or followed by a separator", () => {
+      const ctx = ctxOf();
+      const at = (value: string): string =>
+        hermesHome({ ...ctx, env: { HERMES_HOME: value } }, "linux");
+      expect(at("~")).toBe(ctx.home);
+      expect(at("~/x")).toBe(join(ctx.home, "x"));
+      expect(at("~\\x")).toBe(resolve(ctx.cwd, join(ctx.home, "\\x")));
+    });
+
+    it("is expanded in --source-dir and --target-dir as well", () => {
+      const ctx = ctxOf();
+      expect(hermesHome({ ...ctx, sourceDir: "~/source" }, "linux")).toBe(join(ctx.home, "source"));
+      expect(hermesHome({ ...ctx, targetDir: "~/target" }, "linux")).toBe(join(ctx.home, "target"));
+    });
+
+    it("is left alone in front of a name, and in the middle of a path", () => {
+      const ctx = ctxOf();
+      const at = (value: string): string =>
+        hermesHome({ ...ctx, env: { HERMES_HOME: value } }, "linux");
+      expect(at("~other")).toBe(resolve(ctx.cwd, "~other"));
+      expect(at("a/~/b")).toBe(resolve(ctx.cwd, "a/~/b"));
+    });
+
+    it("does not expand $VAR", () => {
+      const ctx = ctxOf({ env: { HERMES_HOME: "$HOME/hermes", HOME: join(root, "elsewhere") } });
+      expect(hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "$HOME/hermes"));
+    });
+  });
 });
 
 describe("profileDir", () => {
