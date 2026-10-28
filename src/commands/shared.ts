@@ -11,7 +11,7 @@ import { UnknownAdapterError, listAdapters, registerAdapter } from "../adapters/
 import type { Adapter, AgentRef, Ctx, WriteOpts } from "../adapters/types.js";
 import { SecretsFoundError } from "../core/engine.js";
 import { readBundle } from "../core/bundle.js";
-import { slugify } from "../core/text.js";
+import { oneLine, slugify } from "../core/text.js";
 import { type MoveReport, renderReportMarkdown, renderReportTerminal } from "../core/report.js";
 import type { Bundle } from "../core/schema.js";
 import type { SecretFinding } from "../core/secrets.js";
@@ -114,13 +114,6 @@ export function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-/**
- * Text from an app squeezed onto one line: a line break or a control character (an ANSI escape
- * included) in an agent's name must not break a table or drive the terminal.
- */
-export function oneLine(text: string): string {
-  return text.replace(/[\p{Cc}\s]+/gu, " ").trim();
-}
 
 /** Rows under a header, each column as wide as its widest cell, two spaces apart. */
 export function table(header: readonly string[], rows: readonly (readonly string[])[]): string {

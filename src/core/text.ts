@@ -7,7 +7,11 @@ export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b 
 export const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-/** One line of text: every run of whitespace and control characters becomes one space. */
+/**
+ * Text from an app squeezed onto one line: every run of whitespace and control characters becomes
+ * one space. A line break or an ANSI escape in an agent's name must not break a table, start a
+ * forged section of a report or drive the terminal.
+ */
 export const oneLine = (value: string): string => value.replace(/[\p{Cc}\s]+/gu, " ").trim();
 
 /** `1 skill`, `3 skills`; `many` is the plural when it is not the word with an `s`. */

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { oneLine } from "./text.js";
 
 /** One thing the move did to a part of the agent. `field` is a free-form label, never validated. */
 export type Item = { field: string; detail: string };
@@ -24,14 +25,9 @@ const ESC = "\u001b";
 const BOLD = "1";
 const YELLOW = "33";
 
-/**
- * A report line is built from text the source app produced, so each string is squeezed onto one
- * line first: a line break could start a forged `## Skipped` section, and a control character
- * (an ANSI escape included) could drive the terminal the report is printed to.
- */
-function oneLine(text: string): string {
-  return text.replace(/[\p{Cc}\s]+/gu, " ").trim();
-}
+// A report line is built from text the source app produced, so each string is squeezed onto one
+// line first (`oneLine`): a line break could start a forged `## Skipped` section, and a control
+// character (an ANSI escape included) could drive the terminal the report is printed to.
 
 type Entry = { field?: string; detail: string };
 type Block = { title: string; entries: Entry[]; skipped?: true };

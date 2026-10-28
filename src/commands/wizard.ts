@@ -4,6 +4,7 @@
 import * as clack from "@clack/prompts";
 import { listAdapters } from "../adapters/registry.js";
 import type { Adapter, AgentRef, Ctx } from "../adapters/types.js";
+import { oneLine } from "../core/text.js";
 import { exportCommand } from "./export.js";
 import { moveCommand } from "./move.js";
 import {
@@ -13,7 +14,6 @@ import {
   fileSlug,
   hasTerminal,
   messageOf,
-  oneLine,
   sideOf,
 } from "./shared.js";
 
