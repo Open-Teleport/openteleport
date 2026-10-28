@@ -16,7 +16,7 @@ The story: one person has five agents in a Claude Code project and wants them in
 | 0:32 to 0:40 | The other four moves, sped up. | "Routines would land disabled. The source is never touched." |
 | 0:40 to 0:48 | `openclaw agents list`: the five agents, now in OpenClaw. | "Five agents, now in OpenClaw." |
 | 0:48 to 0:56 | `openteleport move --from openclaw ... --to folder ...`, then `ls agents/reviewer`: `AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/` and the rest of the `.jetpack` layout. | "And back out as a plain folder that Codex, Cursor or any AGENTS.md-aware tool can use." |
-| 0:56 to 1:00 | The move report file, then the end card. | "Three tools, one format. `npx openteleport`" and "Not affiliated with Teleport by Gravitational." |
+| 0:56 to 1:00 | The move report file, then the end card. | "Three tools, one format. `npx openteleport`" |
 
 ## Running the demo
 

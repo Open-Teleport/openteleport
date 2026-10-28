@@ -159,6 +159,4 @@ In PowerShell: `$env:OPENTELEPORT_EXTRA_ADAPTER = "./my-app.js"; npx opentelepor
 
 ## License
 
-Apache-2.0. The command is `openteleport`, never `teleport`.
-
-Not affiliated with Teleport by Gravitational.
+Apache-2.0.
