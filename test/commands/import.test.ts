@@ -57,6 +57,21 @@ describe("import", () => {
     expect(result.stdout).toContain(`Report written to ${path}`);
   });
 
+  it("writes into a folder named after the agent in the working directory without --to", async () => {
+    const file = await adaJetpack("ada.jetpack");
+    const result = await run(box, ["import", file]);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(join(box.cwd, "ada", "AGENTS.md"), "utf8")).toContain("# Instructions");
+    expect(result.stdout).toContain("Outcome: done");
+  });
+
+  it("does the same for an agent folder without --to", async () => {
+    const result = await run(box, ["import", ADA_DIR, "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(json<MoveReport>(result).target.app).toBe("folder");
+    expect(await readdir(join(box.cwd, "ada"))).toContain("jetpack.json");
+  });
+
   it("imports an agent folder", async () => {
     const result = await run(box, ["import", "--to", "memory", ADA_DIR, "--json"]);
     expect(result.exitCode).toBe(0);
