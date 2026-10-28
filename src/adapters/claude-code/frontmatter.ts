@@ -1,4 +1,5 @@
-import { parse, stringify } from "yaml";
+import { stringify } from "yaml";
+import { splitFrontmatter } from "../../core/frontmatter.js";
 
 /** A subagent file: YAML frontmatter between `---` lines, then the system prompt. */
 export type AgentFile = {
@@ -15,10 +16,6 @@ export type AgentFile = {
 
 const KNOWN_KEYS = new Set(["name", "description", "tools", "model"]);
 
-const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
-
-// The opening fence must be the first line; the closing one is the next line that is only `---`.
-const FRONTMATTER = /^---[ \t]*\n(?:([\s\S]*?)\n)?---[ \t]*(?:\n|$)/;
 
 /** A scalar as text; anything else, and an empty string, is absent. */
 function scalar(value: unknown): string | undefined {
@@ -57,30 +54,14 @@ function toolsOf(value: unknown): string[] | undefined {
 }
 
 /**
- * Parses a Claude Code subagent file. Line endings become `\n` and a byte order mark is dropped.
- * A file that does not open with a `---` line has no frontmatter: all of it is the body. Throws
- * when the frontmatter is not YAML or not a mapping.
+ * Parses a Claude Code subagent file: the frontmatter as `splitFrontmatter` reads it, then the
+ * fields this adapter knows. A file that does not open with a `---` line has no frontmatter, and
+ * all of it is the body. Throws when the frontmatter is not YAML or not a mapping.
  */
 export function parseAgentFile(text: string): AgentFile {
-  const unmarked = text.startsWith(BYTE_ORDER_MARK) ? text.slice(1) : text;
-  const source = unmarked.replace(/\r\n?/g, "\n");
-  const match = FRONTMATTER.exec(source);
-  if (match === null) return { name: undefined, body: source, ignored: [] };
-
-  let data: unknown;
-  try {
-    data = parse(match[1] ?? "");
-  } catch (error) {
-    throw new Error(`invalid frontmatter: ${(error as Error).message}`);
-  }
-  data ??= {};
-  if (typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("invalid frontmatter: expected key: value pairs");
-  }
-  const fields = data as Record<string, unknown>;
-
+  const { data: fields, body } = splitFrontmatter(text);
   const file: AgentFile = {
-    body: source.slice(match[0].length).replace(/^\n+/, ""),
+    body,
     ignored: Object.keys(fields).filter((key) => !KNOWN_KEYS.has(key)),
   };
   const name = scalar(fields.name);

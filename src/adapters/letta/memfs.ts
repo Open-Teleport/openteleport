@@ -4,7 +4,8 @@
 // the agent's skills [L13]. Reading it never touches the folder.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse, stringify } from "yaml";
+import { stringify } from "yaml";
+import { splitFrontmatter } from "../../core/frontmatter.js";
 import { isForbiddenPath, isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import type { Bundle, FileEntry, Note, Skill } from "../../core/schema.js";
@@ -40,39 +41,7 @@ export const REFERENCE_PREFIX = "reference--";
 const PERSONA_LABEL = "persona";
 const MAX_DESCRIPTION_CHARS = 120;
 
-// The opening fence must be the first line; the closing one is the next line that is only `---`.
-const FRONTMATTER = /^---[ \t]*\n(?:([\s\S]*?)\n)?---[ \t]*(?:\n|$)/;
-
 const encoder = new TextEncoder();
-
-/**
- * Splits a Markdown file into its YAML frontmatter (between `---` lines at the top) and the
- * text after it. A byte order mark is dropped and line endings become `\n`. A file that does not
- * open with a `---` line has no frontmatter: all of it is the body. Throws when the frontmatter
- * is not YAML or not a mapping of keys to values. (The Claude Code adapter's parser knows the
- * fields of a subagent file only, so MemFS has its own.)
- */
-export function parseFrontmatter(text: string): { data: Record<string, unknown>; body: string } {
-  const source = withoutMark(text).replace(/\r\n?/g, "\n");
-  const match = FRONTMATTER.exec(source);
-  if (match === null) return { data: {}, body: source };
-  let data: unknown;
-  try {
-    data = parse(match[1] ?? "");
-  } catch (error) {
-    // The parser's message goes on to quote the source; its first line is the reason.
-    const reason = (error as Error).message.split("\n")[0]?.replace(/:$/, "") ?? "";
-    throw new Error(`invalid frontmatter: ${reason}`, { cause: error });
-  }
-  data ??= {};
-  if (typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("invalid frontmatter: expected key: value pairs");
-  }
-  return {
-    data: data as Record<string, unknown>,
-    body: source.slice(match[0].length).replace(/^\n+/, ""),
-  };
-}
 
 /** A file with YAML frontmatter holding `data`, then `body`. */
 export function renderFrontmatter(data: Record<string, string>, body: string): string {
@@ -171,7 +140,7 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
 /** The text of a memory file without its frontmatter; a frontmatter that is no YAML stays text. */
 function bodyOf(text: string): string {
   try {
-    return parseFrontmatter(text).body;
+    return splitFrontmatter(text).body;
   } catch {
     return withoutMark(text).replace(/\r\n?/g, "\n");
   }
@@ -183,7 +152,7 @@ export async function readPersona(
 ): Promise<NonNullable<MemFs["persona"]>> {
   const text = await readFile(file, "utf8");
   try {
-    const { data, body } = parseFrontmatter(text);
+    const { data, body } = splitFrontmatter(text);
     const name = field(data, "name");
     const description = field(data, "description");
     return {
@@ -192,7 +161,9 @@ export async function readPersona(
       body,
     };
   } catch (error) {
-    warnings.push(`persona.md: ${(error as Error).message}; kept as text`);
+    // The parser's message goes on to quote the source; its first line is the reason.
+    const reason = (error as Error).message.split("\n")[0]?.replace(/:$/, "") ?? "";
+    warnings.push(`persona.md: ${reason}; kept as text`);
     return { body: bodyOf(text) };
   }
 }

@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { splitFrontmatter } from "../../core/frontmatter.js";
 import { MAX_AVATAR_BYTES, MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
 import { fromOpenClawJob } from "../../core/schedule.js";
 import {
@@ -275,12 +275,8 @@ const SKILL_FILE = "SKILL.md";
 
 /** The `name` in a SKILL.md frontmatter block, if there is one. */
 function frontmatterName(bytes: Uint8Array): string | undefined {
-  const text = new TextDecoder().decode(bytes);
-  const block = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1];
-  if (block === undefined) return undefined;
   try {
-    const data: unknown = parseYaml(block);
-    return isRecord(data) ? label(data.name) : undefined;
+    return label(splitFrontmatter(new TextDecoder().decode(bytes)).data.name);
   } catch {
     return undefined;
   }

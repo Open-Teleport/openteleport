@@ -5,11 +5,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   RESERVED_ROOT,
-  parseFrontmatter,
   readMemFs,
   renderFrontmatter,
   renderMemFs,
 } from "../../../src/adapters/letta/memfs.js";
+import { splitFrontmatter } from "../../../src/core/frontmatter.js";
 import type { Item } from "../../../src/core/report.js";
 import type { Bundle, FileEntry } from "../../../src/core/schema.js";
 import { proseToFacts } from "../../../src/core/text.js";
@@ -59,45 +59,17 @@ function textOf(entries: FileEntry[], path: string): string {
   return new TextDecoder().decode(entry.bytes);
 }
 
-describe("parseFrontmatter", () => {
-  it("reads the fields and the body, dropping a byte order mark and CRLF line endings", () => {
-    const text = `${BOM}---\r\nname: Reviewer\r\ndescription: Reviews PRs\r\n---\r\nCalm.\r\nShort.\r\n`;
-    expect(parseFrontmatter(text)).toEqual({
-      data: { name: "Reviewer", description: "Reviews PRs" },
-      body: "Calm.\nShort.\n",
-    });
-  });
-
-  it("treats a file that does not open with --- as all body", () => {
-    expect(parseFrontmatter("Hello\n---\nnot: frontmatter\n---\n")).toEqual({
-      data: {},
-      body: "Hello\n---\nnot: frontmatter\n---\n",
-    });
-  });
-
-  it("reads an empty frontmatter as no fields", () => {
-    expect(parseFrontmatter("---\n---\nBody\n")).toEqual({ data: {}, body: "Body\n" });
-  });
-
-  it("throws for a frontmatter that is not YAML or not a mapping", () => {
-    expect(() => parseFrontmatter("---\nname: [unclosed\n---\nBody\n")).toThrow(
-      /invalid frontmatter/,
-    );
-    expect(() => parseFrontmatter("---\njust text\n---\nBody\n")).toThrow(/key: value pairs/);
-  });
-});
-
 describe("renderFrontmatter", () => {
   it("round-trips values that YAML would otherwise read as something else", () => {
     const data = { name: 'Ada: the "second"', description: "yes" };
-    expect(parseFrontmatter(renderFrontmatter(data, "Body\n"))).toEqual({ data, body: "Body\n" });
+    expect(splitFrontmatter(renderFrontmatter(data, "Body\n"))).toEqual({ data, body: "Body\n" });
   });
 
   it("keeps a long description on one line", () => {
     const description = "word ".repeat(60).trim();
     const text = renderFrontmatter({ name: "Ada", description }, "");
     expect(text.split("\n")).toHaveLength(5);
-    expect(parseFrontmatter(text).data.description).toBe(description);
+    expect(splitFrontmatter(text).data.description).toBe(description);
   });
 });
 
@@ -298,7 +270,7 @@ describe("renderMemFs", () => {
   });
 
   it("labels the persona memory 'persona', never with the agent's name", () => {
-    expect(parseFrontmatter(textOf(renderMemFs(adaBundle()), "persona.md")).data).toEqual({
+    expect(splitFrontmatter(textOf(renderMemFs(adaBundle()), "persona.md")).data).toEqual({
       name: "persona",
       description: "Research assistant",
     });
@@ -307,7 +279,7 @@ describe("renderMemFs", () => {
   it("describes the persona as that of the agent when the agent has no title", () => {
     const bundle = adaBundle();
     delete bundle.manifest.title;
-    expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data).toEqual({
+    expect(splitFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data).toEqual({
       name: "persona",
       description: "Persona of Ada",
     });
@@ -317,7 +289,7 @@ describe("renderMemFs", () => {
     const bundle = adaBundle();
     delete bundle.manifest.title;
     bundle.manifest.description = "Reads papers and web pages.";
-    expect(parseFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data.description).toBe(
+    expect(splitFrontmatter(textOf(renderMemFs(bundle), "persona.md")).data.description).toBe(
       "Persona of Ada",
     );
   });
@@ -390,7 +362,7 @@ describe("renderMemFs", () => {
     const bundle = adaBundle();
     delete bundle.manifest.title;
     bundle.manifest.name = "Ada\nname: Eve";
-    const { data } = parseFrontmatter(textOf(renderMemFs(bundle), "persona.md"));
+    const { data } = splitFrontmatter(textOf(renderMemFs(bundle), "persona.md"));
     expect(data).toEqual({ name: "persona", description: "Persona of Ada name: Eve" });
   });
 

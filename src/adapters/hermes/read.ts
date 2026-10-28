@@ -3,7 +3,7 @@
 // directory; nothing is read from a running Hermes, and nothing is changed.
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { parse } from "yaml";
+import { splitFrontmatter } from "../../core/frontmatter.js";
 import {
   MAX_FACT_CHARS,
   MAX_ROUTINES,
@@ -224,11 +224,8 @@ async function bundledNames(
 
 /** The `name` in the frontmatter of a `SKILL.md`, which is how Hermes names a skill. */
 function frontmatterName(markdown: string): string | undefined {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)?.[1];
-  if (block === undefined) return undefined;
   try {
-    const data: unknown = parse(block);
-    const name = isRecord(data) ? data.name : undefined;
+    const { name } = splitFrontmatter(markdown).data;
     return typeof name === "string" && name.trim() !== "" ? name.trim() : undefined;
   } catch {
     return undefined;

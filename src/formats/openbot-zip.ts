@@ -12,7 +12,6 @@
 // the limits are refused before anything is inflated.
 import { stat } from "node:fs/promises";
 import { zipSync } from "fflate";
-import { parse as parseYaml } from "yaml";
 import { isSafeName } from "../adapters/fs.js";
 import type { WriteResult } from "../adapters/types.js";
 import {
@@ -27,6 +26,7 @@ import {
   isReservedDeviceName,
   isSafeArchivePath,
 } from "../core/paths.js";
+import { FrontmatterError, hasFrontmatter, splitFrontmatter } from "../core/frontmatter.js";
 import {
   OPENBOT_MIN_INTERVAL_MINUTES,
   type OpenBotSchedule,
@@ -83,8 +83,7 @@ const MAX_ARCHIVE_ENTRIES = 5000;
 const SKILL_FILE = "SKILL.md";
 const MAX_SKILL_NAME_CHARS = 80;
 const MAX_SKILL_DESCRIPTION_CHARS = 1024;
-// The frontmatter OpenBot looks for at the top of a SKILL.md.
-const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u;
+
 const ROUTINE_LIMIT_POLICIES = ["wait", "skip"];
 const ROUTINE_MISSED_POLICIES = ["skip", "run-once"];
 const MEMORY_INCLUSIONS = ["essential", "searchable"] as const;
@@ -753,16 +752,18 @@ function frontmatterProblem(main: FileEntry): string | undefined {
   } catch {
     return `its ${SKILL_FILE} is not valid UTF-8`;
   }
-  const match = FRONTMATTER.exec(text);
-  if (match === null) return `its ${SKILL_FILE} has no frontmatter, which OpenBot needs`;
-  let metadata: unknown;
+  if (!hasFrontmatter(text)) return `its ${SKILL_FILE} has no frontmatter, which OpenBot needs`;
+  let metadata: Json = {};
   try {
-    metadata = parseYaml(match[1] ?? "");
-  } catch {
-    return `the frontmatter of its ${SKILL_FILE} is not valid YAML`;
+    metadata = splitFrontmatter(text).data;
+  } catch (error) {
+    // YAML that is no mapping has no name, which is said below.
+    if (!(error instanceof FrontmatterError && error.kind === "shape")) {
+      return `the frontmatter of its ${SKILL_FILE} is not valid YAML`;
+    }
   }
-  const name = isRecord(metadata) ? nonBlank(metadata.name) : undefined;
-  const description = isRecord(metadata) ? nonBlank(metadata.description) : undefined;
+  const name = nonBlank(metadata.name);
+  const description = nonBlank(metadata.description);
   if (
     name === undefined ||
     name.length > MAX_SKILL_NAME_CHARS ||

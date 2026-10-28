@@ -14,11 +14,12 @@ import { fileURLToPath } from "node:url";
 import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { lettaAdapter } from "../../../src/adapters/letta/index.js";
-import { parseFrontmatter, readMemFs } from "../../../src/adapters/letta/memfs.js";
+import { readMemFs } from "../../../src/adapters/letta/memfs.js";
 import { renderCommands, routineSlugs, writeLettaAgent } from "../../../src/adapters/letta/write.js";
 import { readMarker } from "../../../src/adapters/marker.js";
 import type { Ctx, WriteOpts } from "../../../src/adapters/types.js";
 import { move } from "../../../src/core/engine.js";
+import { splitFrontmatter } from "../../../src/core/frontmatter.js";
 import type { Bundle } from "../../../src/core/schema.js";
 import { proseToFacts } from "../../../src/core/text.js";
 import { ADA_ID, OTHER_ID, adaBundle, bytes } from "./ada.js";
@@ -115,7 +116,7 @@ describe("writeLettaAgent: the folder", () => {
   it("lays the memory out as MemFS: persona, instructions, facts, notes and skills", async () => {
     await writeLettaAgent(ctx, adaBundle(), ENABLE);
     const memory = join(ADA_DIR(), "memory");
-    expect(parseFrontmatter(await text(join(memory, "persona.md")))).toEqual({
+    expect(splitFrontmatter(await text(join(memory, "persona.md")))).toEqual({
       data: { name: "persona", description: "Research assistant" },
       body: "Curious, precise and brief.\n",
     });
