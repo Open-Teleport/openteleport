@@ -54,7 +54,7 @@ it("expires, cancels and bounds plans", async () => {
   now = 600001;
   await expect(session.apply(expired.planId, true)).rejects.toThrow("expired");
   const cancelled = await session.plan(request);
-  expect(session.cancel(cancelled.planId)).toEqual({ cancelled: true });
+  expect(session.cancel(cancelled.planId)).toMatchObject({ cancelled: true, state: "cancelled" });
   await expect(session.apply(cancelled.planId, true)).rejects.toThrow("missing");
   for (let n = 0; n < 8; n++) await session.plan(request);
   await expect(session.plan(request)).rejects.toThrow("Too many");
@@ -166,7 +166,7 @@ it("releases expired snapshots without waiting for another request", async () =>
     vi.advanceTimersByTime(600000);
     expect(vi.getTimerCount()).toBe(0);
     // cancel cannot find the data even though no intervening plan/apply performed a sweep.
-    expect(session.cancel(plan.planId)).toEqual({ cancelled: false });
+    expect(session.cancel(plan.planId)).toMatchObject({ cancelled: false, state: "not_pending" });
   } finally {
     session.dispose();
     vi.useRealTimers();
@@ -185,7 +185,7 @@ it("cancellation and transport disposal clear timers and invalidate plans", asyn
     expect(vi.getTimerCount()).toBe(1);
     session.dispose();
     expect(vi.getTimerCount()).toBe(0);
-    expect(session.cancel(b.planId)).toEqual({ cancelled: false });
+    expect(session.cancel(b.planId)).toMatchObject({ cancelled: false, state: "not_pending" });
     await expect(session.plan(request)).rejects.toThrow("closed");
     await expect(session.apply(b.planId, true)).rejects.toThrow("closed");
   } finally {
@@ -277,6 +277,7 @@ it("does not claim that a started receipt proves a live operation after reconnec
   await entered;
   try {
     expect(await session.operationStatus(plan.planId)).toMatchObject({ state: "started", execution: "in_progress" });
+    expect(session.cancel(plan.planId)).toMatchObject({ cancelled: false, state: "in_progress" });
     expect(await new TransferSession(ctx).operationStatus(plan.planId)).toMatchObject({ state: "started", execution: "unknown" });
   } finally { release(); }
   await applying;

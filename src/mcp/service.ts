@@ -177,7 +177,20 @@ export class TransferSession {
     };
   }
 
-  cancel(planId: string) { return { cancelled: this.discard(planId) }; }
+  cancel(planId: string) {
+    if (this.discard(planId)) return {
+      cancelled: true, state: "cancelled" as const,
+      guidance: "The pending plan was discarded before destination writes.",
+    };
+    if (this.activeOperationId === planId) return {
+      cancelled: false, state: "in_progress" as const,
+      guidance: "Apply has already started and was not stopped. Query operation_status; do not repeat the transfer.",
+    };
+    return {
+      cancelled: false, state: "not_pending" as const,
+      guidance: "No pending plan was found. It may have expired or already been applied; this does not prove that the destination is unchanged. Query operation_status if apply was attempted.",
+    };
+  }
 
   async operationStatus(operationId: string) {
     try {
@@ -212,6 +225,7 @@ export class TransferSession {
     // Consume before starting: retries must never replay a partly completed write.
     this.discard(planId);
     this.busy = true;
+    this.activeOperationId = planId;
     let destinationWriteStarted = false;
     let receiptPath: string | undefined;
     const { input, bundle, ctx, from, to, agent, identity, warnings } = pending;
@@ -226,7 +240,6 @@ export class TransferSession {
       catch {
         throw new UsageError("Cannot record the transfer before writing. The destination was not changed. Check the OpenTeleport home and prepare a new preview.");
       }
-      this.activeOperationId = planId;
       const trackedTarget: Adapter | undefined = to ? {
         ...to,
         write: async (targetCtx, data, options) => {
