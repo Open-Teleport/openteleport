@@ -156,3 +156,13 @@ memory, skill bytes or raw exception messages. Metadata can still be private. Re
 local, have restrictive creation permissions where the platform supports them, and remain until removed
 by the user. They are not a backup, rollback mechanism, tamper-proof audit log or power-loss transaction.
 This receipt workflow currently covers MCP apply; native CLI wrappers keep their documented report behavior.
+
+## Distributable verification
+
+After npm run build, run npm run verify:package. The check packs the npm artifact without rerunning
+build hooks, installs it with production dependencies in a temporary directory, imports its public API,
+and exercises a folder transfer and operation receipt through the installed MCP entry point. It does
+not load adapters from src, publish a package, modify application profiles or install anything globally.
+It needs npm registry access (or cached dependencies) and removes its temporary installation afterwards.
+CI runs this check on Linux, macOS and Windows. It verifies the root npm package; native plugin releases
+still need their separate installation checks and a published dependency version before distribution.
