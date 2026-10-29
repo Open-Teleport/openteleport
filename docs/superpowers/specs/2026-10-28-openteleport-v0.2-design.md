@@ -73,6 +73,7 @@ Nazwa CLI `hermes`, `displayName` „Hermes Agent". Pewność researchu: wysoka.
 ### 4.1 Położenie i wykrywanie
 
 - Katalog domowy: `ctx.env.HERMES_HOME`, inaczej na Windows `%LOCALAPPDATA%\hermes` (z `ctx.env.LOCALAPPDATA`, fallback `<home>\AppData\Local\hermes`), na pozostałych systemach `<home>/.hermes` [H16]. `--source-dir`/`--target-dir` nadpisują.
+  Uwaga (wykonanie): na Windows bez `HERMES_HOME` (i bez `--source-dir`/`--target-dir`) sam Hermes też bierze `~/.hermes` (`get_hermes_home()`; zmienną `HERMES_HOME=%LOCALAPPDATA%\hermes` ustawia dopiero instalator), więc adapter bierze `<home>\.hermes`, gdy jest profilem (`isProfile`), a w przeciwnym razie `%LOCALAPPDATA%\hermes`. Dlatego `hermesHome` jest asynchroniczne. Sprawdzone na prawdziwej instalacji 2026-10-29 (`docs/superpowers/research/2026-10-29-real-install-check.md`).
 - Katalog jest profilem, jeśli zawiera jeden z plików `config.yaml`, `.env`, `SOUL.md`, `profile.yaml`, `auth.json`, `state.db` [H4].
 - `detect`: `found` = katalog domowy jest profilem; `location` = ten katalog; `hint` = „Install Hermes Agent or pass --source-dir <HERMES_HOME>".
 
@@ -88,7 +89,7 @@ Nazwa CLI `hermes`, `displayName` „Hermes Agent". Pewność researchu: wysoka.
 | `instructions` | sekcja po znaczniku w `SOUL.md`; inaczej `agent.system_prompt` z `config.yaml`, jeśli jest łańcuchem [H18]; inaczej pusty łańcuch | `AGENTS.md` w Hermesie jest plikiem projektu, nie profilu [H11]. |
 | `skills` | `skills/**/SKILL.md` | Nazwa skilla = nazwa katalogu ze `SKILL.md`; kategorie pośrednie [H6] są spłaszczane (kolizje nazw → ostrzeżenie, drugi dostaje `-N`). Pomijane: `skills/.hub/` oraz **skille dostarczone z Hermesem**, czyli wymienione w `skills/.bundled_manifest` [H6][H17] (plik czytany jako JSON; nazwy lub ścieżki z tablicy najwyższego poziomu albo z pola `skills`; format do potwierdzenia w kodzie Hermesa przez wykonawcę, a nieczytelny manifest = nic nie jest pomijane); ostrzeżenie podaje, ile skilli dostarczonych zostało na miejscu. Katalogi `*-imports/` są czytane normalnie. Limit 32 jak w formacie: nadmiar → ostrzeżenie i pominięcie. |
 | `routines` | `cron/jobs.json` → `jobs[]` [H13] | Patrz 4.5. |
-| `facts` | wpisy `memories/MEMORY.md` i `memories/USER.md`, rozdzielone `"\n§\n"` [H14], ≤500 znaków | Kolejność: MEMORY.md, potem USER.md. BOM usuwany. |
+| `facts` | wpisy `memories/MEMORY.md` i `memories/USER.md`, rozdzielone `"\n§\n"` [H14], ≤500 znaków | Kolejność: MEMORY.md, potem USER.md. BOM usuwany. Uwaga (wykonanie): wpis ≤500 znaków z łamaniem wiersza staje się faktem jednowierszowym (każde łamanie wraz ze spacjami wokół zamieniane na jedną spację, jak w `factsToProse`, przez `foldLines` w `hermes/memory.ts`), a odczyt dodaje ostrzeżenie „N memory entries had line breaks folded into one line"; wpisy >500 znaków zostają notatkami bez zmian. Przy zapisie fakt jest uznany za już obecny także wtedy, gdy plik ma wpis, którego złożona postać jest równa faktowi (wpis wielowierszowy, który Hermes zapisał sam, nie jest dublowany). |
 | `notes` | wpisy dłuższe niż 500 znaków | Nazwa `memory-<n>` (MEMORY.md) / `user-<n>` (USER.md), n od 1. |
 | `models` | `config.yaml`: `model.default` → `model`, `model.provider` → `provider` [H18] | Jedna preferencja; `model.base_url` → `x-hermes.baseUrl`. |
 | `avatar` | brak | Brak udokumentowanego pola [H10]. |
@@ -119,7 +120,7 @@ Hermes `schedule.kind` ↔ `Schedule`:
 |---|---|---|
 | `cron {expr, display}` | `{kind:"cron", expression: expr}` | `display` odtwarzane z wyrażenia przy zapisie. |
 | `interval {minutes}` | `{kind:"every", every}` | Minuty → `Nd` gdy podzielne przez 1440, `Nh` gdy przez 60, inaczej `Nm`; odwrotnie przy zapisie. |
-| `once {run_at}` | `{kind:"at", at}` | `run_at` bez offsetu interpretowany w strefie Hermesa (4.5, strefa); zapisany jako ISO z offsetem. Przy zapisie termin z przeszłości → `skipped` („Hermes rejects past one-off jobs"). |
+| `once {run_at}` | `{kind:"at", at}` | `run_at` bez offsetu interpretowany w strefie Hermesa (4.5, strefa); zapisany jako ISO z offsetem. Uwaga (wykonanie): `run_at` bez offsetu Hermes (`parse_schedule`, `_ensure_aware`) czyta w strefie lokalnej maszyny, nie w strefie profilu (ta dotyczy tylko wyrażeń cron), więc adapter czyta go tak samo (`Intl.DateTimeFormat().resolvedOptions().timeZone`) i dodaje ostrzeżenie `cron job '<nazwa>' has a one-off time without an offset; read in this machine's time zone (<strefa>), as Hermes does`. Sprawdzone na prawdziwej instalacji 2026-10-29. Przy zapisie termin z przeszłości → `skipped` („Hermes rejects past one-off jobs"). |
 
 Strefa czasowa Hermesa jest globalna: `ctx.env.HERMES_TIMEZONE`, inaczej `timezone` z `config.yaml` profilu, inaczej strefa procesu (`Intl.DateTimeFormat().resolvedOptions().timeZone`) [H15]. Przy odczycie każda rutyna dostaje tę strefę. Przy zapisie rutyna z inną strefą niż strefa profilu jest zapisana bez zmian wyrażenia i oznaczona `approximated` („Hermes has one time zone per profile; this routine assumed <tz>").
 

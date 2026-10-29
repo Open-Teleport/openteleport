@@ -837,6 +837,26 @@ describe("an agent that is already there", () => {
     });
   });
 
+  it("does not repeat a multi-line entry Hermes learned when the agent is read and written back", async () => {
+    await firstWrite();
+    const memoryFile = join(profile(), "memories", "MEMORY.md");
+    const native = "Deploys go out on Tuesdays.\nNever on Fridays.";
+    await writeFile(memoryFile, `${await text(memoryFile)}\n§\n${native}`);
+
+    // The reader folds the entry into one line; writing that fact back must see the entry as held.
+    const { bundle } = await hermesAdapter.read(ctx, "ada");
+    expect(bundle.facts).toContain("Deploys go out on Tuesdays. Never on Fridays.");
+    const result = await writeHermesProfile(ctx, bundle, opts());
+
+    const entries = parseEntries(await text(memoryFile));
+    expect(entries.filter((entry) => entry.includes("Tuesdays"))).toEqual([native]);
+    expect(entries).toContain(native);
+    // Not recorded as ours, so a later move leaves it alone too.
+    expect((await readMarker()).memoryEntries).not.toContain("Deploys go out on Tuesdays. Never on Fridays.");
+    expect((await readMarker()).memoryEntries).not.toContain(native);
+    expect(result.items.skipped).toEqual([]);
+  });
+
   it("removes what it wrote when the Bundle no longer has it", async () => {
     await firstWrite();
     await writeHermesProfile(ctx, ada({ facts: [], routines: [] }), opts());

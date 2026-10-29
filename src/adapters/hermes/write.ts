@@ -20,7 +20,7 @@ import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type HermesJob, newJobId, readJobsFile, routineToJob, writeJobsFile } from "./cron.js";
-import { entryText, parseEntries, renderEntries } from "./memory.js";
+import { entryText, foldLines, parseEntries, renderEntries } from "./memory.js";
 import { type HermesConfig, hermesHome, hermesTimezone, readConfig } from "./paths.js";
 
 type Items = WriteResult["items"];
@@ -568,7 +568,9 @@ async function writeProfileSkills(
  * (`recorded`) are taken out first; entries that are not ours stay, and the new ones come after
  * them. Hermes refuses a write over its limit, so the file as a whole is held to
  * `memory_char_limit`: a fact that does not fit is skipped as `fact:<n>`. A fact the file already
- * holds is not repeated. Returns the entries to record: the ones written now.
+ * holds is not repeated; an entry with line breaks that Hermes learned on its own is read back as
+ * its folded one-line form (`foldLines`), so it holds the fact too. Returns the entries to record:
+ * the ones written now.
  */
 async function writeMemory(
   dir: string,
@@ -594,6 +596,8 @@ async function writeMemory(
     const index = kept.indexOf(entry);
     if (index !== -1) kept.splice(index, 1);
   }
+  const holds = (entry: string): boolean =>
+    kept.some((held) => held === entry || foldLines(held) === entry);
   const added: string[] = [];
   for (const [index, fact] of facts.entries()) {
     const entry = entryText(fact);
@@ -603,7 +607,7 @@ async function writeMemory(
     };
     if (entry === "") {
       skip("empty");
-    } else if (kept.includes(entry) || added.includes(entry)) {
+    } else if (holds(entry) || added.includes(entry)) {
       continue;
     } else if (charCount(renderEntries([...kept, ...added, entry])) > limit) {
       skip(`Hermes memory limit: ${limit} chars`);

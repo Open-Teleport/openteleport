@@ -585,6 +585,34 @@ describe("writeLettaAgent: a folder that is already there", () => {
     expect(result.outcome).toBe("handoff");
   });
 
+  it("does not send the user to a script that a folder kept from being written", async () => {
+    await writeLettaAgent(ctx, adaBundle(), ENABLE);
+    await rm(join(ADA_DIR(), "letta-commands.sh"));
+    await mkdir(join(ADA_DIR(), "letta-commands.sh"));
+
+    const onlyPs1 = await writeLettaAgent(ctx, adaBundle(), ENABLE);
+    expect(onlyPs1.items.skipped.map((item) => item.field)).toEqual(["file:letta-commands.sh"]);
+    expect(onlyPs1.nextStep).toBe(
+      `Run ${join(ADA_DIR(), "letta-commands.ps1")} (letta-commands.sh was not written, a folder is in its place): ` +
+        "it creates the agent, restores its memory and adds the routines",
+    );
+
+    await rm(join(ADA_DIR(), "letta-commands.ps1"));
+    await mkdir(join(ADA_DIR(), "letta-commands.ps1"));
+    const neither = await writeLettaAgent(ctx, adaBundle(), ENABLE);
+    expect(neither.outcome).toBe("handoff");
+    expect(neither.nextStep).toBe(
+      "letta-commands.sh and letta-commands.ps1 were not written, a folder is in the place of each: " +
+        "move them away and move the agent again",
+    );
+
+    await rm(join(ADA_DIR(), "letta-commands.sh"), { recursive: true });
+    const onlySh = await writeLettaAgent(ctx, adaBundle(), ENABLE);
+    expect(onlySh.nextStep).toBe(
+      `Run ${join(ADA_DIR(), "letta-commands.sh")}: it creates the agent, restores its memory and adds the routines`,
+    );
+  });
+
   it("writes another agent of the same name next to a folder with no marker, and says so", async () => {
     await mkdir(ADA_DIR());
     await writeFile(join(ADA_DIR(), "theirs.txt"), "theirs");

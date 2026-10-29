@@ -22,6 +22,15 @@ export function renderEntries(entries: readonly string[]): string {
 }
 
 /**
+ * An entry as the one-line fact it is read as: every line break, with the spaces around it, becomes
+ * a single space (as `factsToProse` folds on writing), and the whole is trimmed. What the reader
+ * returns and what `writeMemory` compares a fact against are both this.
+ */
+export function foldLines(entry: string): string {
+  return entry.replace(/\s*[\r\n]+\s*/g, " ").trim();
+}
+
+/**
  * A fact as one entry: LF line breaks, trimmed, and without a line that is only a section sign,
  * which Hermes would read as the boundary of two entries.
  */

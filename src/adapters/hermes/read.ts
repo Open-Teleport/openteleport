@@ -21,7 +21,7 @@ import { readMarker } from "../marker.js";
 import { claimSkillName, findSkillFolders, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { jobToRoutine, readJobsFile } from "./cron.js";
-import { parseEntries } from "./memory.js";
+import { foldLines, parseEntries } from "./memory.js";
 import {
   DEFAULT_PROFILE,
   type HermesConfig,
@@ -269,7 +269,7 @@ async function readMemory(
         notes.push({ name: `${prefix}-${index + 1}`, text: entry });
       } else if (/[\r\n]/.test(entry)) {
         folded += 1;
-        facts.push(entry.replace(/\s*[\r\n]+\s*/g, " ").trim());
+        facts.push(foldLines(entry));
       } else {
         facts.push(entry);
       }
