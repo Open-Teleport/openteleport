@@ -37,3 +37,10 @@ JSON reports (including handoff/nextStep) are retained. Invalid JSON and timeout
 mean a partially completed import can be retried safely.
 
 See docs/integrations/native-plugins.md for tested versions and limits.
+
+## Transfer without structured memory
+
+Add `--no-memory` to `teleport export` or `teleport import` to omit facts and notes.
+Memory is included by default. Reports list the excluded counts. This does not anonymize
+instructions, persona, skills, routines, files or metadata. Updating without memory may remove
+previously imported destination memory; use `--copy` to keep the existing agent.

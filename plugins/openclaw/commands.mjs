@@ -62,6 +62,7 @@ export function registerTeleportCommands(program, options = {}) {
     }));
   root.command("export").description("Export an agent; refuses an existing output file")
     .argument("<agent>", "source agent ID").requiredOption("--out <file.jetpack>", "new archive path")
+    .option("--no-memory", "omit facts and notes; updates may remove existing imported memory")
     .option("--include-files", "include files/ (may contain personal data)")
     .action(action(async (agent, flags) => {
       const { library, ctx } = await load();
@@ -71,7 +72,7 @@ export function registerTeleportCommands(program, options = {}) {
       try {
         const archive = join(temporary, "agent.jetpack");
         const { report } = await library.exportBundle({
-          from: adapter, agent, ctx, out: archive, includeFiles: flags.includeFiles === true,
+          from: adapter, agent, ctx, out: archive, includeMemory: flags.memory !== false, includeFiles: flags.includeFiles === true,
         });
         const out = resolve(ctx.cwd, flags.out);
         await promisify(copyFile)(archive, out, constants.COPYFILE_EXCL);
@@ -81,6 +82,7 @@ export function registerTeleportCommands(program, options = {}) {
   root.command("import").description("Import into this instance; source bundle is retained")
     .argument("<bundle>", "archive or agent folder")
     .option("--copy", "create a copy rather than update the same agent")
+    .option("--no-memory", "omit facts and notes; updates may remove existing imported memory")
     .option("--include-files", "include files/ (may contain personal data)")
     .option("--enable-routines", "explicitly enable imported routines")
     .action(action(async (path, flags) => {
@@ -92,7 +94,7 @@ export function registerTeleportCommands(program, options = {}) {
       const absolute = resolve(ctx.cwd, path);
       const bundle = await library.readBundle(absolute, { requireManifest: !(await stat(absolute)).isDirectory() });
       const report = await library.importBundle({
-        to: adapter, bundle, ctx, write: {
+        to: adapter, bundle, ctx, includeMemory: flags.memory !== false, write: {
           onConflict: flags.copy ? "copy" : "update",
           includeFiles: flags.includeFiles === true, enableRoutines: flags.enableRoutines === true,
         },

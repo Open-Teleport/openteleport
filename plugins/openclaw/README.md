@@ -42,3 +42,10 @@ plugin import, discovery, registration, or help.
 Registration uses a plugin-owned root because attaching to agents is not reliably discovered in the
 researched host. A conflicting teleport root fails explicitly. See docs/integrations/native-plugins.md
 for the tested host versions and the remaining runtime limits.
+
+## Transfer without structured memory
+
+Add `--no-memory` to `teleport export` or `teleport import` to omit facts and notes.
+Memory is included by default. Reports list the excluded counts. This does not anonymize
+instructions, persona, skills, routines, files or metadata. Updating without memory may remove
+previously imported destination memory; use `--copy` to keep the existing agent.

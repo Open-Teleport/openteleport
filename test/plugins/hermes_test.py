@@ -185,6 +185,37 @@ class HermesPluginTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertTrue(Path(payload["reportPath"]).is_file())
 
+    def test_memory_flag_is_explicit_for_both_operations(self):
+        for words in [("export", "--out", "a.jetpack"), ("import", "a.jetpack")]:
+            default = plugin.command(args(*words), sys.executable, self.cli, self.root, "default")
+            selected = plugin.command(args(*words, "--no-memory"), sys.executable, self.cli, self.root, "default")
+            self.assertNotIn("--no-memory", default)
+            self.assertEqual(selected.count("--no-memory"), 1)
+
+    def test_real_cli_excludes_memory_from_native_export(self):
+        node = os.environ["OPENTELEPORT_TEST_NODE"]
+        cli = PLUGIN.parents[2] / "dist" / "cli.js"
+        (self.root / "config.yaml").write_text("model: {}\n", encoding="utf-8")
+        (self.root / "SOUL.md").write_text("Synthetic persona\n", encoding="utf-8")
+        memory = self.root / "memories" / "MEMORY.md"
+        memory.parent.mkdir()
+        memory.write_text("- Private preference\n", encoding="utf-8")
+        destination = self.root / "selected.jetpack"
+        output = io.StringIO()
+        with patch.dict(os.environ, {"OPENTELEPORT_CLI": str(cli), "OPENTELEPORT_NODE": node,
+                                    "OPENTELEPORT_HOME": str(self.root)}), \
+             patch.object(plugin, "profile_context", return_value=(self.root, "default")), \
+             patch("sys.stdout", output), patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit) as status:
+                plugin.run(args("export", "--out", str(destination), "--no-memory"))
+            self.assertEqual(status.exception.code, 0)
+        with zipfile.ZipFile(destination) as archive:
+            self.assertNotIn("MEMORY.md", archive.namelist())
+            self.assertIn("SOUL.md", archive.namelist())
+        payload = json.loads(output.getvalue())
+        self.assertTrue(any(item["field"] == "memory.facts" for item in payload["skipped"]))
+        self.assertEqual(memory.read_text(encoding="utf-8"), "- Private preference\n")
+
     def test_replace_is_unavailable(self):
         with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
             args("import", "a.jetpack", "--replace")

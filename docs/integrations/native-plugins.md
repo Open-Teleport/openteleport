@@ -26,6 +26,9 @@ and saves a separate <archive>.report.md. A report-save failure is a warning aft
 An interrupted copy can leave a partial new archive; neither plugin automatically retries or rolls back.
 
 Both interfaces expose copy/update, not replace. Files and enabled routines require explicit flags.
+Both export and import accept --no-memory to exclude structured facts and notes. The report records
+omitted counts. This is not anonymization: other fields may contain personal information. An update
+without memory may remove previously imported destination memory; use --copy to keep the existing agent.
 The source remains unchanged. A successful command can return handoff; always follow nextStep.
 A secret scanner is not a guarantee that personal memory is safe to share.
 

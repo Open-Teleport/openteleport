@@ -97,3 +97,28 @@ it("preserves transfer success when report storage is unavailable", async () => 
   expect((await library.readBundle(join(home, "reviewer.jetpack"))).instructions).toBe("Review changes");
   expect(await readFile(blocked, "utf8")).toBe("keep this file");
 });
+
+it("selects memory for native export and import and retains omission reports", async () => {
+  const h = harness();
+  const read = h.adapter.read;
+  h.adapter.read = async (ctx, id) => {
+    const result = await read(ctx, id);
+    result.bundle.facts = ["Private preference"];
+    result.bundle.notes = [{ name: "private", text: "Private note" }];
+    return result;
+  };
+  await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "selected.jetpack", "--no-memory"], { from: "user" });
+  const selected = await library.readBundle(join(home, "selected.jetpack"));
+  expect(selected.facts).toEqual([]); expect(selected.notes).toEqual([]);
+  expect(h.output.mock.calls[0][0].skipped.map(item => item.field)).toEqual(["memory.facts", "memory.notes"]);
+  const original = (await h.adapter.read(h.ctx, "reviewer")).bundle;
+  original.manifest.id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  await library.writeBundle(original, join(home, "original.jetpack"));
+  const target = harness();
+  await target.program.parseAsync(["teleport", "import", "original.jetpack", "--no-memory", "--copy"], { from: "user" });
+  expect(target.adapter.written[0].bundle.facts).toEqual([]);
+  expect(target.adapter.written[0].bundle.notes).toEqual([]);
+  const report = target.output.mock.calls[0][0];
+  expect(JSON.parse(await readFile(report.reportPath, "utf8")).skipped).toHaveLength(2);
+  expect((await library.readBundle(join(home, "original.jetpack"))).facts).toEqual(["Private preference"]);
+});

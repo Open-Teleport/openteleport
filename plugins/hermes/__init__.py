@@ -16,10 +16,12 @@ def setup(parser):
     exporting = commands.add_parser("export", help="Export the selected profile")
     exporting.add_argument("--agent", help="Profile ID (defaults to the active profile)")
     exporting.add_argument("--out", required=True, help="Output .jetpack file")
+    exporting.add_argument("--no-memory", action="store_true", help="Omit facts and notes; updates may remove existing imported memory")
     exporting.add_argument("--include-files", action="store_true")
     importing = commands.add_parser("import", help="Import a bundle into a named Hermes profile")
     importing.add_argument("bundle")
     importing.add_argument("--copy", action="store_true")
+    importing.add_argument("--no-memory", action="store_true", help="Omit facts and notes; updates may remove existing imported memory")
     importing.add_argument("--include-files", action="store_true")
     importing.add_argument("--enable-routines", action="store_true")
 
@@ -52,6 +54,8 @@ def command(args, node, cli, base, active_id):
             argv.append("--include-files")
         if args.enable_routines:
             argv.append("--enable-routines")
+    if args.teleport_action != "list" and args.no_memory:
+        argv.append("--no-memory")
     return argv + ["--json", "--quiet"]
 
 
