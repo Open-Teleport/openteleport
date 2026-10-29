@@ -9,6 +9,7 @@ import sys
 import tempfile
 import types
 import unittest
+import zipfile
 from unittest.mock import patch
 
 PLUGIN = Path(__file__).resolve().parents[2] / "plugins" / "hermes" / "__init__.py"
@@ -104,6 +105,85 @@ class HermesPluginTests(unittest.TestCase):
         self.assertEqual(status, 1)
         status, _, _, _ = self.execute(subprocess.CompletedProcess([], 0, "{}", ""))
         self.assertEqual(status, 1)
+
+    def export_fixture(self, *, during=None, returncode=0, stdout=None):
+        destination = self.root / "output.jetpack"
+        output, error = io.StringIO(), io.StringIO()
+        def child(argv, **kwargs):
+            if argv[-1] == "--version":
+                return subprocess.CompletedProcess(argv, 0, "v24.1.0", "")
+            staged = Path(argv[argv.index("--out") + 1])
+            self.assertNotEqual(staged, destination)
+            staged.write_bytes(b"archive fixture")
+            (staged.parent / "move-report.md").write_text("report fixture", encoding="utf-8")
+            if during:
+                during(destination)
+            return subprocess.CompletedProcess(argv, returncode,
+                stdout if stdout is not None else json.dumps({"outcome": "exported", "warnings": []}), "")
+        with patch.object(plugin, "profile_context", return_value=(self.root, "reviewer")), \
+             patch.object(plugin.subprocess, "run", side_effect=child) as process, \
+             patch("sys.stdout", output), patch("sys.stderr", error):
+            with self.assertRaises(SystemExit) as status:
+                plugin.run(args("export", "--out", str(destination)))
+        return status.exception.code, output.getvalue(), error.getvalue(), process
+
+    def test_export_refuses_existing_and_racing_destinations(self):
+        destination = self.root / "output.jetpack"
+        destination.write_bytes(b"original")
+        status, _, error, child = self.export_fixture()
+        self.assertEqual(status, 1)
+        self.assertIn("already exists", error)
+        self.assertEqual(child.call_count, 1)  # Only Node version, no source export.
+        self.assertEqual(destination.read_bytes(), b"original")
+        destination.unlink()
+        status, _, _, _ = self.export_fixture(during=lambda path: path.write_bytes(b"racing writer"))
+        self.assertEqual(status, 1)
+        self.assertEqual(destination.read_bytes(), b"racing writer")
+
+    def test_export_publishes_archive_and_report_without_overwriting_report(self):
+        status, output, _, _ = self.export_fixture()
+        self.assertEqual(status, 0)
+        payload = json.loads(output)
+        self.assertEqual(Path(payload["artifactPath"]).read_bytes(), b"archive fixture")
+        report = Path(payload["reportPath"])
+        self.assertEqual(report.read_text(), "report fixture")
+        Path(payload["artifactPath"]).unlink()
+        report.write_text("keep this report")
+        status, output, _, _ = self.export_fixture()
+        self.assertEqual(status, 0)
+        self.assertEqual(report.read_text(), "keep this report")
+        self.assertNotIn("reportPath", json.loads(output))
+        self.assertIn("retain this JSON", json.loads(output)["warnings"][0])
+
+    def test_failed_or_invalid_export_is_never_published(self):
+        for status_code, text in [(3, '{"error": {}}'), (0, 'invalid'), (0, '{"outcome": "done"}')]:
+            status, _, _, _ = self.export_fixture(returncode=status_code, stdout=text)
+            self.assertNotEqual(status, 0)
+            self.assertFalse((self.root / "output.jetpack").exists())
+
+    def test_real_cli_export_roundtrip_and_collision(self):
+        node = os.environ["OPENTELEPORT_TEST_NODE"]
+        cli = PLUGIN.parents[2] / "dist" / "cli.js"
+        (self.root / "config.yaml").write_text("model: {}\n", encoding="utf-8")
+        (self.root / "SOUL.md").write_text("Synthetic reviewer persona\n", encoding="utf-8")
+        destination = self.root / "real export.jetpack"
+        output, error = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {"OPENTELEPORT_CLI": str(cli), "OPENTELEPORT_NODE": node,
+                                    "OPENTELEPORT_HOME": str(self.root)}), \
+             patch.object(plugin, "profile_context", return_value=(self.root, "default")), \
+             patch("sys.stdout", output), patch("sys.stderr", error):
+            with self.assertRaises(SystemExit) as status:
+                plugin.run(args("export", "--out", str(destination)))
+            self.assertEqual(status.exception.code, 0, error.getvalue())
+            original = destination.read_bytes()
+            with self.assertRaises(SystemExit) as status:
+                plugin.run(args("export", "--out", str(destination)))
+            self.assertEqual(status.exception.code, 1)
+            self.assertEqual(destination.read_bytes(), original)
+        with zipfile.ZipFile(destination) as archive:
+            self.assertIn("Synthetic reviewer persona", archive.read("SOUL.md").decode("utf-8"))
+        payload = json.loads(output.getvalue())
+        self.assertTrue(Path(payload["reportPath"]).is_file())
 
     def test_replace_is_unavailable(self):
         with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):

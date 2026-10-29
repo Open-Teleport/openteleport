@@ -20,6 +20,11 @@ It uses the host's root/profile helpers to choose the source agent and import ba
 reports, stderr and nonzero status, and rejects missing Node/CLI, old Node, invalid output and timeout.
 The wrapper does not run a package installer or interpolate a shell command.
 
+Both native plugins refuse to overwrite export archives, including files created while export is
+running. Hermes prepares the CLI export in temporary storage, then exclusively copies the archive
+and saves a separate <archive>.report.md. A report-save failure is a warning after archive success.
+An interrupted copy can leave a partial new archive; neither plugin automatically retries or rolls back.
+
 Both interfaces expose copy/update, not replace. Files and enabled routines require explicit flags.
 The source remains unchanged. A successful command can return handoff; always follow nextStep.
 A secret scanner is not a guarantee that personal memory is safe to share.
@@ -46,4 +51,4 @@ The test suite requires Python >=3.11 for the Hermes bridge contract tests; CI i
 
 - Hermes 0.13.0: the actual executable loaded the directory plugin in a synthetic named profile; help, list, export and copy-import passed. The copy landed beside the original profile under the base, not inside it. No model or scheduler was started.
 - OpenClaw 2026.5.28: the actual CLI discovered the plugin root; help, list and export passed in an isolated configuration. Importing the Hermes-produced bundle with copy created reviewer-2 beside reviewer, preserving persona and one memory fact. The export reported that routines were not read because the test Gateway was unavailable. These probes used NODE_DISABLE_COMPILE_CACHE=1 after initial cold-start timeouts.
-- Full local suite: 2641 passed, 12 skipped, including the Python bridge tests invoked by Vitest. Typecheck/build passed. The v0.3 PR also passed CI on Linux, macOS and Windows.
+- Full local suite after export collision handling: 2679 passed, 12 skipped, including 11 Python bridge tests invoked by Vitest and a real local CLI export. Typecheck/build passed. The v0.3 PR also passed CI on Linux, macOS and Windows.

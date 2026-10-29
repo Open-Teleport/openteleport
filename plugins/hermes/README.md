@@ -24,8 +24,12 @@ The bridge resolves that distinction through Hermes's own public constants helpe
 
 Commands execute immediately, with OpenTeleport CLI semantics. For conversational preview and approval
 use the v0.3 MCP server. Import defaults to update; files are excluded and routines disabled.
-Replace is not exposed. Unlike the OpenClaw wrapper, export follows CLI overwrite behavior: choose
-a new --out path to retain an existing archive. The CLI also saves its normal Markdown report.
+Replace is not exposed. Export refuses an existing archive, including one created during the export.
+The CLI first writes into a private temporary directory; only a successful export is copied to the
+requested path with exclusive creation. A failed or interrupted final copy may leave a partial new
+file: inspect it before retrying. Export also saves <archive>.report.md without overwriting an existing
+report. If saving that report fails, the completed archive remains successful and the JSON result
+includes a warning. Import keeps the CLI's normal Markdown report behavior.
 
 Registration/help do not spawn a process. Operations use a fixed local Node/CLI path, argv arrays,
 shell=False, an explicit cwd, copied environment, and bounded timeouts. Nonzero child exit status and

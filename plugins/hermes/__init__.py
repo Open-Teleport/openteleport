@@ -1,5 +1,8 @@
 """Hermes directory plugin. Import and register are deliberately side-effect free."""
 import json
+import copy
+from contextlib import nullcontext
+import tempfile
 import os
 from pathlib import Path
 import shutil
@@ -52,6 +55,27 @@ def command(args, node, cli, base, active_id):
     return argv + ["--json", "--quiet"]
 
 
+def publish_export(stage, destination, payload):
+    # Exclusive creation also rejects a file/symlink created while the CLI was exporting.
+    # A failed copy may leave a partial new file; never remove or overwrite it automatically.
+    with (stage / "agent.jetpack").open("rb") as source:
+        with destination.open("xb") as output:
+            shutil.copyfileobj(source, output)
+    payload["artifactPath"] = str(destination)
+    report = Path(str(destination) + ".report.md")
+    try:
+        with (stage / "move-report.md").open("rb") as source:
+            with report.open("xb") as output:
+                shutil.copyfileobj(source, output)
+        payload["reportPath"] = str(report)
+    except OSError:
+        # The archive is already complete. Preserve success and the full JSON report.
+        payload.setdefault("warnings", []).append(
+            "Export completed, but its Markdown report could not be saved; retain this JSON result."
+        )
+    return payload
+
+
 def run(args):
     try:
         cli_value = os.environ.get("OPENTELEPORT_CLI", "")
@@ -68,29 +92,45 @@ def run(args):
         child_env = os.environ.copy()
         # Active profile is addressed by ID; the adapter must receive its base, not a nested profile.
         child_env["HERMES_HOME"] = str(base)
-        result = subprocess.run(command(args, node_value, cli_value, base, active_id),
-                                cwd=str(Path.cwd()), env=child_env, capture_output=True,
-                                text=True, encoding="utf-8", timeout=120, shell=False)
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            raise ValueError("OpenTeleport returned invalid JSON; inspect the destination before retrying.")
-        if not isinstance(payload, (dict, list)):
-            raise ValueError("OpenTeleport returned an unexpected result.")
-        if result.returncode == 0 and isinstance(payload, dict) and "error" in payload:
-            raise ValueError("OpenTeleport reported an error despite a zero exit status.")
-        if result.returncode == 0 and args.teleport_action != "list":
-            if not isinstance(payload, dict) or payload.get("outcome") not in ("done", "handoff", "exported"):
-                raise ValueError("OpenTeleport did not return a transfer report.")
-        print(json.dumps(payload, ensure_ascii=False))
-        raise SystemExit(result.returncode)
+        destination = None
+        if args.teleport_action == "export":
+            # Do not resolve the final symlink: even a dangling link must count as occupied.
+            destination = Path(os.path.abspath(args.out))
+            if os.path.lexists(destination):
+                raise ValueError("Export destination already exists; choose a new --out path.")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        with (tempfile.TemporaryDirectory(prefix="openteleport-export-")
+              if destination is not None else nullcontext(None)) as staging:
+            invocation = copy.copy(args)
+            if staging is not None:
+                invocation.out = str(Path(staging) / "agent.jetpack")
+            result = subprocess.run(command(invocation, node_value, cli_value, base, active_id),
+                                    cwd=str(Path.cwd()), env=child_env, capture_output=True,
+                                    text=True, encoding="utf-8", timeout=120, shell=False)
+            if result.stderr:
+                sys.stderr.write(result.stderr)
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                raise ValueError("OpenTeleport returned invalid JSON; inspect the destination before retrying.")
+            if not isinstance(payload, (dict, list)):
+                raise ValueError("OpenTeleport returned an unexpected result.")
+            if result.returncode == 0 and isinstance(payload, dict) and "error" in payload:
+                raise ValueError("OpenTeleport reported an error despite a zero exit status.")
+            if result.returncode == 0 and args.teleport_action != "list":
+                if not isinstance(payload, dict) or payload.get("outcome") not in ("done", "handoff", "exported"):
+                    raise ValueError("OpenTeleport did not return a transfer report.")
+            if destination is not None and result.returncode == 0:
+                if payload.get("outcome") != "exported":
+                    raise ValueError("OpenTeleport did not return an export report; no archive was published.")
+                payload = publish_export(Path(staging), destination, payload)
+            print(json.dumps(payload, ensure_ascii=False))
+            raise SystemExit(result.returncode)
     except subprocess.TimeoutExpired:
         print("OpenTeleport timed out; inspect the destination before retrying.", file=sys.stderr)
         raise SystemExit(1)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        print("OpenTeleport: " + str(error), file=sys.stderr)
+        print("OpenTeleport: " + str(error) + "; inspect any output before retrying.", file=sys.stderr)
         raise SystemExit(1)
 
 
