@@ -27,6 +27,7 @@ it("discloses Codex shared skills outside an explicit destination", async () => 
   const result = await destinationScope("codex", ctx, bundle);
   expect(result.locations).toEqual(expect.arrayContaining([
     expect.objectContaining({ path: join(home, "custom", "agents") }),
+    expect.objectContaining({ path: join(home, "custom"), kind: "container", purpose: expect.stringContaining("skill-association") }),
     expect.objectContaining({ path: join(home, ".agents", "skills"), shared: true }),
   ]));
   const empty = await destinationScope("codex", ctx, { ...bundle, skills: [] });
