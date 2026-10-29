@@ -17,7 +17,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 
 The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; the research behind it is in `docs/superpowers/research/`.
 
-- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code (layout from documentation and source code, not yet verified on a real install).
+- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code, not recorded from an install. Hermes and Codex have since been checked on real installs (see "What is verified").
   - `hermes`: profiles (the Hermes home and `profiles/*`), `SOUL.md`, skills, memory entries, `cron/jobs.json` (written paused). Result: `done`.
   - `codex`: the global setup and the custom agents in `agents/*.toml`; a write makes a custom agent file and puts its skills in `~/.agents/skills`. Result: `done`.
   - `openbot`: reads a copy of `openbot.db` or an export zip; writes an `openbot-agent-import` zip. Result: `handoff` (import the zip in Server settings).
@@ -28,15 +28,31 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 - **A simpler CLI**: `export` and `import` default to the current folder; `--help` shows the basic commands and flags, `--help-all` everything.
 - **Adapter authoring**: `Adapter.createsOnWrite` and `Adapter.handoff`, the shared helpers in `src/adapters/` (`marker.ts`, `fs.ts`, `skill-files.ts`, `skills.ts`, `names.ts`) and `src/core/` (`zip.ts`, `text.ts`, `schedule.ts`), and a test that every adapter flagged `handoff` ends a write in a handoff.
 - **Fixes**: a closed pipe keeps an earlier failure's exit code; the id cache asks for an agent's identity only when the agent has no id; a fact an adapter skipped is no longer counted as moved.
-- **Tests**: 2,603 passing, 12 skipped on this machine (the end-to-end test that needs a real OpenClaw, and tests that need a platform feature). CI runs them on Ubuntu, macOS and Windows against the built CLI in a sandbox.
+- **Tests**: 2,616 passing, 12 skipped on this machine (the end-to-end test that needs a real OpenClaw, and tests that need a platform feature). CI runs them on Ubuntu, macOS and Windows against the built CLI in a sandbox.
+
+## What is verified
+
+Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). The evidence is `docs/superpowers/research/2026-10-29-real-install-check.md`.
+
+- **Hermes** (0.13.0): import, same-id update, copy and export through the engine, with Hermes's own code reading the result back. It recovered the facts, the skill, the three routines (all paused, none run) and both profiles, and `skills/.bundled_manifest` has `name:hash` lines. Two edge cases came out of it, both fixed on this branch and not yet rechecked on an install:
+  - A one-off time without an offset (`once.run_at`, as a hand-written job has it) is read by Hermes in the machine's time zone, not the profile's. The adapter now reads it the same way and warns about the assumption; cron expressions keep the profile's zone.
+  - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
+- **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the open defects below.
+
+## Open defects
+
+Found on the same real install and reproduced through OpenTeleport itself. A fix for both is in progress on a separate branch (the report has the steps). Until it merges, do not call Codex round-trip portability verified.
+
+- **Codex: copies share the runtime `name`.** `--copy`, or a name conflict, writes `<slug>-2.toml` with the same `name = "..."`. Codex keys a role by `name`, so it exposes one role and the original is no longer separately selectable. The `@<slug>` in the Codex hint is also wrong for a name that slugifies differently.
+- **Codex: a custom-agent export drops its skills.** Importing an agent reports its skill as moved and Codex finds it, but exporting that custom agent gives a bundle with no skills and no warning. Only the global setup (`--agent default`) exports skills.
 
 ## What is not verified yet
 
 - The end-to-end round trip on a real OpenClaw install (`OPENTELEPORT_E2E=1 npx vitest run test/e2e`). The table in `docs/demo.md` lists the assumptions it settles: the JSON printed by `openclaw cron list/add`, routine creation through the Gateway, the Windows `.cmd` shim with multi-line instructions, `config set` with dashed agent ids.
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
-- **The five v0.2 adapters on a real install.** None of the five apps was used to record fixtures; every layout comes from documentation and source code. A verifier should check:
-  - **Hermes**: the fields of `cron/jobs.json` that `hermes cron list` shows for an imported job (`id`, `schedule`, `enabled`, `state: "paused"`, `next_run_at`), that `hermes cron resume <id>` starts one, and the format of `skills/.bundled_manifest` (the adapter reads `name` or `name:hash` lines).
-  - **Codex**: that an `agents/<name>.toml` the adapter writes is listed and usable as `@<name>` (the keying and the fields Codex requires), and that `~/.agents/skills` is where Codex looks for user skills.
+- **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
+  - **Hermes** (the rest of it): what `hermes cron list` shows for an imported job, that `hermes cron resume <id>` starts one, and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
+  - **Codex** (the rest of it): the `@<name>` syntax and `agents.enabled`, and the file names Codex gives its generated memory (`memories/` was empty).
   - **OpenBot**: the schema of `openbot.db` (the adapter knows migration 47; a newer one gets a warning, a missing table or column an error), and that Server settings accepts the import zip it writes, including the `x-openteleport` key in its manifest.
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
@@ -47,6 +63,7 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 - A folder whose `files/` exceeds 100 MiB cannot be read even without `--include-files`.
 - The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
 - Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
+- Codex (open until its branch merges): copies of one agent share a runtime `name`, and exporting a custom agent drops its skills. See "Open defects".
 - A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
 
 ## What comes next (v0.3)

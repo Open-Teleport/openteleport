@@ -11,8 +11,10 @@ Five more apps, a wizard for the first run, and a few small fixes.
 
 ### Added
 
-- Five adapters, all read and write, each built from the documentation and source code of the app
-  and not yet checked on a real install:
+- Five adapters, all read and write, each built from the documentation and source code of the app.
+  Hermes and Codex were then checked on real installs: Hermes passed, and Codex has two open
+  defects (copies of one agent share a runtime `name`, and exporting a custom agent drops its
+  skills); the other three have not been checked yet:
   - `hermes` (Hermes Agent): profiles, `SOUL.md`, skills, memory entries and cron jobs. A write
     makes or updates a named profile and writes its cron jobs paused. Result: done.
   - `codex` (Codex): the global setup and the custom agents in `agents/*.toml`. A write makes a
