@@ -29,6 +29,7 @@ export async function destinationScope(app: string, ctx: Ctx, bundle: Bundle) {
       const home = codexHome(target);
       add(agentsDir(home), "container", false, "Custom agent definitions");
       add(join(home, IDS_FILE), "file", true, "OpenTeleport agent identity map");
+      add(home, "container", true, "OpenTeleport identity and per-agent skill-association metadata in the application home");
       if (bundle.skills.length) add(userSkillsDir(target), "container", true, "Skills shared with other agents and applications, even with an explicit targetDir");
       break;
     }
