@@ -19,7 +19,7 @@ const IMPORT_DIR = fileURLToPath(new URL("../../fixtures/openbot/import-v1", imp
 const TRANSFER_DIR = fileURLToPath(new URL("../../fixtures/openbot/transfer-v1", import.meta.url));
 
 const HINT =
-  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>";
+  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then run: openteleport list --from grok-bot --source-dir <openbot-export-*.zip>";
 const CLOUD = /^Grok Bot keeps agents in the cloud\. /;
 
 const noExec = (() => {

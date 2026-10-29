@@ -17,7 +17,7 @@ import { zipDirectoryToFile } from "../../helpers/zip.js";
 
 const IMPORT_DIR = fileURLToPath(new URL("../../fixtures/openbot/import-v1", import.meta.url));
 const HINT =
-  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>";
+  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then run: openteleport list --from grok-bot --source-dir <openbot-export-*.zip>";
 
 let box: Sandbox;
 beforeEach(async () => {
@@ -80,14 +80,14 @@ describe("import --to grok-bot", () => {
     expect(await readdir(box.cwd)).toEqual(["ada-for-grok-bot"]);
   });
 
-  it("prints the next step last, and nothing like a stack trace", async () => {
+  it("prints the next step once, first in the report, and nothing like a stack trace", async () => {
     const result = await run(box, ["import", "--to", "grok-bot", ADA_DIR]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Outcome: handoff");
-    const lastLine = result.stdout.trimEnd().split("\n").at(-1);
-    expect(lastLine).toBe(
-      `Next step: Open ${join(folder(), "README.md")} and follow the five steps in Grok Bot`,
-    );
+    const lines = result.stdout.trimEnd().split(/\r?\n/);
+    const next = `Next step: Open ${join(folder(), "README.md")} and follow the five steps in Grok Bot`;
+    expect(lines.filter((line) => line.startsWith("Next step:"))).toEqual([next]);
+    expect(lines[1]).toBe(next);
     expect(result.stdout + result.stderr).not.toMatch(STACK_LINE);
   });
 

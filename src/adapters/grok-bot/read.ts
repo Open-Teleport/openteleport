@@ -15,7 +15,7 @@ const APP = "grok-bot";
 
 /** What `detect` says, and what an error starts with when there is no zip to read. */
 export const HINT =
-  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>";
+  "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then run: openteleport list --from grok-bot --source-dir <openbot-export-*.zip>";
 
 /** `stat` (a link to a zip is read like the zip), or `undefined` when nothing is there. */
 async function statIfAny(path: string): Promise<Stats | undefined> {

@@ -136,7 +136,8 @@ const useColor = (): boolean => process.stdout.isTTY === true && !process.env.NO
 /**
  * The outcome of an export, import or move. With `--json` stdout carries only the report, and
  * the report file is mentioned on stderr unless `--quiet`. Otherwise the report is printed, then
- * where its file went (unless `--quiet`), then, for a hand-over, the step left to the user.
+ * where its file went (unless `--quiet`). The step a hand-over leaves to the user is part of the
+ * report (its `Next step` line), so it is said once.
  */
 export function printReport(report: MoveReport, opts: CommonOptions, reportPath: string): void {
   const written = `Report written to ${reportPath}`;
@@ -147,9 +148,6 @@ export function printReport(report: MoveReport, opts: CommonOptions, reportPath:
   }
   const lines = [renderReportTerminal(report, { color: useColor() }), ""];
   if (opts.quiet !== true) lines.push(written);
-  if (report.outcome === "handoff" && report.nextStep !== undefined) {
-    lines.push(`Next step: ${oneLine(report.nextStep)}`);
-  }
   writeOut(lines.join("\n").trimEnd());
 }
 
@@ -280,8 +278,14 @@ export async function ensureDetected(
   const { found, location, hint } = await adapter.detect(ctx);
   if (found) return;
   const where = location === undefined ? "" : ` at ${location}`;
+  // Adapters word their hint for a source. A target is pointed to with `--target-dir`, and
+  // `--source-dir` changes nothing there (see `sideOf`), so a target is told so.
+  const advice =
+    side === "target" && hint?.includes("--source-dir") === true
+      ? `${hint} (as a target, pass --target-dir in place of --source-dir)`
+      : hint;
   throw new NotDetectedError(
-    `${adapter.displayName} was not detected${where}${hint === undefined ? "" : `. ${hint}`}`,
+    `${adapter.displayName} was not detected${where}${advice === undefined ? "" : `. ${advice}`}`,
   );
 }
 

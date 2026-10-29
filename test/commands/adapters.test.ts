@@ -96,7 +96,7 @@ describe("adapters", () => {
       found: false,
       location: null,
       version: null,
-      hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>",
+      hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then run: openteleport list --from grok-bot --source-dir <openbot-export-*.zip>",
     });
     expect(rows[7]).toMatchObject({
       name: "letta",
