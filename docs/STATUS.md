@@ -17,7 +17,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 
 The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; the research behind it is in `docs/superpowers/research/`.
 
-- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code: layout from documentation and source code, not yet verified on a real install.
+- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code (layout from documentation and source code, not yet verified on a real install).
   - `hermes`: profiles (the Hermes home and `profiles/*`), `SOUL.md`, skills, memory entries, `cron/jobs.json` (written paused). Result: `done`.
   - `codex`: the global setup and the custom agents in `agents/*.toml`; a write makes a custom agent file and puts its skills in `~/.agents/skills`. Result: `done`.
   - `openbot`: reads a copy of `openbot.db` or an export zip; writes an `openbot-agent-import` zip. Result: `handoff` (import the zip in Server settings).
@@ -45,6 +45,7 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 ## Known small issues (good first fixes)
 
 - A folder whose `files/` exceeds 100 MiB cannot be read even without `--include-files`.
+- The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
 - Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
 - A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
 
@@ -62,7 +63,7 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 
 `package.json` stays at `0.1.0` until the owner decides. `v0.1.0` has not been released (there is no `NPM_TOKEN` secret yet, and neither the CHANGELOG entry nor a tag has a date). There are two paths:
 
-1. Tag `v0.1.0` on commit `f1ad906` (the last commit before v0.2 was merged), release it, then bump to `0.2.0` after the merge and release that. Two versions on npm, the second with everything on this page.
+1. Tag `v0.1.0` on commit `f1ad906` (the commit v0.2 branched from), release it, then bump to `0.2.0` after the merge and release that. Two versions on npm, the second with everything on this page.
 2. Skip `0.1.0` and release `0.2.0` directly: set `version` to `0.2.0`, date the CHANGELOG entry, tag `v0.2.0`.
 
 Either way the `NPM_TOKEN` repository secret has to exist first, and the release workflow refuses a tag that does not match `package.json`.

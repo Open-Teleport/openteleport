@@ -24,11 +24,12 @@ Five more apps, a wizard for the first run, and a few small fixes.
     text to paste into a new Bot. Result: handoff (the five steps in the pack's README).
   - `letta` (Letta Code): reads the local backend and the local memory of Cloud agents, writes a
     folder with the memory in MemFS layout and a script (`letta-commands.sh` or `.ps1`) that
-    creates the agent, restores its memory and adds its routines. Result: handoff.
+    creates the agent, restores its memory and adds its routines, which stay commented out in the
+    script unless `--enable-routines` is given (for the enabled ones). Result: handoff.
 - A wizard: `npx openteleport` with no arguments, in a terminal, asks for the source app, the
   agent and the target, says in one sentence what it will do, and asks before it does it. Without
   a terminal, it prints the help and exits with 2.
-- `--help-all`, which lists every command, flag and environment variable. `--help` now shows the
+- `--help-all`, which lists every command and flag and the two `OPENTELEPORT_` variables. `--help` now shows the
   commands and flags most people need.
 - `export` without `--from` exports the agent folder you are in; `import` without `--to`
   unpacks into a new folder named after the agent.

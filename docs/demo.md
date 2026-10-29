@@ -65,7 +65,7 @@ Copy-Item -Recurse test/fixtures/hermes/home "$demo/hermes"
 Copy-Item -Recurse test/fixtures/codex/home/.codex "$demo/codex"
 ```
 
-The commands below are written for bash (`$DEMO`); in PowerShell use `$demo`. The fixtures are rebuilt from documentation and source code, so the results show what OpenTeleport writes, not that the app accepts it; the table at the end of this page lists what a real run has to settle.
+The commands below are written for bash (`$DEMO`); in PowerShell use `$demo`. The setup sets `OPENTELEPORT_HOME` in your shell, so run the scenarios in a subshell, or unset it afterwards (`unset OPENTELEPORT_HOME`, or `Remove-Item Env:OPENTELEPORT_HOME` in PowerShell). The fixtures are rebuilt from documentation and source code, so the results show what OpenTeleport writes, not that the app accepts it; the table at the end of this page lists what a real run has to settle.
 
 | Adapter | Result of a write | What you do after |
 | --- | --- | --- |

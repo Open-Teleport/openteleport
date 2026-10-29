@@ -254,7 +254,7 @@ Nazwa CLI `letta`, `displayName` „Letta Code". Pewność: średnia. Zapis to `
 
 | `Bundle` | Letta Code MemFS [L10] | Reguła |
 |---|---|---|
-| `persona` | `memory/persona.md` (treść bez frontmattera) | Frontmatter `name`, `description` → manifest `name`, `title`, gdy rekordu brak. |
+| `persona` | `memory/persona.md` (treść bez frontmattera) | Frontmatter `name`, `description` → manifest `name`, `title`, gdy rekordu brak. Uwaga (wykonanie): `name` jest etykietą bloku pamięci (`persona`), nie nazwą agenta, więc nazwą jest nazwa z rekordu albo `agentId` (8.2); z frontmattera zostaje tylko `description` (jako `title`). |
 | `instructions` | `system` z rekordu lokalnego; dla Cloud: `memory/instructions.md`, jeśli istnieje (plik, który sam zapisujemy); inaczej pusty | |
 | `skills` | `memory/skills/<name>/SKILL.md` [L13] | Skille maszyny (`~/.letta/skills`) i projektu nie są czytane (nie należą do agenta). |
 | `routines` | `crons.json` → `tasks[]` z `agent_id` = id agenta [L17] | `cron` + `timezone` → `{kind:"cron"}`; `scheduled_for` (ISO UTC) → `{kind:"at"}`; `status` `active` → `enabled: true`, `paused` → `false`; `fired`, `missed`, `cancelled` → pominięte z ostrzeżeniem. `description`, `conversation_id` → `x-letta.routines[name]`. |
