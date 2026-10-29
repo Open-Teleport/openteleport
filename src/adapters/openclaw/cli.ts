@@ -164,10 +164,16 @@ export type OpenClawCommand = {
   viaShell: boolean;
 };
 
-/** How long `--version` and the probe for the job family may take. */
-const SHORT_TIMEOUT_MS = 10_000;
-/** How long a job, config or agents command may take: jobs go through the Gateway. */
-const LONG_TIMEOUT_MS = 90_000;
+/**
+ * How long `--version` may take. OpenClaw is a large Node program: on a loaded Windows machine
+ * it took 10 to 15 s to print its version.
+ */
+const SHORT_TIMEOUT_MS = 30_000;
+/**
+ * How long any other command may take; jobs and `agents add` go through the Gateway. On the
+ * same machine `agents add` once took over 90 s while the Gateway waited on its database.
+ */
+const LONG_TIMEOUT_MS = 300_000;
 
 /** How long commands may take, in milliseconds; tests make them short. */
 export type OpenClawTimeouts = { short?: number; long?: number };
@@ -355,12 +361,13 @@ export class OpenClawCli {
   /**
    * Runs `automations list --all --json` to settle the job command family: `cron` when OpenClaw
    * answers "Unknown command", otherwise `automations`. Returns the listing when it ran; throws
-   * when it failed for another reason, a timeout included. `timeout` is the long one when the
-   * listing is what the caller wants, the short one when only the family is.
+   * when it failed for another reason, a timeout included. The answer comes as soon as the CLI
+   * has started, so the long timeout costs nothing but guards against a wrong family on a slow
+   * machine (a probe cut short would leave `automations` for an OpenClaw that has `cron`).
    */
-  private async probeJobCommand(timeout: number = this.longTimeout): Promise<string | undefined> {
+  private async probeJobCommand(): Promise<string | undefined> {
     try {
-      const stdout = await this.run(["automations", "list", "--all"], true, timeout);
+      const stdout = await this.run(["automations", "list", "--all"], true, this.longTimeout);
       this.jobFamily = "automations";
       return stdout;
     } catch (error) {
@@ -378,8 +385,8 @@ export class OpenClawCli {
    */
   async jobCommand(): Promise<JobCommand> {
     if (this.jobFamily === undefined) {
-      // Only the family is wanted, and an OpenClaw without `automations` says so at once.
-      await this.probeJobCommand(this.shortTimeout).catch(() => undefined);
+      // Only the family is wanted; an OpenClaw without `automations` says so once it has started.
+      await this.probeJobCommand().catch(() => undefined);
     }
     return this.jobFamily ?? "automations";
   }

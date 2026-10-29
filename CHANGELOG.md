@@ -13,6 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - OpenClaw: `agents list --json` rows that call the workspace `location` (2026.5.28) are read; the default agent's workspace is `agents.defaults.workspace` itself, as OpenClaw resolves it; a job without an agent belongs to the default agent, not always `main`.
 - The end-to-end test no longer passes the test runner's own variables (`VITEST`, `TEST`, `NODE_ENV`) on to the CLI and to OpenClaw, which runs in a test mode of its own under `VITEST` and prints nothing for `agents list --json`.
 
+### Changed
+
+- OpenClaw: a command may take 5 minutes instead of 90 seconds (`--version` 30 seconds instead of 10), and the probe for the job command family gets the full time too. On a loaded Windows machine `agents add` through the Gateway exceeded 90 seconds, and a probe cut short would have left `automations` for an OpenClaw that has `cron`.
+
 ## [0.4.0] - 2026-10-29
 
 Combines the v0.3 session integration and v0.4 native plugin milestones. There was no separate npm 0.3.0 release.

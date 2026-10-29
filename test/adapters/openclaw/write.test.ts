@@ -1187,24 +1187,24 @@ describe("OpenClawCli: timeouts", () => {
     expect(await cli.version()).toBeUndefined();
   });
 
-  it("settles the job family after the short timeout when the probe hangs", async () => {
-    const cli = cliWith(() => undefined, { short: 20, long: 60_000 });
+  it("settles the job family after the long timeout when the probe hangs", async () => {
+    const cli = cliWith(() => undefined, { short: 60_000, long: 20 });
 
     expect(await cli.jobCommand()).toBe("automations");
   });
 
   it("says the same when execa itself stops a command for its timeout", async () => {
-    const timedOut = Object.assign(new Error("Command timed out after 90000 milliseconds"), {
+    const timedOut = Object.assign(new Error("Command timed out after 300000 milliseconds"), {
       timedOut: true,
     });
     const cli = cliWith((args) => (args[0] === "agents" ? timedOut : undefined));
 
     await expect(cli.agentsList()).rejects.toThrow(
-      "openclaw agents list did not finish within 90 s",
+      "openclaw agents list did not finish within 300 s",
     );
   });
 
-  it("asks execa for 10 s for --version and the probe, 90 s for every other command", async () => {
+  it("asks execa for 30 s for --version and 300 s for every other command, the probe included", async () => {
     const seen: { args: string[]; timeout?: number }[] = [];
     const cli = cliWith(
       (args) => (args[0] === "--version" ? "OpenClaw 2026.10.3\n" : defaultReply(args)),
@@ -1219,11 +1219,11 @@ describe("OpenClawCli: timeouts", () => {
     await cli.configSet("agents.entries.ada.model", "a/b");
 
     expect(seen.map(({ args, timeout }) => [args.slice(0, 2).join(" "), timeout])).toEqual([
-      ["--version", 10_000],
-      ["automations list", 10_000],
-      ["agents list", 90_000],
-      ["automations add", 90_000],
-      ["config set", 90_000],
+      ["--version", 30_000],
+      ["automations list", 300_000],
+      ["agents list", 300_000],
+      ["automations add", 300_000],
+      ["config set", 300_000],
     ]);
   });
 });
