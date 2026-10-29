@@ -99,11 +99,27 @@ function scanWhole(path: string, text: string, findings: SecretFinding[]): void 
 /** Too large to scan: over the text-entry limit. */
 const isTooLarge = ({ bytes }: FileEntry): boolean => bytes.byteLength > MAX_TEXT_ENTRY_BYTES;
 
+const isBinary = ({ bytes }: FileEntry): boolean => bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0);
+
+/** Counts skipped payloads using exactly the same size/binary rules as scanFile, without contents. */
+export function secretScanExclusions(bundle: Bundle) {
+  let oversizedFiles = 0;
+  let binaryFiles = 0;
+  const count = (entry: FileEntry) => {
+    if (isTooLarge(entry)) oversizedFiles += 1;
+    else if (isBinary(entry)) binaryFiles += 1;
+  };
+  for (const skill of bundle.skills) for (const entry of skill.files) count(entry);
+  for (const entry of bundle.files) count(entry);
+  return { oversizedFiles, binaryFiles, avatars: bundle.avatar ? 1 : 0 };
+}
+
+
 /** Scans a file's bytes as UTF-8 text, unless it is too large or looks binary. */
 function scanFile(path: string, entry: FileEntry, findings: SecretFinding[]): void {
   const { bytes } = entry;
   if (isTooLarge(entry)) return;
-  if (bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return;
+  if (isBinary(entry)) return;
   scanLines(path, decoder.decode(bytes), findings);
 }
 

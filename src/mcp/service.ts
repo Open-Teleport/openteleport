@@ -1,3 +1,4 @@
+import { scanDisclosure } from "./scan.js";
 import { destinationScope } from "./destination.js";
 import { fitsPreviewBudget } from "./budget.js";
 import { ApplyFailedError, readReceipt, writeReceipt, type Receipt } from "./receipts.js";
@@ -130,6 +131,7 @@ export class TransferSession {
       throw new UsageError("Bundle exceeds the session preview size or complexity limit; use the CLI.");
     }
     bundle = structuredClone(bundle);
+    const secretScan = scanDisclosure(bundle);
     const findings = scanSecrets(bundle);
     if (findings.length) throw new SecretsFoundError(findings);
     const identity = from?.cacheIdentity && agent
@@ -162,12 +164,12 @@ export class TransferSession {
         path: input.path ? resolve(ctx.cwd, input.path) : ctx.sourceDir ?? null },
       destination: { app: to?.name ?? "jetpack", path: out ?? ctx.targetDir ?? null,
         usesApplicationDefault: !out && !ctx.targetDir, cwd: ctx.cwd, writeScope },
-      contents: summary(bundle), skipped,
+      contents: summary(bundle), skipped, secretScan,
       options: { onConflict: input.onConflict ?? "update", includeFiles: input.includeFiles === true,
         enableRoutines: input.enableRoutines === true },
       handoff: to?.handoff === true,
       warnings: [
-        ...warnings,
+        ...warnings, ...secretScan.warnings,
         "This is a content/capability preview, not a file diff or a reservation of the destination. Adapter conflicts are checked during apply.",
         "Memory and instructions may contain personal information even when the secret scan passes.",
         ...(to ? ["Writes are not transactional; on failure inspect the destination before retrying."] : []),

@@ -43,7 +43,11 @@ default. The source is never deleted. Export refuses an existing destination, in
 preview. A handoff is returned as such, with nextStep. Successful transfers return the complete report and
 save a Markdown copy under OPENTELEPORT_HOME/.openteleport/reports (home by default).
 
-The secret scanner is heuristic. Personal memory is not automatically anonymized. Previews summarize
+The secret scanner is heuristic. Validation's ok means no detected credential findings, not that every
+payload was scanned or that the package is safe to share. Validation returns scan and previews return
+secretScan, with counts of oversized files, binary files and avatars that were not scanned. Preview
+counts describe the selected snapshot: excluded files do not travel and are not included in those counts.
+Names/paths and some metadata are outside the scanner's scope. Personal memory is not automatically anonymized. Previews summarize
 capability losses; additional adapter approximations and skips are reported after application.
 
 ## Destination location disclosure
