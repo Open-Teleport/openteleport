@@ -5,6 +5,32 @@ and whether OpenTeleport saves effort compared with configuring the destination 
 The reviewer in `examples/pilot-reviewer/` uses fictional Project Cedar data. Keep evaluation prompts
 and scoring notes outside that folder so they do not become part of the transferred agent.
 
+## Include all three audiences
+
+The first public release serves technical users, people moving a personal assistant, and teams
+sharing agent configurations. Use the same fictional reviewer and task rubric for comparable results,
+but record each audience separately. A participant can belong to more than one group; record the
+scenario being tested for each attempt.
+
+| Audience | Scenario | Additional evidence |
+| --- | --- | --- |
+| Technical users | Move a reviewer between two applications they use. | Setup and repair effort compared with manual configuration; repeated use across apps. |
+| Personal assistant users | Move the fictional assistant through the guided conversation. | Whether the participant understands the preview, chooses the destination and finishes any handoff without operator help. |
+| Teams | Give a colleague a reusable configuration using fictional team context. | Whether the recipient can inspect, install and use it; whether both people understand which memory and shared locations are included. |
+
+Record every intervention by the test operator, including terminal commands and explanations. An
+assisted completion does not count as an unassisted completion. Installation prerequisites and missing
+interfaces are findings, even when the underlying transfer works.
+
+Use synthetic data for the team scenario. The current MCP preview includes structured memory and
+does not provide a memory-exclusion switch. Credential scanning is not anonymization: instructions,
+skills, memory and other fields may contain personal information. Treat selective memory sharing as
+an unmet requirement to evaluate, not an existing feature or a guarantee that a package is safe to share.
+
+Recruit across all three audiences and include at least two participants per audience when expanding
+to ten participants. Report completion, assistance, repair time and repeat use separately for each
+audience; the small groups provide qualitative evidence, not representative adoption estimates.
+
 ## Prepare the portable reviewer
 
 From this checkout, with Node >=24 and dependencies installed:
@@ -77,6 +103,8 @@ or private model outputs to this public repository.
 | Field | Result |
 | --- | --- |
 | Participant alias and date | |
+| Audience and scenario tested | |
+| Operator interventions and assisted / unassisted completion | |
 | OpenTeleport commit or package version | |
 | Source app, version, model and selected agent | |
 | Target app, version, model and selected agent | |
