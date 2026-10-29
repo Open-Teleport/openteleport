@@ -106,12 +106,12 @@ const notFound = (hint: string | undefined): string =>
   hint === undefined ? "not found" : oneLine(`not found: ${hint}`);
 
 /** One sentence on what is about to happen, the last thing the user reads before saying yes. */
-function summarize(agent: string, from: Adapter, to: Adapter | undefined, file: string): string {
-  if (to === undefined) return `Save ${agent} from ${from.displayName} as ${file} in this folder.`;
+function summarize(agent: string, from: Adapter, to: Adapter | undefined, file: string, copy = false): string {
+  if (to === undefined) return `Save ${agent} from ${from.displayName} as ${file} in this folder. Existing archives are kept.`;
   const ending =
     to.handoff === true
       ? `${to.displayName} needs one more step after this, which the report names.`
-      : "An agent of the same name is updated.";
+      : copy ? "A separate copy is created; the existing agent is kept." : "An agent of the same name is updated.";
   return `Move ${agent} from ${from.displayName} to ${to.displayName}. Routines arrive disabled. ${ending}`;
 }
 
@@ -191,14 +191,32 @@ export async function runWizard(
 
   const file = `${fileSlug(agent.name)}.jetpack`;
   const to = target === JETPACK_TARGET ? undefined : target;
-  prompter.note(summarize(oneLine(agent.name), source, to, file));
+  const memory = await prompter.select<boolean>("Include the agent's saved facts and notes?", [
+    { value: true, label: "Include facts and notes", hint: "Keep the agent's remembered context" },
+    { value: false, label: "Leave out facts and notes", hint: "Other content may still contain personal information" },
+  ]);
+  if (memory === CANCELLED) return stop(prompter, "Cancelled.");
+  let copy = false;
+  if (!memory && to) {
+    const mode = await prompter.select<boolean>("How should the destination agent be written?", [
+      { value: true, label: "Create a separate copy", hint: "Keep the existing agent and its memory" },
+      { value: false, label: "Update the previously imported agent", hint: "May remove its previously imported facts and notes" },
+    ]);
+    if (mode === CANCELLED) return stop(prompter, "Cancelled.");
+    copy = mode;
+  }
+  prompter.note(memory
+    ? "Saved facts and notes will be included. Review personal information before sharing."
+    : "Saved facts and notes will be left out. Instructions, persona, skills and other content may still contain personal information."
+      + (to && !copy ? " Updating may remove previously imported destination memory." : ""));
+  prompter.note(summarize(oneLine(agent.name), source, to, file, copy));
   const go = await prompter.confirm("Go ahead?");
   if (go !== true) return stop(prompter, "Cancelled.");
 
   if (to === undefined) {
-    await exportTo({ ...opts, from: source.name, agent: agent.id, out: file });
+    await exportTo({ ...opts, ...(!memory ? { memory: false } : {}), from: source.name, agent: agent.id, out: file, overwrite: false });
   } else {
-    await move({ ...opts, from: source.name, to: to.name, agent: agent.id });
+    await move({ ...opts, ...(!memory ? { memory: false, copy } : {}), from: source.name, to: to.name, agent: agent.id });
   }
   prompter.outro(to?.handoff === true ? "Done. The report names the step that is left." : "Done.");
   return "done";

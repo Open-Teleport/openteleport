@@ -50,13 +50,14 @@ export async function moveCommand(opts: MoveOptions): Promise<void> {
       agent: agent.id,
       ctx,
       includeFiles: opts.includeFiles === true,
+      includeMemory: opts.memory !== false,
     });
     const keep = resolve(ctx.cwd, opts.keep);
     await mkdir(dirname(keep), { recursive: true });
     await writeBundle(bundle, keep);
   }
   const report = await withReplaceHint(onConflict, () =>
-    move({ from: source, to: target, agent: agent.id, ctx, write: writeOptsOf(opts, onConflict) }),
+    move({ from: source, to: target, agent: agent.id, ctx, includeMemory: opts.memory !== false, write: writeOptsOf(opts, onConflict) }),
   );
   printReport(report, opts, await saveReport(report, ctx.home, agent.name));
 }

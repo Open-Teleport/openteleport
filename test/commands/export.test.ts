@@ -237,3 +237,32 @@ describe("export", () => {
     expect(await readdir(box.cwd)).toEqual(["leaky"]);
   });
 });
+
+it("--no-overwrite retains archives and neighbouring reports", async () => {
+  const out = join(box.cwd, "selected.jetpack");
+  const previousReport = join(box.cwd, "move-report.md");
+  await writeFile(previousReport, "previous report");
+  const args = ["export", "--from", "memory", "--agent", "ada", "--out", out, "--no-overwrite", "--json"];
+  const first = await run(box, args);
+  expect(first.exitCode, first.stderr).toBe(0);
+  const archive = await readFile(out);
+  expect((await readBundle(out)).manifest.name).toBe("Ada");
+  expect(await readFile(previousReport, "utf8")).toBe("previous report");
+  expect(await readdir(join(box.home, ".openteleport", "reports"))).toHaveLength(1);
+  const second = await run(box, args);
+  expect(second.exitCode).toBe(2);
+  expect(second.stderr).toContain("already exists");
+  expect(await readFile(out)).toEqual(archive);
+  expect(await readFile(previousReport, "utf8")).toBe("previous report");
+});
+
+it("--no-overwrite preserves export success when the separate report cannot be saved", async () => {
+  await mkdir(join(box.home, ".openteleport"));
+  await writeFile(join(box.home, ".openteleport", "reports"), "keep this");
+  const out = join(box.cwd, "selected.jetpack");
+  const result = await run(box, ["export", "--from", "memory", "--agent", "ada", "--out", out, "--no-overwrite", "--json"]);
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(json<MoveReport>(result).warnings.join(" ")).toContain("Archive exported, but its report could not be saved");
+  expect((await readBundle(out)).manifest.name).toBe("Ada");
+  expect(await readFile(join(box.home, ".openteleport", "reports"), "utf8")).toBe("keep this");
+});

@@ -49,14 +49,14 @@ describe("openteleport with no command", () => {
 });
 
 describe("--help", () => {
-  it("shows the five commands and the six flags that do the work", async () => {
+  it("shows the five commands and the basic transfer flags", async () => {
     const result = await run(box, ["--help"]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Usage:");
     for (const command of ["move", "export", "import", "list", "inspect"]) {
       expect(result.stdout, command).toMatch(new RegExp(`^ {2}${command}\\b`, "m"));
     }
-    for (const flag of ["--from", "--to", "--agent", "--out", "--include-files", "--json"]) {
+    for (const flag of ["--from", "--to", "--agent", "--out", "--include-files", "--no-memory", "--json"]) {
       expect(result.stdout, flag).toContain(flag);
     }
   });

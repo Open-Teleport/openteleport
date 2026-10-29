@@ -28,6 +28,8 @@ export type CommonOptions = {
 export type WriteFlags = {
   enableRoutines?: boolean;
   includeFiles?: boolean;
+  /** Commander maps --no-memory to memory=false. */
+  memory?: boolean;
   copy?: boolean;
   replace?: boolean;
   yes?: boolean;
@@ -139,15 +141,15 @@ const useColor = (): boolean => process.stdout.isTTY === true && !process.env.NO
  * where its file went (unless `--quiet`). The step a hand-over leaves to the user is part of the
  * report (its `Next step` line), so it is said once.
  */
-export function printReport(report: MoveReport, opts: CommonOptions, reportPath: string): void {
+export function printReport(report: MoveReport, opts: CommonOptions, reportPath?: string): void {
   const written = `Report written to ${reportPath}`;
   if (opts.json === true) {
     writeJson(report);
-    if (opts.quiet !== true) process.stderr.write(`${written}\n`);
+    if (opts.quiet !== true && reportPath !== undefined) process.stderr.write(`${written}\n`);
     return;
   }
   const lines = [renderReportTerminal(report, { color: useColor() }), ""];
-  if (opts.quiet !== true) lines.push(written);
+  if (opts.quiet !== true && reportPath !== undefined) lines.push(written);
   writeOut(lines.join("\n").trimEnd());
 }
 
