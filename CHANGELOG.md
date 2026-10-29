@@ -5,7 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-10-29
+
+The first published release. It carries everything listed under 0.1.0 below, which was never published on its own.
 
 Five more apps, a wizard for the first run, and a few small fixes.
 
@@ -61,7 +63,7 @@ Five more apps, a wizard for the first run, and a few small fixes.
 
 - The test timeout is 30 seconds instead of 5, since the CLI tests start the built program.
 
-## [0.1.0] - unreleased
+## [0.1.0] - not published (folded into 0.2.0)
 
 First release.
 
@@ -111,7 +113,6 @@ First release.
   subfolder of a repository, memory is read from, and written to, a place Claude Code does not use.
 - There is no SSH transport. To move an agent to another machine, export it, copy the file and
   import it there.
-- Planned for later releases: OpenBot, Hermes, Codex, Grok Bot and Letta.
 
 [0.2.0]: https://github.com/Open-Teleport/openteleport/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0
