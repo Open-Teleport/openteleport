@@ -40,7 +40,20 @@ try {
   const source = join(home, "source");
   const destination = join(home, "destination");
   await mkdir(source, { recursive: true });
-  await writeFile(join(source, "AGENTS.md"), "Synthetic package verification instructions.\n");
+  const sourceFiles = {
+    "AGENTS.md": "Synthetic package verification instructions.\n",
+    "SOUL.md": "Synthetic reviewer persona.\n",
+    "MEMORY.md": "- Prefer concise reviews.\n",
+    "memory/context.md": "Synthetic project context.\n",
+    "skills/review/SKILL.md": "---\nname: review\ndescription: Review changes\n---\nCheck the assumptions.\n",
+    "files/example.txt": "Synthetic optional attachment.\n",
+    "routines/daily.json": JSON.stringify({ name: "Daily", instruction: "Review changes", enabled: true,
+      timezone: "UTC", schedule: { kind: "cron", expression: "0 8 * * *" } }),
+  };
+  for (const [path, content] of Object.entries(sourceFiles)) {
+    await mkdir(dirname(join(source, path)), { recursive: true });
+    await writeFile(join(source, path), content);
+  }
   const env = {
     PATH: "", HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
     OPENTELEPORT_HOME: home, CODEX_HOME: join(home, ".codex"), HERMES_HOME: join(home, ".hermes"),
@@ -63,7 +76,50 @@ try {
   assert.equal(await readFile(join(destination, "AGENTS.md"), "utf8"), await readFile(join(source, "AGENTS.md"), "utf8"));
   const status = await call("operation_status", { operationId: preview.operationId });
   assert.equal(status.state, "completed");
-  console.log("Package verification passed: fresh production install, public API, CLI version, MCP transfer and receipt.");
+  const moved = await call("inspect", { path: destination });
+  assert.deepEqual(moved.counts, { skills: 1, routines: 1, facts: 1, notes: 1, files: 0 });
+  const disabled = JSON.parse(await readFile(join(destination, "routines", "daily.json"), "utf8"));
+  assert.equal(disabled.enabled, false, "Routines must arrive disabled by default.");
+
+  const bundle = join(home, "portable.jetpack");
+  const exporting = await call("export", { from: "folder", agent: ".", sourceDir: source, out: bundle, includeFiles: true });
+  assert.equal((await call("apply", { planId: exporting.planId, confirmed: true })).outcome, "exported");
+  assert.equal((await call("validate", { path: bundle })).ok, true);
+  const packedContents = await call("inspect", { path: bundle });
+  assert.deepEqual(packedContents.counts, { skills: 1, routines: 1, facts: 1, notes: 1, files: 1 });
+  const restored = join(home, "restored");
+  const importing = await call("import", { path: bundle, to: "folder", targetDir: restored, includeFiles: true });
+  assert.equal((await call("apply", { planId: importing.planId, confirmed: true })).outcome, "done");
+  for (const path of ["AGENTS.md", "SOUL.md", "memory/context.md", "skills/review/SKILL.md", "files/example.txt"]) {
+    assert.equal(await readFile(join(restored, path), "utf8"), sourceFiles[path], `Archive round trip changed ${path}`);
+  }
+
+  // A synthetic Codex home tests adapter serialization, not execution by a live Codex host.
+  await mkdir(env.CODEX_HOME);
+  await writeFile(join(env.CODEX_HOME, "config.toml"), "# synthetic installation\n");
+  const codex = await call("import", { path: bundle, to: "codex", targetDir: env.CODEX_HOME, includeFiles: true });
+  for (const field of ["routine:Daily", "memory.notes", "files"]) {
+    assert(codex.skipped.some(item => item.field === field), `Preview omitted unsupported ${field}`);
+  }
+  const codexResult = await call("apply", { planId: codex.planId, confirmed: true });
+  assert.equal(codexResult.outcome, "done");
+  for (const field of ["routine:Daily", "memory.notes", "files"]) {
+    assert(codexResult.skipped.some(item => item.field === field), `Final report omitted unsupported ${field}`);
+  }
+  const agents = await call("list", { from: "codex", sourceDir: env.CODEX_HOME });
+  assert(agents.agents.some(agent => agent.id === codexResult.target.agent));
+  assert.equal(await readFile(join(env.CODEX_HOME, "config.toml"), "utf8"), "# synthetic installation\n");
+
+  const handoff = await call("import", { path: bundle, to: "grok-bot", targetDir: join(home, "handoff") });
+  assert.equal(handoff.handoff, true);
+  const handoffResult = await call("apply", { planId: handoff.planId, confirmed: true });
+  assert.equal(handoffResult.outcome, "handoff");
+  assert(handoffResult.nextStep?.length > 0, "A manual handoff must explain the remaining step.");
+  assert.equal((await call("operation_status", { operationId: handoff.operationId })).result.outcome, "handoff");
+  for (const [path, content] of Object.entries(sourceFiles)) {
+    assert.equal(await readFile(join(source, path), "utf8"), content, `Transfer changed source ${path}`);
+  }
+  console.log("Package verification passed: fresh install, public API, archive round trip, capability losses, manual handoff, source preservation and receipts.");
 } finally {
   try { await client?.close(); } finally {
     try { await transport?.close(); } finally { await rm(temporary, { recursive: true, force: true }); }
