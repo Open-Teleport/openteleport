@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.10",
+    "@modelcontextprotocol/server": "2.4.0",
     "commander": "^13",
     "execa": "^9",
     "fflate": "^0.8",
@@ -59,6 +60,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^24",
     "tsup": "^8",
     "typescript": "^5",

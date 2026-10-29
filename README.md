@@ -196,3 +196,7 @@ In PowerShell: `$env:OPENTELEPORT_EXTRA_ADAPTER = "./my-app.js"; npx opentelepor
 ## License
 
 Apache-2.0.
+
+## From inside Claude Code and MCP clients (upcoming v0.3)
+
+The local stdio server and Claude Code plugin support reviewed agent transfers from a session. Build this checkout first; this is not yet an npm release. See [setup, tools, and the preview/apply workflow](docs/integrations/mcp.md).

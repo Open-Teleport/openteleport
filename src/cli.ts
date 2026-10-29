@@ -178,6 +178,8 @@ function buildProgram(showAll: boolean): Command {
     .description("list the supported apps and whether they are installed");
   withOutput(withDirs(adapters)).action(act((opts: CommonOptions) => adaptersCommand(opts)));
 
+  program.command("mcp", { hidden: !showAll }).description("serve local MCP tools over stdio").action(act(async () => { const { startMcpServer } = await import("./mcp/server.js"); await startMcpServer(); }));
+
   return program;
 }
 

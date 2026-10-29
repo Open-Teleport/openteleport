@@ -1,0 +1,17 @@
+{
+  "name": "openteleport",
+  "owner": {
+    "name": "OpenTeleport"
+  },
+  "plugins": [
+    {
+      "name": "openteleport",
+      "source": "./plugins/claude-code",
+      "version": "0.1.0",
+      "description": "Portable agent transfers with a reviewed plan."
+    }
+  ],
+  "metadata": {
+    "description": "Portable agent transfers with OpenTeleport"
+  }
+}
