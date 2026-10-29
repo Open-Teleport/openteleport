@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Ctx } from "../../src/adapters/types.js";
 import type { Bundle } from "../../src/core/schema.js";
 import { registerAdapter } from "../../src/adapters/registry.js";
-import { readBundle } from "../../src/core/bundle.js";
+import { readBundle, writeBundle } from "../../src/core/bundle.js";
 import { TransferSession } from "../../src/mcp/service.js";
 import { createMemoryAdapter } from "../helpers/memory-adapter.js";
 let home: string;
@@ -345,5 +345,53 @@ it("accepts binary attachments by actual size and rejects oversized snapshots be
   expect(withoutFiles.contents.counts.files).toBe(0);
   expect(target.written).toHaveLength(0);
   expect(await readdir(home)).toEqual([]);
+  session.dispose();
+});
+
+it.each(["export", "import", "move"] as const)("excludes selected memory from %s snapshots and persisted reports", async (operation) => {
+  const original = { ...bundle(), notes: [{ name: "private", text: "Private note" }] };
+  const source = createMemoryAdapter({ name: "selected-source", agents: { ada: original } });
+  const target = createMemoryAdapter({ name: "selected-target" });
+  registerAdapter(source); registerAdapter(target);
+  const path = join(home, "source.jetpack");
+  // A valid fixed identity is required for archive imports.
+  await writeBundle({ ...original, manifest: { ...original.manifest, id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" } }, path);
+  const out = join(home, "selected.jetpack");
+  const session = new TransferSession(ctx);
+  const input = operation === "import" ? { operation, to: target.name, path }
+    : operation === "export" ? { operation, from: source.name, agent: "ada", out }
+      : { operation, from: source.name, agent: "ada", to: target.name };
+  const full = await session.plan(input);
+  expect(full.options.includeMemory).toBe(true);
+  expect(full.contents.counts).toMatchObject({ facts: 1, notes: 1 });
+  session.cancel(full.planId);
+  const plan = await session.plan({ ...input, includeMemory: false });
+  expect(plan.contents.counts).toMatchObject({ facts: 0, notes: 0 });
+  expect(plan.excluded.map(item => item.field)).toEqual(["memory.facts", "memory.notes"]);
+  expect(JSON.stringify(plan)).not.toContain("Private note");
+  if (operation !== "export") expect(plan.warnings.join(" ")).toContain("may remove previously imported");
+  const result = await session.apply(plan.planId, true);
+  expect(result.skipped).toEqual(expect.arrayContaining(plan.excluded));
+  expect(await readFile(result.reportPath!, "utf8")).toContain("excluded by includeMemory=false");
+  const transferred = operation === "export" ? await readBundle(out) : target.written[0].bundle;
+  expect(transferred.facts).toEqual([]);
+  expect(transferred.notes).toEqual([]);
+  expect(transferred.instructions).toBe(original.instructions);
+  expect((await source.read(ctx, "ada")).bundle.facts).toEqual(original.facts);
+  expect((await readBundle(path)).notes).toEqual(original.notes);
+  session.dispose();
+});
+
+it("scans retained content but not explicitly excluded memory", async () => {
+  const { source } = adapters();
+  const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123";
+  source.read = async () => ({ bundle: { ...bundle(), facts: [secret], notes: [{ name: "private", text: secret }] }, warnings: [] });
+  const session = new TransferSession(ctx);
+  await expect(session.plan(request)).rejects.toThrow("secret");
+  const plan = await session.plan({ ...request, includeMemory: false, onConflict: "copy" });
+  expect(plan.warnings.join(" ")).not.toContain("may remove previously imported");
+  expect(plan.warnings.join(" ")).toContain("not anonymization");
+  source.read = async () => ({ bundle: { ...bundle(), instructions: secret }, warnings: [] });
+  await expect(session.plan({ ...request, includeMemory: false })).rejects.toThrow("secret");
   session.dispose();
 });
