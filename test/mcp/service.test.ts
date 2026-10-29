@@ -77,7 +77,7 @@ it("preserves handoff and consumes failed writes without replay", async () => {
     outcome: "handoff", nextStep: "Import in Settings", warnings: ["Review settings"] });
   target.write = async () => { throw new Error("partial write"); };
   const failed = await session.plan(request);
-  await expect(session.apply(failed.planId, true)).rejects.toThrow("partial write");
+  await expect(session.apply(failed.planId, true)).rejects.toThrow("destination may have changed");
   await expect(session.apply(failed.planId, true)).rejects.toThrow("expired");
 });
 it("never overwrites an archive created after preview", async () => {
@@ -211,4 +211,113 @@ it("does not retain a preview whose source finishes reading after transport disp
   release();
   await expect(pending).rejects.toThrow("closed");
   expect(await readdir(home)).toEqual([]);
+});
+
+
+it("persists a successful outcome for a new session without storing agent content", async () => {
+  adapters();
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  const result = await session.apply(plan.planId, true);
+  expect(result).toMatchObject({ operationId: plan.planId, receiptSaved: true });
+  const saved = await readFile(result.receiptPath!, "utf8");
+  expect(saved).not.toContain("Review carefully");
+  expect(saved).not.toContain("Private preference");
+  session.dispose();
+  expect(await new TransferSession(ctx).operationStatus(plan.planId)).toMatchObject({
+    state: "completed", execution: "completed", result: { outcome: "done" },
+  });
+});
+
+it("persists partial failure and returns recovery data without raw exception content", async () => {
+  const { target } = adapters();
+  target.write = async () => {
+    await writeFile(join(home, "partly-written.txt"), "partial");
+    throw new Error("DO_NOT_RETURN_PRIVATE_EXCEPTION_TEXT");
+  };
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  const error = await session.apply(plan.planId, true).catch((error) => error);
+  expect(error.receipt).toMatchObject({ operationId: plan.planId, state: "needs_review", errorCode: "TRANSFER_FAILED" });
+  expect(error.message).toContain("Do not retry automatically");
+  expect(error.message).not.toContain("DO_NOT_RETURN");
+  expect(await readFile(error.receiptPath, "utf8")).not.toContain("DO_NOT_RETURN");
+  expect(await new TransferSession(ctx).operationStatus(plan.planId)).toMatchObject({
+    state: "needs_review", execution: "needs_review",
+  });
+  await expect(session.apply(plan.planId, true)).rejects.toThrow("missing");
+});
+
+it("refuses to invoke the destination writer if the initial receipt cannot be recorded", async () => {
+  const { target } = adapters();
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  await writeFile(join(home, ".openteleport"), "not a directory");
+  await expect(session.apply(plan.planId, true)).rejects.toThrow("destination was not changed");
+  expect(target.written).toHaveLength(0);
+});
+
+it("does not claim that a started receipt proves a live operation after reconnect", async () => {
+  const { target } = adapters();
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const write = target.write;
+  target.write = async (context, data, options) => {
+    started();
+    await gate;
+    return write(context, data, options);
+  };
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  const applying = session.apply(plan.planId, true);
+  await entered;
+  try {
+    expect(await session.operationStatus(plan.planId)).toMatchObject({ state: "started", execution: "in_progress" });
+    expect(await new TransferSession(ctx).operationStatus(plan.planId)).toMatchObject({ state: "started", execution: "unknown" });
+  } finally { release(); }
+  await applying;
+});
+
+it("distinguishes failure before the adapter writer from partial destination changes", async () => {
+  const { target } = adapters();
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  Object.defineProperty(target, "capabilities", { get() { throw new Error("adapter unavailable"); } });
+  const error = await session.apply(plan.planId, true).catch((error) => error);
+  expect(error.receipt.state).toBe("not_applied");
+  expect(error.message).toContain("before writing");
+  expect(target.written).toHaveLength(0);
+});
+
+
+it("keeps a successful transfer successful when final receipt persistence fails", async () => {
+  const { target } = adapters();
+  const write = target.write;
+  target.write = async (context, data, options) => {
+    const result = await write(context, data, options);
+    await rm(join(home, ".openteleport", "transfers"), { recursive: true, force: true });
+    return result;
+  };
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  const result = await session.apply(plan.planId, true);
+  expect(result).toMatchObject({ outcome: "done", receiptSaved: false });
+  expect(result.warnings).toContain("Transfer completed, but its receipt could not be finalized. Retain this result; a later status query may be inconclusive.");
+  expect(target.written).toHaveLength(1);
+  await expect(session.apply(plan.planId, true)).rejects.toThrow("missing");
+});
+
+it("retains the manual handoff step in the receipt after reconnecting", async () => {
+  const { target } = adapters();
+  target.write = async () => ({ outcome: "handoff", nextStep: "Import the package in Settings",
+    items: { approximated: [], skipped: [], warnings: [] } });
+  const session = new TransferSession(ctx);
+  const plan = await session.plan(request);
+  await session.apply(plan.planId, true);
+  session.dispose();
+  expect(await new TransferSession(ctx).operationStatus(plan.planId)).toMatchObject({
+    state: "completed", result: { outcome: "handoff", nextStep: "Import the package in Settings" },
+  });
 });

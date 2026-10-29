@@ -1,3 +1,4 @@
+import { ApplyFailedError } from "./receipts.js";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { UnknownAdapterError } from "../adapters/registry.js";
@@ -14,6 +15,7 @@ const write = {
 const source = { from: text, agent: text, sourceDir: text.optional() };
 const target = { to: text, targetDir: text.optional() };
 export const schemas = {
+  operation_status: z.strictObject({ operationId: z.string().uuid() }),
   adapters: z.strictObject({}),
   list: z.strictObject({ from: text, sourceDir: text.optional() }),
   inspect: z.strictObject({ path: text }),
@@ -27,6 +29,7 @@ export const schemas = {
 
 export function registerTools(server: McpServer, session: TransferSession) {
   const handlers = {
+    operation_status: (input: z.output<typeof schemas.operation_status>) => session.operationStatus(input.operationId),
     adapters: async () => ({ adapters: await session.adapters() }),
     list: async (input: z.output<typeof schemas.list>) => ({ agents: await session.list(input) }),
     inspect: async (input: z.output<typeof schemas.inspect>) => summary(await session.read(input.path)),
@@ -42,6 +45,7 @@ export function registerTools(server: McpServer, session: TransferSession) {
     cancel: async (input: z.output<typeof schemas.cancel>) => session.cancel(input.planId),
   };
   const descriptions = {
+    operation_status: "Read a persisted transfer receipt, including after reconnecting. An old started receipt is not proof that execution is still running or completed. Never replay a transfer automatically.",
     adapters: "List supported adapters and detect their local installations.",
     list: "List agent IDs from one application; does not change application state.",
     inspect: "Summarize a bundle without returning instructions, memory text, or file contents.",
@@ -74,6 +78,17 @@ export function registerTools(server: McpServer, session: TransferSession) {
           ...(isError ? { isError: true } : {}),
         };
       } catch (error) {
+        if (error instanceof ApplyFailedError) {
+          return {
+            isError: true,
+            structuredContent: {
+              ...error.receipt, receiptPath: error.receiptPath, receiptSaved: error.receiptSaved,
+              destinationMayHaveChanged: error.receipt.state === "needs_review", retrySafe: false,
+              recovery: error.message,
+            },
+            content: [{ type: "text" as const, text: error.message }],
+          };
+        }
         const expected = error instanceof NotDetectedError || error instanceof UsageError || error instanceof UnknownAdapterError ||
           error instanceof SecretsFoundError;
         const message = expected ? error.message : error instanceof z.ZodError
