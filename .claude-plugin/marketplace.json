@@ -7,7 +7,7 @@
     {
       "name": "openteleport",
       "source": "./plugins/claude-code",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Portable agent transfers with a reviewed plan."
     }
   ],
