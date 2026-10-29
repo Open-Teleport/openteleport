@@ -7,7 +7,11 @@ import type { Ctx } from "../types.js";
 /** How an agent presents itself. `avatar` is a workspace-relative path, a URL or a data URI. */
 export type OpenClawIdentity = { name?: string; emoji?: string; theme?: string; avatar?: string };
 
-/** One agent under `agents.entries.<id>` in `openclaw.json`. */
+/**
+ * One agent of the roster in `openclaw.json`: under `agents.entries.<id>`, keyed by id (OpenClaw
+ * 2026.6 and later), or an element of the `agents.list` array that names its `id` (up to
+ * 2026.5.28).
+ */
 export type OpenClawAgentEntry = {
   name?: string;
   workspace?: string;
@@ -23,10 +27,74 @@ export type OpenClawAgentEntry = {
 /** The part of `openclaw.json` the adapter uses. */
 export type OpenClawConfig = {
   agents?: {
-    defaults?: { workspace?: string };
+    defaults?: { workspace?: string; systemAgent?: { agentId?: string } };
+    /** The keyed roster, OpenClaw 2026.6 and later. */
     entries?: Record<string, OpenClawAgentEntry>;
+    /** The roster as an array, up to 2026.5.28; each element names its `id`. */
+    list?: (OpenClawAgentEntry & { id?: unknown; default?: unknown })[];
   };
 };
+
+/**
+ * The roster by id, whichever form the config keeps it in: the elements of `agents.list` that
+ * name an id, then `agents.entries`, which wins for an id in both. An element or entry that is
+ * not an object counts as an empty one; an element without an id is left out.
+ */
+export function agentEntries(cfg: OpenClawConfig): Record<string, OpenClawAgentEntry> {
+  const roster: Record<string, OpenClawAgentEntry> = Object.create(null);
+  const list = cfg.agents?.list;
+  if (Array.isArray(list)) {
+    for (const element of list) {
+      if (!isRecord(element)) continue;
+      const id = element.id;
+      if (typeof id === "string" && id !== "") roster[id] = element as OpenClawAgentEntry;
+    }
+  }
+  const entries = cfg.agents?.entries;
+  if (isRecord(entries)) {
+    for (const [id, entry] of Object.entries(entries)) {
+      roster[id] = isRecord(entry) ? (entry as OpenClawAgentEntry) : {};
+    }
+  }
+  return roster;
+}
+
+/**
+ * The agent whose workspace is `agents.defaults.workspace` itself (or `<state dir>/workspace`).
+ * In an `agents.list` roster: the element marked `default`, else the first, else `main`, as
+ * OpenClaw 2026.5.28 picks it. In a keyed roster: `agents.defaults.systemAgent.agentId`, which
+ * OpenClaw 2026.10 writes; without it the only agent, or `main` when none is configured, and
+ * none of several (not checked on an install).
+ */
+export function defaultAgentId(cfg: OpenClawConfig): string | undefined {
+  const list = cfg.agents?.list;
+  if (Array.isArray(list)) {
+    const elements = list.filter(isRecord);
+    const chosen = elements.find((element) => Boolean(element.default)) ?? elements[0];
+    const id = chosen?.id;
+    return typeof id === "string" && id !== "" ? id : DEFAULT_AGENT_ID;
+  }
+  const designated = cfg.agents?.defaults?.systemAgent?.agentId;
+  if (typeof designated === "string" && designated.trim() !== "") return designated;
+  const ids = Object.keys(agentEntries(cfg));
+  if (ids.length === 0) return DEFAULT_AGENT_ID;
+  return ids.length === 1 ? ids[0] : undefined;
+}
+
+/**
+ * Where the config keeps agent `id`, as a path for `openclaw config set`: `agents.entries.<id>`
+ * when it is keyed there, `agents.list[<index>]` when it is in the array, `undefined` when it
+ * is in neither.
+ */
+export function agentConfigPath(cfg: OpenClawConfig, id: string): string | undefined {
+  const entries = cfg.agents?.entries;
+  if (isRecord(entries) && Object.hasOwn(entries, id)) return `agents.entries.${id}`;
+  const list = cfg.agents?.list;
+  const index = Array.isArray(list)
+    ? list.findIndex((element) => isRecord(element) && element.id === id)
+    : -1;
+  return index === -1 ? undefined : `agents.list[${index}]`;
+}
 
 export type OpenClawPaths = {
   stateDir: string;
@@ -78,21 +146,21 @@ export function openclawPaths(ctx: Ctx): OpenClawPaths {
     configOverride === undefined ? join(stateDir, "openclaw.json") : absolute(configOverride);
 
   /**
-   * The entry's own `workspace`; else `<agents.defaults.workspace>/<id>`; else
-   * `<state dir>/workspace` for the only configured agent (or `main` when none is configured);
-   * else `<state dir>/workspace-<id>`. Throws for an id that is not a single path segment.
+   * The entry's own `workspace`; else, for the default agent (`defaultAgentId`),
+   * `agents.defaults.workspace` itself or `<state dir>/workspace`; else
+   * `<agents.defaults.workspace>/<id>` or `<state dir>/workspace-<id>`. This is OpenClaw
+   * 2026.5.28's own rule (its `resolveAgentWorkspaceDir`); 2026.10 writes every entry's
+   * workspace out, so the rule only fills gaps there. Throws for an id that is not a single
+   * path segment.
    */
   function workspaceFor(agentId: string, cfg: OpenClawConfig): string {
     assertAgentId(agentId);
-    const entries = cfg.agents?.entries ?? {};
-    const own = entries[agentId]?.workspace;
+    const own = agentEntries(cfg)[agentId]?.workspace;
     if (typeof own === "string" && own.trim() !== "") return absolute(own);
     const shared = cfg.agents?.defaults?.workspace;
-    if (typeof shared === "string" && shared.trim() !== "") return join(absolute(shared), agentId);
-    const ids = Object.keys(entries);
-    const onlyAgent =
-      ids.length === 0 ? agentId === DEFAULT_AGENT_ID : ids.length === 1 && ids[0] === agentId;
-    return join(stateDir, onlyAgent ? "workspace" : `workspace-${agentId}`);
+    const named = typeof shared === "string" && shared.trim() !== "" ? absolute(shared) : undefined;
+    if (agentId === defaultAgentId(cfg)) return named ?? join(stateDir, "workspace");
+    return named === undefined ? join(stateDir, `workspace-${agentId}`) : join(named, agentId);
   }
 
   return { stateDir, configFile, workspaceFor };

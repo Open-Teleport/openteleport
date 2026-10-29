@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- OpenClaw: the adapter reads the agent roster in both forms OpenClaw has used, `agents.list` (an array, up to 2026.5.28) and `agents.entries` (keyed by id, from 2026.6), and sets an agent's model and runtime at the path the install keeps it under (`agents.list[<index>]` or `agents.entries.<id>`). On 2026.5.28 a move used to create the agent and then fail with `Config validation failed: agents: Invalid input`, and reading an agent back failed with `no workspace at ...`. Checked on 2026.5.28 and 2026.10.8.
+- OpenClaw: `agents list --json` rows that call the workspace `location` (2026.5.28) are read; the default agent's workspace is `agents.defaults.workspace` itself, as OpenClaw resolves it; a job without an agent belongs to the default agent, not always `main`.
+- The end-to-end test no longer passes the test runner's own variables (`VITEST`, `TEST`, `NODE_ENV`) on to the CLI and to OpenClaw, which runs in a test mode of its own under `VITEST` and prints nothing for `agents list --json`.
+
+### Changed
+
+- OpenClaw: a command may take 5 minutes instead of 90 seconds (`--version` 30 seconds instead of 10), and the probe for the job command family gets the full time too. On a loaded Windows machine `agents add` through the Gateway exceeded 90 seconds, and a probe cut short would have left `automations` for an OpenClaw that has `cron`.
+
 ## [0.4.0] - 2026-10-29
 
 Combines the v0.3 session integration and v0.4 native plugin milestones. There was no separate npm 0.3.0 release.

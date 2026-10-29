@@ -27,6 +27,8 @@ import {
   type OpenClawConfig,
   type OpenClawIdentity,
   type OpenClawPaths,
+  agentEntries,
+  defaultAgentId,
   openclawPaths,
   readOpenClawConfig,
 } from "./paths.js";
@@ -70,9 +72,7 @@ async function isDirectory(path: string): Promise<boolean> {
 }
 
 function entryOf(cfg: OpenClawConfig, agentId: string): OpenClawAgentEntry {
-  const entries = cfg.agents?.entries;
-  const entry = isRecord(entries) && Object.hasOwn(entries, agentId) ? entries[agentId] : undefined;
-  return isRecord(entry) ? entry : {};
+  return agentEntries(cfg)[agentId] ?? {};
 }
 
 // -- Identity ----------------------------------------------------------------------------------
@@ -345,9 +345,13 @@ function toRoutine(job: JobRow): { routine: Routine; note?: string } | { warning
   };
 }
 
-/** The agent's jobs as routines. Without the CLI the agent is still exported, without routines. */
+/**
+ * The agent's jobs as routines; a job without an agent is the default agent's. Without the CLI
+ * the agent is still exported, without routines.
+ */
 async function readRoutines(
   cli: OpenClawCli,
+  cfg: OpenClawConfig,
   agentId: string,
 ): Promise<{ routines: Routine[]; warnings: string[] }> {
   const warnings: string[] = [];
@@ -359,8 +363,9 @@ async function readRoutines(
     return { routines: [], warnings };
   }
   const routines: Routine[] = [];
+  const fallback = defaultAgentId(cfg) ?? DEFAULT_AGENT_ID;
   for (const job of jobs) {
-    if ((job.agentId ?? DEFAULT_AGENT_ID) !== agentId) continue;
+    if ((job.agentId ?? fallback) !== agentId) continue;
     const result = toRoutine(job);
     if ("warning" in result) {
       warnings.push(result.warning);
@@ -450,7 +455,7 @@ export async function readOpenClawAgent(
 
   const skills = await readSkills(workspace, entry.skills);
   const cli = new OpenClawCli(ctx, paths.stateDir, paths.configFile);
-  const routines = await readRoutines(cli, agentId);
+  const routines = await readRoutines(cli, cfg, agentId);
   const memory = await readMemory(workspace);
   const avatar = await readAvatar(workspace, identity?.avatar);
   const clipped: string[] = [];
@@ -503,8 +508,7 @@ export async function readOpenClawAgent(
 export async function listOpenClawAgents(ctx: Ctx): Promise<AgentRef[]> {
   const paths = openclawPaths(ctx);
   const cfg = await readOpenClawConfig(paths.configFile);
-  const entries = cfg.agents?.entries;
-  const ids = isRecord(entries) ? Object.keys(entries) : [];
+  const ids = Object.keys(agentEntries(cfg));
 
   const refs: AgentRef[] = [];
   for (const id of ids) {
