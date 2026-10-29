@@ -165,3 +165,18 @@ Before treating Codex round-trip portability as verified, address the **runtime-
 - Adapter comparison at the snapshot above: `src/adapters/codex/read.ts:readAllSkills`, `src/adapters/codex/write.ts`, `src/adapters/hermes/paths.ts:hermesHome`, `src/adapters/hermes/cron.ts:instantOf`.
 
 These native Windows checks apply to the installed versions. The follow-up exercises Codex CLI archive/import/export and Hermes engine import/export with native read-back. Codex generated memory filenames, actual agent invocation, provider connectivity, scheduler execution, and Letta MemFS/crons remain unverified. No source, tests, README, CHANGELOG or pre-existing branch contents were edited; only this report changes.
+
+## Release-review follow-up: current v0.2 snapshot
+
+Repeated the isolated Codex CLI import/update/copy/export and installed Codex discovery probe against commit `65acd19fee6b7b5b6282e772163000eaf9af476d` on 2026-10-29. Source was extracted with `git archive` into a temporary directory; the working v0.2 checkout was not changed. This is a targeted runtime recheck, not a rerun of the full unit suite.
+
+Both Codex findings remain reproducible on this newer snapshot:
+
+| Priority | Observed result | Acceptance condition for a fix |
+| --- | --- | --- |
+| High | Copy creates two TOML files with the same runtime name; installed Codex exposes only the copied description. | Original and copy have distinct runtime identities and are independently discoverable. Reported invocation hints identify those actual roles. Re-import of the same bundle without copy still updates the intended agent. |
+| High | Custom-agent export contains zero skills and no warning or skipped item, after import reported moving one skill. | Define skill ownership/inheritance policy. Preserve intended skills on re-export, or explicitly report their omission; do not silently include unrelated user skills. Repeat import/export/archive read-back. |
+
+Same-ID update still used one file before the copy. The imported skill remained visible to Codex. Global config and instructions sentinels remained byte-for-byte unchanged. The probe did not invoke a model or run scheduled work.
+
+Recommended release review: resolve these two cases before describing Codex round-trip portability as verified. Recheck the separately documented Hermes default-home and timezone edge cases after their fixes; this follow-up did not repeat Hermes execution. The plugin research is preparatory work for v0.4 and does not resolve these v0.2 adapter findings.
