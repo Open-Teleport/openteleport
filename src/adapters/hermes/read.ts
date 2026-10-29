@@ -136,7 +136,7 @@ async function readProfileMeta(dir: string): Promise<{ meta: ProfileMeta } | { e
 /** The profiles of the Hermes home: `default`, then the named ones. */
 export async function listHermesProfiles(ctx: Ctx): Promise<AgentRef[]> {
   const refs: AgentRef[] = [];
-  for (const { id, dir } of await locateProfiles(hermesHome(ctx))) {
+  for (const { id, dir } of await locateProfiles(await hermesHome(ctx))) {
     const read = await readProfileMeta(dir);
     // Listing is for discovery: a broken profile.yaml is reported by `read`, not here.
     const meta = "meta" in read ? read.meta : {};
@@ -155,7 +155,7 @@ export async function listHermesProfiles(ctx: Ctx): Promise<AgentRef[]> {
  * of its directory (`default` is a different agent in every `HERMES_HOME`).
  */
 export async function hermesCacheIdentity(ctx: Ctx, agent: string): Promise<string> {
-  return realpath(profileDir(hermesHome(ctx), agent));
+  return realpath(profileDir(await hermesHome(ctx), agent));
 }
 
 // -- Skills ------------------------------------------------------------------------------------
@@ -330,6 +330,7 @@ async function readRoutines(
     names.add(name);
     routines.push({ ...entry.routine, name });
     if (Object.keys(entry.extra).length > 0) extras[name] = entry.extra;
+    if (entry.warning !== undefined) warnings.push(entry.warning);
   }
   return { routines, extras };
 }
@@ -365,7 +366,7 @@ export async function readHermesProfile(
   ctx: Ctx,
   agent: string,
 ): Promise<{ bundle: Bundle; warnings: string[] }> {
-  const home = hermesHome(ctx);
+  const home = await hermesHome(ctx);
   const profiles = await locateProfiles(home);
   const located = profiles.find(({ id }) => id === agent);
   if (located === undefined) {

@@ -34,17 +34,25 @@ function expandHome(path: string, home: string): string {
 
 /**
  * The Hermes home (`HERMES_HOME`): `sourceDir`, else `targetDir`, else `HERMES_HOME`, else
- * `%LOCALAPPDATA%\hermes` on Windows (`<home>\AppData\Local\hermes` without `LOCALAPPDATA`) and
- * `<home>/.hermes` elsewhere. A blank variable counts as unset, as it does for Hermes. A leading
- * `~` is expanded to `ctx.home`; `$VAR` is not expanded. The result is absolute, against
- * `ctx.cwd`.
+ * `<home>/.hermes`, which is where Hermes itself looks without the variable, on every system. On
+ * Windows the installer sets `HERMES_HOME` to `%LOCALAPPDATA%\hermes`, so when the variable is
+ * missing (a shell that did not read the installer's profile) and `<home>\.hermes` is not a
+ * profile, that is the place (`<home>\AppData\Local\hermes` without `LOCALAPPDATA`). A blank
+ * variable counts as unset, as it does for Hermes. A leading `~` is expanded to `ctx.home`;
+ * `$VAR` is not expanded. The result is absolute, against `ctx.cwd`.
  */
-export function hermesHome(ctx: Ctx, platform: NodeJS.Platform = process.platform): string {
-  const fallback =
-    platform === "win32"
-      ? join(nonBlankAsIs(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local"), "hermes")
-      : join(ctx.home, ".hermes");
-  const home = ctx.sourceDir ?? ctx.targetDir ?? nonBlankAsIs(ctx.env.HERMES_HOME) ?? fallback;
+export async function hermesHome(
+  ctx: Ctx,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string> {
+  let home = ctx.sourceDir ?? ctx.targetDir ?? nonBlankAsIs(ctx.env.HERMES_HOME);
+  if (home === undefined) {
+    home = join(ctx.home, ".hermes");
+    if (platform === "win32" && !(await isProfile(home))) {
+      const local = nonBlankAsIs(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local");
+      home = join(local, "hermes");
+    }
+  }
   return resolve(ctx.cwd, expandHome(home, ctx.home));
 }
 
@@ -153,14 +161,20 @@ export async function readConfig(
   return { config: configOf(raw), raw };
 }
 
+/** The time zone of this machine, the one Hermes falls back on (`hermes_time.py`). */
+export function machineTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /**
- * The time zone Hermes reads cron expressions and one-off times in: `HERMES_TIMEZONE`, else the
- * `timezone` of the config, else the zone of the process (`hermes_time.py`). A value that is not
- * a time zone is skipped.
+ * The time zone Hermes reads cron expressions in: `HERMES_TIMEZONE`, else the `timezone` of the
+ * config, else the zone of the process (`hermes_time.py`). A value that is not a time zone is
+ * skipped. A one-off time without an offset is not read in this zone but in the machine's own
+ * (see `instantOf` in `cron.ts`).
  */
 export function hermesTimezone(ctx: Ctx, config: HermesConfig | undefined): string {
   for (const zone of [ctx.env.HERMES_TIMEZONE?.trim(), config?.timezone]) {
     if (zone !== undefined && zone !== "" && isTimeZone(zone)) return zone;
   }
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return machineTimezone();
 }

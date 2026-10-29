@@ -21,6 +21,8 @@ import {
   readHermesProfile,
 } from "../../../src/adapters/hermes/read.js";
 import type { Ctx } from "../../../src/adapters/types.js";
+import { machineTimezone } from "../../../src/adapters/hermes/paths.js";
+import { zonedToInstant } from "../../../src/core/schedule.js";
 import { RoutineSchema, parseManifest } from "../../../src/core/schema.js";
 
 const FIXTURE = fileURLToPath(new URL("../../fixtures/hermes/home", import.meta.url));
@@ -165,7 +167,8 @@ describe("readHermesProfile", () => {
         instruction: "Remind me to renew the domain before it lapses.",
         enabled: true,
         timezone: "Europe/Warsaw",
-        schedule: { kind: "at", at: "2026-12-01T07:00:00.000Z" },
+        // The fixture's `run_at` has no offset: Hermes reads it in the zone of the machine.
+        schedule: { kind: "at", at: zonedToInstant("2026-12-01T08:00:00", machineTimezone()) },
       },
     ]);
 
@@ -200,7 +203,11 @@ describe("readHermesProfile", () => {
     expect(warnings).toContain(
       "1 memory entry over 500 characters was kept as the note memory-3",
     );
-    expect(warnings).toHaveLength(2);
+    expect(warnings).toContain(
+      "cron job 'Renew the domain' has a one-off time without an offset; " +
+        `read in this machine's time zone (${machineTimezone()}), as Hermes does`,
+    );
+    expect(warnings).toHaveLength(3);
   });
 
   it("reads a Bundle that the manifest and routine schemas accept", async () => {
@@ -355,17 +362,23 @@ describe("readHermesProfile", () => {
     expect(warnings).toContain("cron job 'Job 66' is over the limit of 64 routines; not exported");
   });
 
-  it("reads one-off times and cron jobs in the time zone HERMES_TIMEZONE names", async () => {
-    const { bundle } = await readHermesProfile(
-      { ...ctx, env: { ...ctx.env, HERMES_TIMEZONE: "America/New_York" } },
+  it("reads cron jobs in the time zone HERMES_TIMEZONE names and a bare one-off time in the machine's", async () => {
+    // Whatever zone the machine running the test is in, HERMES_TIMEZONE is the other of the two.
+    const host = machineTimezone();
+    const profile = host === "America/New_York" ? "Asia/Tokyo" : "America/New_York";
+    const { bundle, warnings } = await readHermesProfile(
+      { ...ctx, env: { ...ctx.env, HERMES_TIMEZONE: profile } },
       "default",
     );
-    expect(bundle.routines.map((routine) => routine.timezone)).toEqual([
-      "America/New_York",
-      "America/New_York",
-      "America/New_York",
-    ]);
-    expect(bundle.routines[2]?.schedule).toEqual({ kind: "at", at: "2026-12-01T13:00:00.000Z" });
+    expect(bundle.routines.map((routine) => routine.timezone)).toEqual([profile, profile, profile]);
+    expect(bundle.routines[2]?.schedule).toEqual({
+      kind: "at",
+      at: zonedToInstant("2026-12-01T08:00:00", host),
+    });
+    expect(warnings).toContain(
+      "cron job 'Renew the domain' has a one-off time without an offset; " +
+        `read in this machine's time zone (${host}), as Hermes does`,
+    );
   });
 
   it("warns about a config.yaml that does not parse and reads without a model", async () => {

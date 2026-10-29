@@ -11,11 +11,13 @@ import {
   routineToJob,
   writeJobsFile,
 } from "../../../src/adapters/hermes/cron.js";
-import { describeSchedule } from "../../../src/core/schedule.js";
+import { machineTimezone } from "../../../src/adapters/hermes/paths.js";
+import { describeSchedule, zonedToInstant } from "../../../src/core/schedule.js";
 import type { Routine } from "../../../src/core/schema.js";
 
 const JOBS = fileURLToPath(new URL("../../fixtures/hermes/home/cron/jobs.json", import.meta.url));
 const WARSAW = "Europe/Warsaw";
+const NEW_YORK = "America/New_York";
 
 let root: string;
 beforeEach(async () => {
@@ -112,7 +114,9 @@ describe("readJobsFile", () => {
 describe("jobToRoutine", () => {
   it("turns the three jobs of the fixture into a cron, an every and an at routine", async () => {
     const [digest, sweep, domain] = await fixtureJobs();
-    const routines = [digest, sweep, domain].map((job) => jobToRoutine(job as HermesJob, WARSAW));
+    const routines = [digest, sweep, domain].map((job) =>
+      jobToRoutine(job as HermesJob, WARSAW, WARSAW),
+    );
     expect(routines.map((entry) => entry?.routine)).toEqual([
       {
         name: "Morning digest",
@@ -219,13 +223,57 @@ describe("jobToRoutine", () => {
     ["with an offset", "2026-12-01T08:00:00+02:00", "2026-12-01T06:00:00.000Z"],
     ["with Z", "2026-12-01T08:00:00Z", "2026-12-01T08:00:00.000Z"],
     ["with microseconds", "2026-12-01T08:00:00.123456+00:00", "2026-12-01T08:00:00.123Z"],
-    ["without an offset, in the zone of the profile", "2026-12-01T08:00", "2026-12-01T07:00:00.000Z"],
+    ["without an offset, in the zone of the machine", "2026-12-01T08:00", "2026-12-01T07:00:00.000Z"],
     ["with a space instead of the T", "2026-07-01 08:00:00", "2026-07-01T06:00:00.000Z"],
     ["with fractions of a second and no offset", "2026-12-01T08:00:00.5", "2026-12-01T07:00:00.500Z"],
     ["with a date only", "2026-12-01", "2026-11-30T23:00:00.000Z"],
   ])("reads a one-off time %s", (_name, run_at, at) => {
-    const entry = jobToRoutine(jobOf({ schedule: { kind: "once", run_at } }), WARSAW);
+    const entry = jobToRoutine(jobOf({ schedule: { kind: "once", run_at } }), WARSAW, WARSAW);
     expect(entry?.routine.schedule).toEqual({ kind: "at", at });
+  });
+
+  it("reads a one-off time without an offset in the zone of the machine, not in that of the profile", () => {
+    const job = jobOf({ schedule: { kind: "once", run_at: "2026-12-01T08:00:00" } });
+    // The profile says Warsaw, the machine New York: Hermes runs the job at 08:00 in New York.
+    const entry = jobToRoutine(job, WARSAW, NEW_YORK);
+    expect(entry?.routine.schedule).toEqual({ kind: "at", at: "2026-12-01T13:00:00.000Z" });
+    expect(entry?.routine.timezone).toBe(WARSAW);
+    expect(entry?.warning).toBe(
+      "cron job 'Digest' has a one-off time without an offset; " +
+        "read in this machine's time zone (America/New_York), as Hermes does",
+    );
+  });
+
+  it("takes the zone of the host for a one-off time when no zone is given", () => {
+    // A zone for the profile that is not the host's, whatever the machine running the test is in.
+    const host = machineTimezone();
+    const profile = host === NEW_YORK ? WARSAW : NEW_YORK;
+    const entry = jobToRoutine(
+      jobOf({ schedule: { kind: "once", run_at: "2026-12-01T08:00:00" } }),
+      profile,
+    );
+    expect(entry?.routine.schedule).toEqual({
+      kind: "at",
+      at: zonedToInstant("2026-12-01T08:00:00", host),
+    });
+    expect(entry?.routine.timezone).toBe(profile);
+    expect(entry?.warning).toContain(`(${host})`);
+  });
+
+  it("keeps the zone of the profile for a cron expression and warns about nothing", () => {
+    const entry = jobToRoutine(jobOf(), NEW_YORK, WARSAW);
+    expect(entry?.routine).toMatchObject({
+      timezone: NEW_YORK,
+      schedule: { kind: "cron", expression: "0 9 * * *" },
+    });
+    expect(entry).not.toHaveProperty("warning");
+  });
+
+  it("does not warn about a one-off time that has an offset", () => {
+    for (const run_at of ["2026-12-01T08:00:00+01:00", "2026-12-01T08:00:00Z"]) {
+      const entry = jobToRoutine(jobOf({ schedule: { kind: "once", run_at } }), WARSAW, NEW_YORK);
+      expect(entry).not.toHaveProperty("warning");
+    }
   });
 
   it("is not enabled when the job is paused, disabled or done", () => {

@@ -954,6 +954,31 @@ describe("an agent that is already there", () => {
     expect(second.items.warnings).not.toContainEqual(expect.stringContaining("already exists"));
   });
 
+  it("keeps the id of a copy within the 64 characters Hermes accepts", async () => {
+    const name = "a".repeat(63);
+    const copied = (id: string): Bundle => ada({ manifest: { name, id } });
+    const first = await writeHermesProfile(ctx, copied(ADA_ID), opts());
+    expect(first.targetAgentId).toBe(name);
+
+    // `<63 a's>-2` would be 65 characters: the base is cut for the suffix instead.
+    const second = await writeHermesProfile(ctx, copied(OTHER_ID), opts());
+    expect(second.targetAgentId).toBe(`${"a".repeat(62)}-2`);
+    expect(second.targetAgentId).toHaveLength(64);
+    expect(second.items.warnings).toContain(
+      `profile '${name}' already exists; written as '${second.targetAgentId}'`,
+    );
+
+    // The copy is found again by its marker, and a third agent gets the next number.
+    const again = await writeHermesProfile(ctx, copied(OTHER_ID), opts());
+    expect(again.targetAgentId).toBe(second.targetAgentId);
+    const third = await writeHermesProfile(ctx, copied("01J9ZT3Z9K8QGQ2M6Q4Y3V6B2V"), opts());
+    expect(third.targetAgentId).toBe(`${"a".repeat(62)}-3`);
+
+    // Hermes (and `list`) accept all three.
+    const listed = (await hermesAdapter.list(ctx)).map((agent) => agent.id);
+    expect(listed).toEqual(expect.arrayContaining([name, second.targetAgentId, third.targetAgentId]));
+  });
+
   it("is not written through a link, and goes to <slug>-2", async (task) => {
     const outside = join(root, "outside");
     await mkdir(outside);

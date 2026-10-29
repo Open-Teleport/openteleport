@@ -6,7 +6,7 @@
 // profile in place and leaves what Hermes and the user added since.
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rm, rmdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, posix } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { stringify } from "yaml";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
@@ -14,7 +14,7 @@ import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
 import { byCodeUnit, mergeInstructions, slugify } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
-import { freeSibling, isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
+import { isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
@@ -205,9 +205,21 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   return (await readdir(path)).length === 0;
 }
 
-/** The first free `<base>-2`, `<base>-3`... */
+/** The longest profile id Hermes accepts (`PROFILE_ID_RE`). */
+const MAX_ID_CHARS = 64;
+
+/** `<base>-<n>`, the base cut so that the whole stays within the 64 characters of an id. */
+function withSuffix(base: string, n: number): string {
+  const suffix = `-${n}`;
+  return `${base.slice(0, MAX_ID_CHARS - suffix.length).replace(/-+$/, "")}${suffix}`;
+}
+
+/** The first free `<base>-2`, `<base>-3`... (see `withSuffix`). */
 async function freeId(profiles: string, base: string): Promise<string> {
-  return basename(await freeSibling(join(profiles, base)));
+  for (let n = 2; ; n += 1) {
+    const candidate = withSuffix(base, n);
+    if (await isFree(join(profiles, candidate))) return candidate;
+  }
 }
 
 /**
@@ -224,9 +236,9 @@ async function ownCopy(profiles: string, base: string, id: string): Promise<Targ
     throw error;
   }
   const copies = names
-    .map((name) => ({ name, n: copyNumber(name, base) }))
-    .filter(({ n }) => n !== undefined && n >= 2)
-    .sort((a, b) => (a.n as number) - (b.n as number));
+    .map((name) => ({ name, n: Number(/-([1-9]\d*)$/.exec(name)?.[1]) }))
+    .filter(({ name, n }) => n >= 2 && name === withSuffix(base, n))
+    .sort((a, b) => a.n - b.n);
   for (const { name } of copies) {
     const dir = join(profiles, name);
     if (!(await lstatIfAny(dir))?.isDirectory()) continue;
@@ -799,7 +811,7 @@ export async function writeHermesProfile(
   opts: WriteOpts,
 ): Promise<WriteResult> {
   const items: Items = { approximated: [], skipped: [], warnings: [] };
-  const profiles = join(hermesHome(ctx), "profiles");
+  const profiles = join(await hermesHome(ctx), "profiles");
   const { slug, reserved } = slugOf(bundle.manifest.name);
   await assertProfilesFolder(profiles);
   if (reserved !== undefined) {
