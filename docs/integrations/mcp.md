@@ -170,3 +170,5 @@ not load adapters from src, publish a package, modify application profiles or in
 It needs npm registry access (or cached dependencies) and removes its temporary installation afterwards.
 CI runs this check on Linux, macOS and Windows. It verifies the root npm package; native plugin releases
 still need their separate installation checks and a published dependency version before distribution.
+
+For a synthetic reviewer, repeatable tasks and a private scoring form, see [Agent transfer pilot](pilot.md).
