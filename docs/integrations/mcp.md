@@ -110,6 +110,19 @@ The plugin provides its MCP configuration, the openteleport skill, and the names
 Do not configure the same server both manually and through the plugin unless you want duplicate tools.
 The launcher uses the current Node executable and a configured absolute CLI path, with no shell.
 
+## Plugin startup troubleshooting
+
+The plugin launcher checks Node >=24 and that OPENTELEPORT_CLI is an absolute, readable file.
+Setup failures go to stderr only, so human-readable diagnostics do not corrupt the MCP stream.
+If the CLI file is missing, run npm ci and npm run build in the checkout and set OPENTELEPORT_CLI
+to its dist/cli.js. Restart the MCP connection after changing the environment. The variable must be
+present in the Claude Code process environment, not only in a terminal opened after Claude started.
+
+If the host starts an older Node from PATH, configure its MCP command with the absolute path of a
+supported Node executable. The launcher uses that same executable for the child CLI. Paths containing
+spaces are passed as arguments without a shell. A readable file is only a startup check; it does not
+prove that the configured build implements MCP. Use the built CLI from this checkout.
+
 ## Scope decisions
 
 The original draft proposed immediate export/import/move tools. These now prepare previews, with a separate
