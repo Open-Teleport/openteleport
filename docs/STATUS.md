@@ -13,7 +13,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 - **Docs**: `README.md`, `docs/design.md` (the design and the reasoning), `docs/demo.md` (demo scenario and the end-to-end test), `docs/openclaw-plugin.md` (a proposal for an OpenClaw plugin), `CHANGELOG.md`.
 - **Website**: `site/` (Astro), not deployed yet.
 
-### v0.2 (merged into `main` on 2026-10-29; version 0.2.0, published once the npm token exists)
+### v0.2 (merged into `main` on 2026-10-29; version 0.2.0, published to npm on 2026-10-29)
 
 The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; the research behind it is in `docs/superpowers/research/`.
 
@@ -56,7 +56,6 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
   - **OpenBot**: the schema of `openbot.db` (the adapter knows migration 47; a newer one gets a warning, a missing table or column an error), and that Server settings accepts the import zip it writes, including the `x-openteleport` key in its manifest.
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
-- The npm publication of 0.2.0 (needs the `NPM_TOKEN` secret and the `v0.2.0` tag; the release workflow refuses a tag that does not match `package.json`). See "Release" below.
 
 ## Known small issues (good first fixes)
 
@@ -78,12 +77,13 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
 
 ## Release
 
-The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly: `package.json` is at `0.2.0` and the CHANGELOG entry is dated 2026-10-29. What is left to publish:
+The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly. [OpenTeleport 0.2.0](https://www.npmjs.com/package/openteleport/v/0.2.0) was published on 2026-10-29 and is the npm `latest` version as of this check.
 
-1. Add the `NPM_TOKEN` repository secret (an npm automation token with publish rights for the `openteleport` package).
-2. Tag the release commit: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow checks that the tag matches `package.json`, runs lint, build and tests, and publishes with provenance.
+The `v0.2.0` tag points to commit `ee4371a52a40cd6f85533344067601c45dc53cac`. [Release workflow 40862578050](https://github.com/Open-Teleport/openteleport/actions/runs/40862578050) checked the version, linted, built, tested and published the package with provenance. npm briefly returned the prior staging version while processing the accepted publication; the public registry now serves 0.2.0.
 
-Until the package is on npm, `npx openteleport` and the npm link on the website do not work.
+A fresh-cache check outside the repository ran `npx openteleport@0.2.0 --version`, exported a synthetic folder agent, imported the resulting archive into a fresh folder, and verified that the instructions were preserved. This checks the published CLI path; it does not establish real-application behavior for every adapter.
+
+Users with Node.js 24+ can start with `npx openteleport`. Use `npx openteleport@0.2.0` to select this exact release. The MCP and native plugin integrations being reviewed in PRs #6 and #7 are not included in this published artifact.
 
 ## How decisions are recorded
 
