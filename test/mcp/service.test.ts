@@ -35,6 +35,7 @@ it("previews without writes and applies only the reviewed snapshot once", async 
   const plan = await session.plan(request);
   expect(await readdir(home)).toEqual([]);
   expect(target.written).toHaveLength(0);
+  expect(plan.destination.writeScope.coverage).toBe("unavailable");
   expect(plan.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ field: "memory.facts" })]));
   source.read = async () => { throw new Error("changed source must not be reread"); };
   await expect(session.apply(plan.planId, false)).rejects.toThrow("Review");
@@ -85,6 +86,7 @@ it("never overwrites an archive created after preview", async () => {
   const session = new TransferSession(ctx);
   const out = join(home, "agent.jetpack");
   const plan = await session.plan({ operation: "export", from: "source", agent: "ada", out });
+  expect(plan.destination.writeScope.locations).toEqual([expect.objectContaining({ path: out, kind: "file" })]);
   await writeFile(out, "sentinel");
   await expect(session.apply(plan.planId, true)).rejects.toThrow();
   expect(await readFile(out, "utf8")).toBe("sentinel");
