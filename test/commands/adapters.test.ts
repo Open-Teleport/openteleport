@@ -33,11 +33,11 @@ describe("adapters", () => {
       "folder",
       "openclaw",
       "claude-code",
-      "codex",
-      "letta",
       "hermes",
-      "grok-bot",
+      "codex",
       "openbot",
+      "grok-bot",
+      "letta",
       "memory",
     ]);
     const [header] = result.stdout.split(/\r?\n/);
@@ -52,11 +52,11 @@ describe("adapters", () => {
       "folder",
       "openclaw",
       "claude-code",
-      "codex",
-      "letta",
       "hermes",
-      "grok-bot",
+      "codex",
       "openbot",
+      "grok-bot",
+      "letta",
       "memory",
     ]);
     for (const row of rows) {
@@ -73,22 +73,22 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw, Claude Code, Codex, Letta Code, Hermes or OpenBot lives in the sandbox
+    // Nothing of OpenClaw, Claude Code, Hermes, Codex, OpenBot or Letta Code lives in the sandbox
     // home, and Grok Bot has no home at all: it is found only through a zip.
-    expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
-    expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
-    expect(rows[3]).toMatchObject({ found: false, hint: expect.any(String) });
-    expect(rows[4]).toMatchObject({
-      name: "letta",
-      displayName: "Letta Code",
-      found: false,
-      hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
-    });
-    expect(rows[5]).toMatchObject({
+    expect(rows[1]).toMatchObject({ name: "openclaw", found: false, hint: expect.any(String) });
+    expect(rows[2]).toMatchObject({ name: "claude-code", found: false, hint: expect.any(String) });
+    expect(rows[3]).toMatchObject({
       name: "hermes",
       displayName: "Hermes Agent",
       found: false,
       hint: "Install Hermes Agent or pass --source-dir <HERMES_HOME>",
+    });
+    expect(rows[4]).toMatchObject({ name: "codex", found: false, hint: expect.any(String) });
+    expect(rows[5]).toMatchObject({
+      name: "openbot",
+      displayName: "OpenBot",
+      found: false,
+      hint: expect.stringContaining("pass --source-dir <export.zip>"),
     });
     expect(rows[6]).toEqual({
       name: "grok-bot",
@@ -99,10 +99,10 @@ describe("adapters", () => {
       hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then pass --source-dir <openbot-export-*.zip>",
     });
     expect(rows[7]).toMatchObject({
-      name: "openbot",
-      displayName: "OpenBot",
+      name: "letta",
+      displayName: "Letta Code",
       found: false,
-      hint: expect.stringContaining("pass --source-dir <export.zip>"),
+      hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
     });
   });
 
@@ -113,11 +113,11 @@ describe("adapters", () => {
       "folder",
       "openclaw",
       "claude-code",
-      "codex",
-      "letta",
       "hermes",
-      "grok-bot",
+      "codex",
       "openbot",
+      "grok-bot",
+      "letta",
     ]);
   });
 });

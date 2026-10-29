@@ -10,16 +10,17 @@ import { registerAdapter } from "./registry.js";
 
 /**
  * Registers the adapters that ship with OpenTeleport: `folder`, `openclaw`, `claude-code`,
- * `codex`, `letta`, `hermes`, `grok-bot` and `openbot`, in that order. Calling it again is
- * harmless: an adapter registered under a taken name replaces the earlier one in its place.
+ * `hermes`, `codex`, `openbot`, `grok-bot` and `letta`, in that order, which is the order
+ * `openteleport adapters` prints them in. Calling it again is harmless: an adapter registered
+ * under a taken name replaces the earlier one in its place.
  */
 export function registerBuiltinAdapters(): void {
   registerAdapter(folderAdapter);
   registerAdapter(openclawAdapter);
   registerAdapter(claudeCodeAdapter);
-  registerAdapter(codexAdapter);
-  registerAdapter(lettaAdapter);
   registerAdapter(hermesAdapter);
-  registerAdapter(grokBotAdapter);
+  registerAdapter(codexAdapter);
   registerAdapter(openbotAdapter);
+  registerAdapter(grokBotAdapter);
+  registerAdapter(lettaAdapter);
 }

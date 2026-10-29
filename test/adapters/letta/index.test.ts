@@ -50,8 +50,9 @@ describe("letta adapter", () => {
     expect(lettaAdapter.write).toBe(writeLettaAgent);
   });
 
-  it("declares what Letta Code can hold, and that writing it needs no install", () => {
+  it("declares what Letta Code can hold, that writing it needs no install and that it hands off", () => {
     expect(lettaAdapter.createsOnWrite).toBe(true);
+    expect(lettaAdapter.handoff).toBe(true);
     expect(lettaAdapter.capabilities).toEqual({
       persona: true,
       instructions: true,

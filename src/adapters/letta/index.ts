@@ -45,6 +45,7 @@ export const lettaAdapter: Adapter = {
   displayName: "Letta Code",
   capabilities: CAPABILITIES,
   createsOnWrite: true,
+  handoff: true,
   detect,
   list: listLettaAgents,
   read: readLettaAgent,
