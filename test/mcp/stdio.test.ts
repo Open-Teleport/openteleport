@@ -40,6 +40,10 @@ it("advertises strict schemas and the write boundary", async () => {
     .toMatchObject({ readOnlyHint: false, destructiveHint: true });
   const moving = tools.find((tool) => tool.name === "openteleport_move")!;
   expect(moving.inputSchema.additionalProperties).toBe(false);
+  for (const name of ["export", "import", "move"]) {
+    expect(tools.find(tool => tool.name === "openteleport_" + name)!.inputSchema.properties)
+      .toMatchObject({ includeMemory: { type: "boolean", default: true } });
+  }
   expect(JSON.stringify(moving.inputSchema)).not.toContain('"replace"');
   expect(await readdir(home)).toEqual([]);
 });
@@ -193,3 +197,18 @@ it("retains completion after client cancellation without replaying or claiming a
     await applying;
   }
 }, 15_000);
+
+it("selects memory through the public export schema without changing the source", async () => {
+  const out = join(home, "configuration.jetpack");
+  const preview = await call("export", { from: "memory", agent: "ada", out, includeMemory: false });
+  expect(preview.isError).not.toBe(true);
+  expect(preview.structuredContent).toMatchObject({
+    options: { includeMemory: false }, contents: { counts: { facts: 0, notes: 0 } },
+    excluded: [{ field: "memory.facts" }],
+  });
+  const applied = await call("apply", { planId: (preview.structuredContent as { planId: string }).planId, confirmed: true });
+  expect(applied.isError).not.toBe(true);
+  expect((await call("inspect", { path: out })).structuredContent).toMatchObject({ counts: { facts: 0, notes: 0 } });
+  const original = await call("export", { from: "memory", agent: "ada", out: join(home, "with-memory.jetpack") });
+  expect(original.structuredContent).toMatchObject({ options: { includeMemory: true }, contents: { counts: { facts: 1 } } });
+});

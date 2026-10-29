@@ -22,10 +22,12 @@ Record every intervention by the test operator, including terminal commands and 
 assisted completion does not count as an unassisted completion. Installation prerequisites and missing
 interfaces are findings, even when the underlying transfer works.
 
-Use synthetic data for the team scenario. The current MCP preview includes structured memory and
-does not provide a memory-exclusion switch. Credential scanning is not anonymization: instructions,
-skills, memory and other fields may contain personal information. Treat selective memory sharing as
-an unmet requirement to evaluate, not an existing feature or a guarantee that a package is safe to share.
+Use synthetic data for the team scenario. MCP includes structured memory by default; includeMemory=false
+excludes structured facts and notes, with omissions shown in the preview and report. Credential scanning
+is not anonymization: instructions, skills, memory and other fields may contain personal information.
+Evaluate whether participants understand the selection and its limits, including that an update may
+remove previously imported destination memory. Use copy for the pilot. The CLI and native plugin
+commands do not yet expose memory selection.
 
 Recruit across all three audiences and include at least two participants per audience when expanding
 to ten participants. Report completion, assistance, repair time and repeat use separately for each

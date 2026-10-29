@@ -10,7 +10,9 @@ import { NotDetectedError, UsageError } from "../commands/shared.js";
 import { summary, TransferSession } from "./service.js";
 
 const text = z.string().min(1).max(4096);
+const memory = { includeMemory: z.boolean().default(true).describe("Include structured facts and notes. False is not anonymization; update may remove existing imported memory.") };
 const write = {
+  ...memory,
   onConflict: z.enum(["update", "copy"]).default("update"),
   enableRoutines: z.boolean().default(false), includeFiles: z.boolean().default(false),
 };
@@ -22,7 +24,7 @@ export const schemas = {
   list: z.strictObject({ from: text, sourceDir: text.optional() }),
   inspect: z.strictObject({ path: text }),
   validate: z.strictObject({ path: text }),
-  export: z.strictObject({ ...source, out: text.optional(), includeFiles: z.boolean().default(false) }),
+  export: z.strictObject({ ...source, ...memory, out: text.optional(), includeFiles: z.boolean().default(false) }),
   import: z.strictObject({ path: text, ...target, ...write }),
   move: z.strictObject({ ...source, ...target, ...write }),
   apply: z.strictObject({ planId: z.string().uuid(), confirmed: z.literal(true) }),

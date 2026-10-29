@@ -50,6 +50,19 @@ counts describe the selected snapshot: excluded files do not travel and are not 
 Names/paths and some metadata are outside the scanner's scope. Personal memory is not automatically anonymized. Previews summarize
 capability losses; additional adapter approximations and skips are reported after application.
 
+## Select memory before sharing
+
+Export, import and move accept includeMemory (default true). Set it to false to exclude structured
+facts and notes before scanning and retaining the reviewed snapshot. Preview contents show the selected
+counts; excluded lists omitted counts and reasons without returning memory text. The final result and
+saved report also record those omissions. The source stays unchanged.
+
+This is not anonymization. Instructions, persona, skills, routines, attachments and vendor metadata can
+still contain personal information. Review those separately before sharing. When updating an existing
+agent, omitted memory may remove previously imported destination memory, depending on the adapter;
+use copy to retain the existing agent. This option selects incoming content, not destination fields to
+leave untouched. The ordinary CLI and native plugin commands do not yet expose this switch.
+
 ## Destination location disclosure
 
 Previews include destination.writeScope: locations, their purpose, whether they are shared, and

@@ -12,6 +12,7 @@ import { getAdapter, listAdapters } from "../adapters/registry.js";
 import type { Adapter, Ctx, WriteOpts } from "../adapters/types.js";
 import { readBundle } from "../core/bundle.js";
 import { diffCapabilities, exportBundle, importBundle, move, SecretsFoundError } from "../core/engine.js";
+import type { Item } from "../core/report.js";
 import type { Bundle } from "../core/schema.js";
 import { scanSecrets } from "../core/secrets.js";
 import { ensureDetected, fileSlug, resolveAgent, saveReport, sideOf, UsageError } from "../commands/shared.js";
@@ -20,9 +21,10 @@ export type Transfer = {
   operation: "export" | "import" | "move";
   from?: string; agent?: string; path?: string; out?: string; to?: string;
   sourceDir?: string; targetDir?: string;
-  includeFiles?: boolean; enableRoutines?: boolean; onConflict?: "update" | "copy";
+  includeFiles?: boolean; includeMemory?: boolean; enableRoutines?: boolean; onConflict?: "update" | "copy";
 };
 type Pending = {
+  excluded: Item[]; selectionWarnings: string[];
   expires: number; input: Transfer; bundle: Bundle; ctx: Ctx; warnings: string[];
   from?: Adapter; to?: Adapter; agent?: string; identity?: string;
 };
@@ -125,8 +127,19 @@ export class TransferSession {
       if (!input.path) throw new UsageError("An import needs a bundle path.");
       bundle = await this.read(input.path);
     }
-    // Freeze the reviewed source in memory; apply never rereads a changed source.
-    bundle = { ...bundle, files: input.includeFiles ? bundle.files : [] };
+    const excluded: Item[] = [];
+    const selectionWarnings: string[] = [];
+    if (input.includeMemory === false) {
+      if (bundle.facts.length) excluded.push({ field: "memory.facts", detail: `${bundle.facts.length} facts excluded by includeMemory=false` });
+      if (bundle.notes.length) excluded.push({ field: "memory.notes", detail: `${bundle.notes.length} notes excluded by includeMemory=false` });
+      selectionWarnings.push("Only structured facts and notes are excluded. Instructions, persona, skills, routines, files and metadata may still contain personal information; this is not anonymization.");
+      if (to && input.onConflict !== "copy") selectionWarnings.push("Updating without memory may remove previously imported destination memory, depending on the adapter. Use copy to keep the existing agent.");
+    }
+    // Select before scanning and cloning; never mutate the source or reread it during apply.
+    bundle = { ...bundle, files: input.includeFiles ? bundle.files : [],
+      facts: input.includeMemory === false ? [] : bundle.facts,
+      notes: input.includeMemory === false ? [] : bundle.notes };
+
     if (!fitsPreviewBudget(bundle, MAX_PLAN_BYTES)) {
       throw new UsageError("Bundle exceeds the session preview size or complexity limit; use the CLI.");
     }
@@ -152,7 +165,7 @@ export class TransferSession {
     if (this.closed) throw new UsageError("Session closed while preparing the preview.");
     const planId = randomUUID();
     this.plans.set(planId, {
-      expires, bundle, ctx, warnings, from, to, agent, identity,
+      expires, bundle, ctx, warnings, from, to, agent, identity, excluded, selectionWarnings,
       input: { ...input, ...(out ? { out } : {}) },
     });
     const expiryTimer = setTimeout(() => this.discard(planId), TTL);
@@ -164,12 +177,13 @@ export class TransferSession {
         path: input.path ? resolve(ctx.cwd, input.path) : ctx.sourceDir ?? null },
       destination: { app: to?.name ?? "jetpack", path: out ?? ctx.targetDir ?? null,
         usesApplicationDefault: !out && !ctx.targetDir, cwd: ctx.cwd, writeScope },
-      contents: summary(bundle), skipped, secretScan,
+      contents: summary(bundle), skipped, excluded, secretScan,
       options: { onConflict: input.onConflict ?? "update", includeFiles: input.includeFiles === true,
+        includeMemory: input.includeMemory !== false,
         enableRoutines: input.enableRoutines === true },
       handoff: to?.handoff === true,
       warnings: [
-        ...warnings, ...secretScan.warnings,
+        ...warnings, ...secretScan.warnings, ...selectionWarnings,
         "This is a content/capability preview, not a file diff or a reservation of the destination. Adapter conflicts are checked during apply.",
         "Memory and instructions may contain personal information even when the secret scan passes.",
         ...(to ? ["Writes are not transactional; on failure inspect the destination before retrying."] : []),
@@ -273,6 +287,8 @@ export class TransferSession {
       } else {
         report = await importBundle({ to: trackedTarget!, bundle, ctx, write });
       }
+      report.skipped.push(...pending.excluded);
+      report.warnings.push(...pending.selectionWarnings);
       let reportPath: string | undefined;
       try { reportPath = await saveReport(report, ctx.home, bundle.manifest.name); }
       catch { report.warnings.push("Transfer completed, but its report could not be saved; retain this result."); }
