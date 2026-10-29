@@ -34,10 +34,12 @@
 //       payload: { kind: "agentTurn", message } }
 //   Rows are read tolerantly: `agentId` or `agent`; `disabled` or `enabled` (neither: enabled);
 //   `payload.message`, `payload.prompt` or a top-level `message`; a numeric id becomes a string.
-//   A job without an agent belongs to `main`, the default agent. A cron job without `tz` runs in
+//   A job without an agent belongs to the default agent (`main`, unless the config names
+//   another). A cron job without `tz` runs in
 //   the Gateway host's local zone. A row that is not an object or has no id is skipped, with a
 //   warning naming it.
-// - `openclaw agents list --json` prints `{ id, name?, workspace? }` rows, bare or under `agents`.
+// - `openclaw agents list --json` prints `{ id, name?, workspace? }` rows, bare or under `agents`
+//   (2026.10; 2026.5.28 calls the workspace `location`).
 // - Adding a job prints the new job's id as `id`, `job.id` or `automation.id`.
 // - `openclaw gateway status --json` prints an object with `running: true` or
 //   `status: "running"` while the Gateway runs.
@@ -67,7 +69,10 @@ export type JobRow = {
   message?: string;
 };
 
-/** An agent as `openclaw agents list` reports it. */
+/**
+ * An agent as `openclaw agents list` reports it. `workspace` is the row's `workspace` (2026.10)
+ * or `location` (2026.5.28).
+ */
 export type AgentRow = { id: string; name?: string; workspace?: string };
 
 /** The command family for jobs: `cron` up to 2026.5, `automations` from 2026.6. */
@@ -391,7 +396,7 @@ export class OpenClawCli {
         return;
       }
       const name = label(row.name);
-      const workspace = label(row.workspace);
+      const workspace = label(row.workspace) ?? label(row.location);
       agents.push({
         id,
         ...(name === undefined ? {} : { name }),

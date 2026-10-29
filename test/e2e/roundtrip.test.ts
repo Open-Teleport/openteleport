@@ -109,8 +109,13 @@ async function namesIn(dir: string): Promise<string[]> {
   }
 }
 
-/** Variables that would lead a child process to the user's own installs. */
-const LEAKY = /^(?:OPENCLAW_|OPENTELEPORT_|CLAUDE_CONFIG_DIR$)/i;
+/**
+ * Variables that would lead a child process to the user's own installs, and the test runner's
+ * own (`VITEST`, `VITEST_*`, `TEST` and `NODE_ENV`, whatever their values): a user's shell does
+ * not carry them, and OpenClaw runs in a test mode of its own under `VITEST`, where
+ * `agents list --json` prints nothing.
+ */
+const LEAKY = /^(?:OPENCLAW_|OPENTELEPORT_|CLAUDE_CONFIG_DIR$|VITEST|TEST$|NODE_ENV$)/i;
 
 /**
  * The environment of every child process: the user's (for `PATH`), with every home and app
@@ -219,6 +224,17 @@ function at(value: unknown, ...keys: string[]): unknown {
   let current = value;
   for (const key of keys) current = isRecord(current) ? current[key] : undefined;
   return current;
+}
+
+/**
+ * The config's entry for agent `id`: under `agents.entries` (OpenClaw 2026.6 and later) or the
+ * element of `agents.list` with that id (up to 2026.5.28).
+ */
+function agentEntry(config: unknown, id: string): unknown {
+  const keyed = at(config, "agents", "entries", id);
+  if (keyed !== undefined) return keyed;
+  const list = at(config, "agents", "list");
+  return Array.isArray(list) ? list.find((row) => isRecord(row) && row.id === id) : undefined;
 }
 
 /** A digest of the file, or `undefined` when there is none. */
@@ -652,7 +668,7 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
   );
 
   it("(d) sets model and runtime of an agent whose id has a dash", async () => {
-    const entry = at(await sandboxConfig(), "agents", "entries", ROUTINES_AGENT_ID);
+    const entry = agentEntry(await sandboxConfig(), ROUTINES_AGENT_ID);
     expect(at(entry, "model")).toBe("anthropic/claude-opus-5-5");
     expect(at(entry, "runtime")).toEqual({ type: "acp", acp: { agent: "claude" } });
   });

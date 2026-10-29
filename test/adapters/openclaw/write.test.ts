@@ -1794,3 +1794,158 @@ describe("openclawAdapter.write", () => {
     expect(await exists(join(stateDir, "workspace-ada", "AGENTS.md"))).toBe(true);
   });
 });
+
+describe("writeOpenClawAgent: an agents.list roster (OpenClaw up to 2026.5.28)", () => {
+  const listed = (elements: unknown[]): string => JSON.stringify({ agents: { list: elements } });
+  const MODELS = [{ runtime: "claude-code", provider: "anthropic", model: "claude-opus-5-5" }];
+  const RUNTIME = { type: "acp", acp: { agent: "claude" } };
+  const configOf = async (): Promise<unknown> =>
+    JSON5.parse(await text(join(stateDir, "openclaw.json")));
+  const configCalls = (): string[][] => argsOf().filter((args) => args[0] === "config");
+
+  it("sets model and runtime at agents.list[<index>] when the config lists the agent", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      listed([{ id: "main" }, { id: "ada", workspace: ws }]),
+    );
+    // The rows of 2026.5.28 call the workspace `location`.
+    agentRows = [
+      { id: "main", name: "main", location: join(stateDir, "workspace") },
+      { id: "ada", name: "ada", location: ws },
+    ];
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({}, { models: MODELS }), OPTS);
+
+    expect(result.targetAgentId).toBe("ada");
+    expect(result.artifactPath).toBe(ws);
+    expect(result.items.warnings).toEqual([]);
+    expect(commands()).not.toContain("agents add");
+    expect(configCalls()).toEqual([
+      ["config", "set", "agents.list[1].model", "anthropic/claude-opus-5-5"],
+      ["config", "set", "agents.list[1].runtime", JSON.stringify(RUNTIME), "--strict-json"],
+    ]);
+  });
+
+  it("sets a new agent by index once `agents add` has appended it, as 2026.5.28 does", async () => {
+    await writeFile(join(stateDir, "openclaw.json"), listed([{ id: "main" }]));
+    override = (args) => {
+      if (args.slice(0, 2).join(" ") !== "agents add") return undefined;
+      const added = { id: args[2], name: args[2], workspace: args[4] };
+      writeFileSync(join(stateDir, "openclaw.json"), listed([{ id: "main" }, added]));
+      return JSON.stringify({ id: args[2] });
+    };
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({}, { models: MODELS }), OPTS);
+
+    expect(result.items.warnings).toEqual([]);
+    expect(configCalls()).toEqual([
+      ["config", "set", "agents.list[1].model", "anthropic/claude-opus-5-5"],
+      ["config", "set", "agents.list[1].runtime", JSON.stringify(RUNTIME), "--strict-json"],
+    ]);
+    expect(await configOf()).toEqual({
+      agents: {
+        list: [
+          { id: "main" },
+          { id: "ada", name: "ada", workspace: join(stateDir, "workspace-ada") },
+        ],
+      },
+    });
+  });
+
+  it("writes one element, with id and workspace, into a list that lacks the agent", async () => {
+    await writeFile(join(stateDir, "openclaw.json"), listed([{ id: "main" }]));
+
+    const result = await writeOpenClawAgent(makeCtx(), ada({}, { models: MODELS }), OPTS);
+
+    // Not through `config set`: a whole element is not checked on an install.
+    expect(commands()).not.toContain("config set");
+    expect(result.items.warnings).toEqual([REWRITE_WARNING]);
+    expect(await configOf()).toEqual({
+      agents: {
+        list: [
+          { id: "main" },
+          {
+            id: "ada",
+            workspace: join(stateDir, "workspace-ada"),
+            model: "anthropic/claude-opus-5-5",
+            runtime: RUNTIME,
+          },
+        ],
+      },
+    });
+    expect(await text(join(stateDir, BACKUP_NAME))).toBe(listed([{ id: "main" }]));
+  });
+
+  it.each([
+    ["no roster", "{}"],
+    ["an empty list", JSON.stringify({ agents: { list: [] } })],
+  ])("puts main first with %s, so that main stays the default agent", async (_name, source) => {
+    await writeFile(join(stateDir, "openclaw.json"), source);
+
+    await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    expect(await configOf()).toEqual({
+      agents: {
+        list: [
+          { id: "main" },
+          { id: "ada", workspace: join(stateDir, "workspace-ada"), model: "anthropic/claude-opus-5-5" },
+        ],
+      },
+    });
+  });
+
+  it("appends a copy's element, with its own workspace, beside the agent it did not write", async () => {
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      '// mine\n{ gateway: { port: 1 }, agents: { list: [{ id: "main" }, { id: "ada", workspace: "~/x" }] } }',
+    );
+
+    const result = await writeOpenClawAgent(makeCtx(), ada(), { ...OPTS, onConflict: "copy" });
+
+    expect(result.targetAgentId).toBe("ada-2");
+    expect(result.items.warnings).toContain(REWRITE_WARNING);
+    expect(await configOf()).toEqual({
+      gateway: { port: 1 },
+      agents: {
+        list: [
+          { id: "main" },
+          { id: "ada", workspace: "~/x" },
+          {
+            id: "ada-2",
+            workspace: join(stateDir, "workspace-ada-2"),
+            model: "anthropic/claude-opus-5-5",
+          },
+        ],
+      },
+    });
+  });
+
+  it("merges into the listed element, not a keyed copy, when the config has both forms", async () => {
+    const ws = join(scratch, "their-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      JSON.stringify({ agents: { entries: {}, list: [{ id: "ada", workspace: ws }] } }),
+    );
+    override = (args) => (args[0] === "config" ? unknownCommand() : undefined);
+
+    const result = await writeOpenClawAgent(makeCtx(), ada(), OPTS);
+
+    expect(result.targetAgentId).toBe("ada");
+    expect(configCalls()).toEqual([
+      ["config", "set", "agents.list[0].model", "anthropic/claude-opus-5-5"],
+    ]);
+    expect(await configOf()).toEqual({
+      agents: { entries: {}, list: [{ id: "ada", workspace: ws, model: "anthropic/claude-opus-5-5" }] },
+    });
+  });
+
+  it("refuses a config whose agents.list is not an array, naming it", async () => {
+    await writeFile(join(stateDir, "openclaw.json"), JSON.stringify({ agents: { list: "x" } }));
+    await expect(writeOpenClawAgent(makeCtx(), ada(), OPTS)).rejects.toThrow(
+      "openclaw.json: agents.list is not an array",
+    );
+  });
+});

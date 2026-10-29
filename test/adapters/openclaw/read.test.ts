@@ -6,7 +6,15 @@ import type { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OpenClawCli } from "../../../src/adapters/openclaw/cli.js";
 import openclawAdapterDefault, { openclawAdapter } from "../../../src/adapters/openclaw/index.js";
-import { openclawPaths, readOpenClawConfig } from "../../../src/adapters/openclaw/paths.js";
+import {
+  type OpenClawAgentEntry,
+  type OpenClawConfig,
+  agentConfigPath,
+  agentEntries,
+  defaultAgentId,
+  openclawPaths,
+  readOpenClawConfig,
+} from "../../../src/adapters/openclaw/paths.js";
 import { readOpenClawAgent } from "../../../src/adapters/openclaw/read.js";
 import type { Ctx } from "../../../src/adapters/types.js";
 import { bundleToEntries, entriesToBundle } from "../../../src/core/bundle.js";
@@ -280,7 +288,7 @@ describe("openclawPaths", () => {
     );
   });
 
-  it("resolves workspaces: entry, defaults, the only agent, then workspace-<id>", () => {
+  it("resolves workspaces: entry, the default agent, defaults/<id>, then workspace-<id>", () => {
     const { workspaceFor } = openclawPaths(ctx);
     const two = { agents: { entries: { ada: {}, bare: {} } } };
 
@@ -291,9 +299,13 @@ describe("openclawPaths", () => {
     expect(workspaceFor("ada", { agents: { entries: { ada: { workspace: absolute } } } })).toBe(
       absolute,
     );
+    // The only agent is the default one, whose workspace `agents.defaults.workspace` is.
     expect(
       workspaceFor("ada", { agents: { defaults: { workspace: "~/claws" }, entries: { ada: {} } } }),
-    ).toBe(join(home, "claws", "ada"));
+    ).toBe(join(home, "claws"));
+    expect(
+      workspaceFor("ops", { agents: { defaults: { workspace: "~/claws" }, entries: { ada: {} } } }),
+    ).toBe(join(home, "claws", "ops"));
     expect(workspaceFor("ada", { agents: { entries: { ada: {} } } })).toBe(
       join(stateDir, "workspace"),
     );
@@ -1338,5 +1350,177 @@ describe("openclawAdapter", () => {
       const bare = await makeState({});
       expect(await openclawAdapter.list(makeCtx({ sourceDir: bare }, noAgents))).toEqual([]);
     });
+  });
+});
+
+describe("the roster in openclaw.json: agents.list (up to 2026.5.28) or agents.entries", () => {
+  const listed: OpenClawConfig = {
+    agents: {
+      list: [
+        { id: "main" },
+        { id: "ada", workspace: "~/ws/ada", model: "anthropic/claude-opus-5-5" },
+        { name: "no id" },
+        "junk" as unknown as OpenClawAgentEntry,
+      ],
+    },
+  };
+
+  it("reads agents.list by id, with agents.entries over it", () => {
+    expect(Object.keys(agentEntries(listed))).toEqual(["main", "ada"]);
+    expect(agentEntries(listed).ada).toEqual({
+      id: "ada",
+      workspace: "~/ws/ada",
+      model: "anthropic/claude-opus-5-5",
+    });
+    const both: OpenClawConfig = {
+      agents: {
+        list: [{ id: "ada", model: "old/one" }],
+        entries: { ada: { model: "new/one" }, ops: null as unknown as OpenClawAgentEntry },
+      },
+    };
+    expect(agentEntries(both)).toEqual({ ada: { model: "new/one" }, ops: {} });
+    expect(agentEntries({})).toEqual({});
+    expect(agentEntries({ agents: { list: "no" as unknown as [] } })).toEqual({});
+  });
+
+  it("names the config path of an agent, for `config set`", () => {
+    expect(agentConfigPath(listed, "ada")).toBe("agents.list[1]");
+    expect(agentConfigPath(listed, "ops")).toBeUndefined();
+    expect(agentConfigPath({ agents: { entries: { ada: {} } } }, "ada")).toBe(
+      "agents.entries.ada",
+    );
+    expect(agentConfigPath({ agents: { entries: {}, list: [{ id: "ada" }] } }, "ada")).toBe(
+      "agents.list[0]",
+    );
+    expect(agentConfigPath({}, "ada")).toBeUndefined();
+  });
+
+  it("resolves the workspace of a listed agent as of a keyed one", () => {
+    const { workspaceFor } = openclawPaths(ctx);
+    expect(workspaceFor("ada", listed)).toBe(join(home, "ws", "ada"));
+    expect(workspaceFor("main", { agents: { list: [{ id: "main" }] } })).toBe(
+      join(stateDir, "workspace"),
+    );
+    expect(workspaceFor("ops", { agents: { list: [{ id: "main" }, { id: "ops" }] } })).toBe(
+      join(stateDir, "workspace-ops"),
+    );
+  });
+
+  it("gives the default agent `agents.defaults.workspace` itself, as OpenClaw does", () => {
+    const { workspaceFor } = openclawPaths(ctx);
+    // As `openclaw onboard` writes it: the default workspace named, `main` listed without one.
+    const onboarded: OpenClawConfig = {
+      agents: {
+        defaults: { workspace: join(stateDir, "workspace") },
+        list: [{ id: "main" }, { id: "reviewer", workspace: join(stateDir, "workspace-reviewer") }],
+      },
+    };
+    expect(workspaceFor("main", onboarded)).toBe(join(stateDir, "workspace"));
+    expect(workspaceFor("reviewer", onboarded)).toBe(join(stateDir, "workspace-reviewer"));
+    expect(workspaceFor("ops", onboarded)).toBe(join(stateDir, "workspace", "ops"));
+    expect(workspaceFor("main", { agents: { defaults: { workspace: "~/claws" } } })).toBe(
+      join(home, "claws"),
+    );
+  });
+
+  it("reads an agent in agents.list: its model and identity", async () => {
+    const dir = await mkdtemp(join(scratch, "state-"));
+    await writeTree(dir, {
+      "openclaw.json": JSON.stringify({
+        agents: {
+          defaults: { workspace: join(dir, "workspace") },
+          list: [
+            { id: "main" },
+            {
+              id: "ada",
+              name: "ada",
+              workspace: join(dir, "workspace-ada"),
+              model: "anthropic/claude-opus-5-5",
+              identity: { name: "Ada", theme: "Research assistant", emoji: "🔎" },
+            },
+          ],
+        },
+      }),
+      "workspace-ada/AGENTS.md": "Do research.\n",
+    });
+    const { bundle } = await readOpenClawAgent(makeCtx({ sourceDir: dir }, noJobs), "ada");
+    expect(bundle.manifest.name).toBe("Ada");
+    expect(bundle.manifest.models).toEqual([{ provider: "anthropic", model: "claude-opus-5-5" }]);
+    expect(bundle.instructions).toBe("Do research.\n");
+  });
+
+  it("lists agents.list, taking the CLI's `location` as a workspace", async () => {
+    const dir = await mkdtemp(join(scratch, "state-"));
+    await writeTree(dir, {
+      "openclaw.json": JSON.stringify({
+        agents: {
+          defaults: { workspace: join(dir, "workspace") },
+          list: [{ id: "main" }, { id: "ada", name: "Ada", workspace: join(dir, "workspace-ada") }],
+        },
+      }),
+    });
+    // The rows of OpenClaw 2026.5.28: the workspace is called `location`.
+    const rows = (args: string[]): Reply =>
+      args[0] === "agents"
+        ? JSON.stringify([
+            { id: "main", name: "main", location: join(dir, "workspace") },
+            { id: "ada", name: "ada", location: join(dir, "workspace-ada") },
+            { id: "ops", name: "Ops", location: "/srv/openclaw/workspace-ops" },
+          ])
+        : undefined;
+    expect(await openclawAdapter.list(makeCtx({ sourceDir: dir }, rows))).toEqual([
+      { id: "main", name: "main", location: join(dir, "workspace") },
+      { id: "ada", name: "Ada", location: join(dir, "workspace-ada") },
+      { id: "ops", name: "Ops", location: "/srv/openclaw/workspace-ops" },
+    ]);
+  });
+});
+
+describe("the default agent", () => {
+  it("is the listed element marked default, else the first, else main", () => {
+    expect(defaultAgentId({ agents: { list: [{ id: "ops" }, { id: "ada", default: true }] } })).toBe(
+      "ada",
+    );
+    expect(defaultAgentId({ agents: { list: [{ id: "ops" }, { id: "ada" }] } })).toBe("ops");
+    expect(defaultAgentId({ agents: { list: [] } })).toBe("main");
+    expect(
+      defaultAgentId({ agents: { list: ["junk" as unknown as OpenClawAgentEntry] } }),
+    ).toBe("main");
+  });
+
+  it("is the keyed roster's systemAgent, else its only agent, else main of none", () => {
+    const designated: OpenClawConfig = {
+      agents: {
+        defaults: { workspace: "~/claws", systemAgent: { agentId: "ops" } },
+        entries: { ada: {}, ops: {} },
+      },
+    };
+    expect(defaultAgentId(designated)).toBe("ops");
+    expect(defaultAgentId({ agents: { entries: { ada: {} } } })).toBe("ada");
+    expect(defaultAgentId({ agents: { entries: {} } })).toBe("main");
+    expect(defaultAgentId({})).toBe("main");
+    expect(defaultAgentId({ agents: { entries: { ada: {}, ops: {} } } })).toBeUndefined();
+
+    const { workspaceFor } = openclawPaths(ctx);
+    expect(workspaceFor("ops", designated)).toBe(join(home, "claws"));
+    expect(workspaceFor("ada", designated)).toBe(join(home, "claws", "ada"));
+    expect(workspaceFor("main", { agents: { entries: { ada: {}, ops: {} } } })).toBe(
+      join(stateDir, "workspace-main"),
+    );
+  });
+
+  it("takes an agent row's workspace, else its location (2026.5.28)", async () => {
+    const rows = JSON.stringify([
+      { id: "a", workspace: "/w", location: "/l" },
+      { id: "b", location: "/l" },
+      { id: "c" },
+    ]);
+    const reply = (args: string[]): Reply => (args[0] === "agents" ? rows : undefined);
+    const cli = new OpenClawCli(makeCtx({}, reply), stateDir, join(stateDir, "openclaw.json"));
+    expect(await cli.agentsList()).toEqual([
+      { id: "a", workspace: "/w" },
+      { id: "b", workspace: "/l" },
+      { id: "c" },
+    ]);
   });
 });

@@ -20,7 +20,10 @@ import {
   DEFAULT_AGENT_ID,
   type OpenClawConfig,
   type OpenClawPaths,
+  agentConfigPath,
+  agentEntries,
   assertAgentId,
+  defaultAgentId,
   openclawPaths,
   readOpenClawConfig,
 } from "./paths.js";
@@ -107,9 +110,7 @@ function existingWorkspace(
   rows: AgentRow[],
   id: string,
 ): string {
-  const entries = cfg.agents?.entries;
-  const entry = isRecord(entries) && Object.hasOwn(entries, id) ? entries[id] : undefined;
-  if (isRecord(entry) && nonBlank(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
+  if (nonBlank(agentEntries(cfg)[id]?.workspace) !== undefined) return paths.workspaceFor(id, cfg);
   const listed = rows.find((row) => row.id === id)?.workspace;
   return listed !== undefined && isAbsolute(listed) ? listed : paths.workspaceFor(id, cfg);
 }
@@ -164,9 +165,7 @@ async function claimTarget(
   warnings: string[],
 ): Promise<Target> {
   const rows = await cli.agentsList();
-  const entries = cfg.agents?.entries;
-  const configured = isRecord(entries) ? Object.keys(entries) : [];
-  const known = new Set([...rows.map((row) => row.id), ...configured]);
+  const known = new Set([...rows.map((row) => row.id), ...Object.keys(agentEntries(cfg))]);
   const freshWorkspace = (id: string): string => join(paths.stateDir, `workspace-${id}`);
   const isFree = async (id: string): Promise<boolean> =>
     !known.has(id) && (await lstatIfAny(freshWorkspace(id))) === undefined;
@@ -350,9 +349,13 @@ async function replaceConfigFile(file: string, content: string): Promise<void> {
 }
 
 /**
- * Sets `values` on `agents.entries.<id>` by rewriting `openclaw.json` (JSON5) as JSON, after a
- * backup of the file as it was. Everything else in the file is kept, but not its comments or
- * layout. Returns whether an existing file was rewritten.
+ * Sets `values` on agent `id` by rewriting `openclaw.json` (JSON5) as JSON, after a backup of
+ * the file as it was. The agent is found as `agentConfigPath` finds it: the keyed entry, else
+ * the listed element. An agent in neither is added to the keyed roster when the file has one,
+ * else to `agents.list` (which 2026.10 still reads, as a legacy form), after a `main` element
+ * when the list was empty, since a new first element would otherwise become the default
+ * agent. Everything else in the file is kept, but not its comments or layout. Returns whether
+ * an existing file was rewritten.
  */
 async function rewriteConfig(
   file: string,
@@ -375,16 +378,30 @@ async function rewriteConfig(
   }
   if (!isRecord(config)) throw new Error(`${file} is not an object`);
 
-  let entry = config;
-  const path: string[] = [];
-  for (const key of ["agents", "entries", id]) {
-    path.push(key);
-    const child = Object.hasOwn(entry, key) ? entry[key] : undefined;
-    if (child === undefined) entry[key] = {};
-    else if (!isRecord(child)) throw new Error(`${file}: ${path.join(".")} is not an object`);
-    entry = entry[key] as Record<string, unknown>;
+  const agents = Object.hasOwn(config, "agents") ? config.agents : (config.agents = {});
+  if (!isRecord(agents)) throw new Error(`${file}: agents is not an object`);
+  const entries = Object.hasOwn(agents, "entries") ? agents.entries : undefined;
+  if (entries !== undefined && !isRecord(entries)) {
+    throw new Error(`${file}: agents.entries is not an object`);
   }
-  Object.assign(entry, values);
+  const list = Object.hasOwn(agents, "list") ? agents.list : undefined;
+  if (list !== undefined && !Array.isArray(list)) {
+    throw new Error(`${file}: agents.list is not an array`);
+  }
+  const entry = entries !== undefined && Object.hasOwn(entries, id) ? entries[id] : undefined;
+  const element: unknown = list?.find((candidate) => isRecord(candidate) && candidate.id === id);
+  if (entry !== undefined) {
+    if (!isRecord(entry)) throw new Error(`${file}: agents.entries.${id} is not an object`);
+    Object.assign(entry, values);
+  } else if (isRecord(element)) {
+    Object.assign(element, values);
+  } else if (entries !== undefined) {
+    entries[id] = { ...values };
+  } else {
+    const rows: unknown[] = list ?? (agents.list = []);
+    if (rows.length === 0 && id !== DEFAULT_AGENT_ID) rows.push({ id: DEFAULT_AGENT_ID });
+    rows.push({ id, ...values });
+  }
 
   if (source !== undefined) await backUp(file, new Date().toISOString().replace(/[:.]/g, "-"));
   await replaceConfigFile(file, `${JSON.stringify(config, null, 2)}\n`);
@@ -392,21 +409,35 @@ async function rewriteConfig(
 }
 
 /**
- * Sets `agents.entries.<id>.<key>` for each value with `openclaw config set` (an object passed
- * as JSON, with `--strict-json`). Once the CLI turns out to have no such command, the rest is
- * set by rewriting `openclaw.json` once, with a backup and a warning.
+ * Sets each value on the target agent with `openclaw config set`, at `agents.entries.<id>.<key>`
+ * or `agents.list[<index>].<key>` as the config keeps the agent (read again here, since
+ * `agents add` has just written it). An agent a keyed roster does not hold goes under
+ * `agents.entries.<id>`; one that an array roster, or no roster, does not hold becomes one
+ * element with its id and workspace, written by rewriting the file, since a `config set` of a
+ * whole element is not checked on an install. An object is passed as JSON, with
+ * `--strict-json`. Once the CLI turns out to have no such command, the rest is set by
+ * rewriting `openclaw.json` once, with a backup and a warning.
  */
 async function setAgentConfig(
   cli: OpenClawCli,
   configFile: string,
-  id: string,
+  target: Target,
   values: [key: string, value: unknown][],
   warnings: string[],
 ): Promise<void> {
+  if (values.length === 0) return;
+  const cfg = await readOpenClawConfig(configFile);
+  const base = agentConfigPath(cfg, target.id);
+  if (base === undefined && !isRecord(cfg.agents?.entries)) {
+    const element = { workspace: target.workspace, ...Object.fromEntries(values) };
+    if (await rewriteConfig(configFile, target.id, element)) warnings.push(REWRITE_WARNING);
+    return;
+  }
+
   const pending: [string, unknown][] = [];
   for (const [key, value] of values) {
     if (pending.length === 0) {
-      const path = `agents.entries.${id}.${key}`;
+      const path = `${base ?? `agents.entries.${target.id}`}.${key}`;
       const set =
         typeof value === "string"
           ? await cli.configSet(path, value)
@@ -416,7 +447,7 @@ async function setAgentConfig(
     pending.push([key, value]);
   }
   if (pending.length === 0) return;
-  if (await rewriteConfig(configFile, id, Object.fromEntries(pending))) {
+  if (await rewriteConfig(configFile, target.id, Object.fromEntries(pending))) {
     warnings.push(REWRITE_WARNING);
   }
 }
@@ -611,7 +642,7 @@ export async function writeOpenClawAgent(
   const cfg = await readOpenClawConfig(paths.configFile);
   const cli = new OpenClawCli(ctx, paths.stateDir, paths.configFile);
   const target = await claimTarget(paths, cfg, cli, bundle, opts.onConflict, items.warnings);
-  const existing = await existingJobs(cli, target, bundle.routines, items);
+  const existing = await existingJobs(cli, cfg, target, bundle.routines, items);
 
   if (target.mode === "new") await cli.agentsAdd(target.id, target.workspace);
   try {
@@ -635,6 +666,7 @@ export async function writeOpenClawAgent(
  */
 async function existingJobs(
   cli: OpenClawCli,
+  cfg: OpenClawConfig,
   target: Target,
   routines: Routine[],
   items: Items,
@@ -643,7 +675,9 @@ async function existingJobs(
   if (!needed) return [];
   try {
     const jobs = await cli.automationsList();
-    return jobs.filter((job) => (job.agentId ?? DEFAULT_AGENT_ID) === target.id);
+    // A job without an agent is the default agent's.
+    const fallback = defaultAgentId(cfg) ?? DEFAULT_AGENT_ID;
+    return jobs.filter((job) => (job.agentId ?? fallback) === target.id);
   } catch (error) {
     if (!blamesGateway(error)) throw error;
     warnGatewayDown(items);
@@ -677,7 +711,7 @@ async function finishWrite(
     ...(identity.theme === undefined ? {} : { theme: identity.theme }),
   });
   const config = modelConfig(bundle.manifest.models, items.approximated);
-  await setAgentConfig(cli, paths.configFile, target.id, config, items.warnings);
+  await setAgentConfig(cli, paths.configFile, target, config, items.warnings);
   await writeRoutines(cli, target, bundle.routines, existing, opts, items);
   if (await gatewayRunning(cli)) items.warnings.push(RESTART_WARNING);
 
