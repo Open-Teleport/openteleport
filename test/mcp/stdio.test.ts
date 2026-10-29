@@ -145,3 +145,18 @@ it("omits scanner previews and redacts credential-bearing paths in validation an
   }
   expect(await readdir(home)).not.toContain("blocked.jetpack");
 });
+
+it("discloses binary exclusions before approving a selected attachment", async () => {
+  const source = join(home, "binary-source");
+  await mkdir(join(source, "files"), { recursive: true });
+  await writeFile(join(source, "AGENTS.md"), "Synthetic instructions");
+  await writeFile(join(source, "files", "example.bin"), new Uint8Array([0, 65, 66]));
+  const validation = await call("validate", { path: source });
+  expect(validation.structuredContent).toMatchObject({ ok: true, scan: { unscanned: { binaryFiles: 1 } } });
+  const omitted = await call("export", { from: "folder", agent: ".", sourceDir: source, out: join(home, "excluded.jetpack") });
+  expect(omitted.structuredContent).toMatchObject({ secretScan: { unscanned: { binaryFiles: 0 } } });
+  const selected = await call("export", { from: "folder", agent: ".", sourceDir: source, out: join(home, "included.jetpack"), includeFiles: true });
+  expect(selected.structuredContent).toMatchObject({ secretScan: { unscanned: { binaryFiles: 1 } } });
+  expect((selected.structuredContent as { warnings: string[] }).warnings.some(warning => warning.includes("not scanned"))).toBe(true);
+  expect(await readdir(home)).not.toContain("included.jetpack");
+});

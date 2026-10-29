@@ -1,3 +1,4 @@
+import { scanDisclosure } from "./scan.js";
 import { publicFindings } from "./findings.js";
 import { ApplyFailedError } from "./receipts.js";
 import { z } from "zod";
@@ -37,7 +38,8 @@ export function registerTools(server: McpServer, session: TransferSession) {
     validate: async (input: z.output<typeof schemas.validate>) => {
       const bundle = await session.read(input.path);
       const findings = publicFindings(scanSecrets(bundle));
-      return { ok: findings.length === 0, findings, warnings: summary(bundle).warnings };
+      const scan = scanDisclosure(bundle);
+      return { ok: findings.length === 0, findings, scan, warnings: [...summary(bundle).warnings, ...scan.warnings] };
     },
     export: (input: z.output<typeof schemas.export>) => session.plan({ operation: "export", ...input }),
     import: (input: z.output<typeof schemas.import>) => session.plan({ operation: "import", ...input }),
