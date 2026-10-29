@@ -16,6 +16,7 @@ import { byCodeUnit, errorLine, splitInstructions, truncate, withoutMark } from 
 import { isRecord } from "../../core/values.js";
 import { entriesOf, isNotFound, lstatIfAny } from "../fs.js";
 import { readIds } from "../marker.js";
+import { readAssociatedSkills } from "./skills.js";
 import { readSkillFolders } from "../skill-files.js";
 import type { Adapter, AgentRef, Ctx } from "../types.js";
 import {
@@ -373,6 +374,7 @@ function ignoredSettings(rest: Table, skillsConfigKept: boolean): string[] {
 
 /** One custom agent: its `developer_instructions` are the persona and instructions. */
 async function readCustom(
+  ctx: Ctx,
   home: string,
   { stem, path }: AgentFileRef,
 ): Promise<{ bundle: Bundle; warnings: string[] }> {
@@ -405,7 +407,8 @@ async function readCustom(
       skillsConfig: skillsConfigKept ? skillsConfig : undefined,
     }),
   };
-  return { bundle: bundleOf(manifest, agent.developer_instructions, {}), warnings };
+  const skills = await readAssociatedSkills(ctx, home, stem, manifest.id, warnings);
+  return { bundle: bundleOf(manifest, agent.developer_instructions, { skills }), warnings };
 }
 
 /**
@@ -419,7 +422,7 @@ export async function readCodexAgent(
 ): Promise<{ bundle: Bundle; warnings: string[] }> {
   if (agent === DEFAULT_AGENT) return readGlobal(ctx);
   const home = codexHome(ctx);
-  return readCustom(home, await locate(home, agent));
+  return readCustom(ctx, home, await locate(home, agent));
 }
 
 /**

@@ -45,10 +45,14 @@
     "pretest": "npm run build",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "schema": "node dist/scripts/emit-schema.js"
+    "schema": "node dist/scripts/emit-schema.js",
+    "verify:package": "node scripts/verify-package.mjs",
+    "check:plugin-versions": "node scripts/sync-plugin-versions.mjs --check",
+    "sync:plugin-versions": "node scripts/sync-plugin-versions.mjs --write"
   },
   "dependencies": {
     "@clack/prompts": "^0.10",
+    "@modelcontextprotocol/server": "2.4.0",
     "commander": "^13",
     "execa": "^9",
     "fflate": "^0.8",
@@ -59,6 +63,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^24",
     "tsup": "^8",
     "typescript": "^5",

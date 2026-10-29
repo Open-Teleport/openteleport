@@ -1,0 +1,2 @@
+- Project Cedar supports CSV export in this pilot.
+- The pilot owner prefers one concrete next check instead of a long checklist.

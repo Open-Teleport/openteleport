@@ -15,6 +15,7 @@ import {
   printReport,
   resolveAgent,
   sideOf,
+  saveReport,
 } from "./shared.js";
 
 export type ExportOptions = CommonOptions & {
@@ -23,6 +24,10 @@ export type ExportOptions = CommonOptions & {
   agent?: string;
   out?: string;
   includeFiles?: boolean;
+  /** Commander maps --no-memory to memory=false. */
+  memory?: boolean;
+  /** False refuses existing archives and retains reports separately. Used by the wizard. */
+  overwrite?: boolean;
 };
 
 /**
@@ -58,11 +63,25 @@ export async function exportCommand(opts: ExportOptions): Promise<void> {
     agent: agent.id,
     ctx,
     includeFiles: opts.includeFiles === true,
+    includeMemory: opts.memory !== false,
   });
   // Written here rather than by `exportBundle`, so that the folder of `--out` is only created
   // once the agent is known to be exportable.
   const out = resolve(ctx.cwd, opts.out ?? `${fileSlug(bundle.manifest.name)}.jetpack`);
   await mkdir(dirname(out), { recursive: true });
-  await writeBundle(bundle, out);
-  printReport(report, opts, await writeReportFile(report, dirname(out)));
+  try { await writeBundle(bundle, out, { exclusiveArchive: opts.overwrite === false }); }
+  catch (error) {
+    if (opts.overwrite === false && (error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new UsageError("Export destination already exists. Keep it and choose another output name or working folder.");
+    }
+    throw error;
+  }
+  if (opts.overwrite === false) {
+    let reportPath: string | undefined;
+    try { reportPath = await saveReport(report, ctx.home, bundle.manifest.name); }
+    catch { report.warnings.push("Archive exported, but its report could not be saved. Keep this result; do not repeat the export."); }
+    printReport(report, opts, reportPath);
+  } else {
+    printReport(report, opts, await writeReportFile(report, dirname(out)));
+  }
 }

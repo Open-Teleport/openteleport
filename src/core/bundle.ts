@@ -52,6 +52,8 @@ export type ReadBundleOptions = {
 export type WriteBundleOptions = {
   /** Write a directory tree instead of a zip archive. */
   asDirectory?: boolean;
+  /** Create a new archive with an exclusive file open; existing entries, including symlinks, fail. */
+  exclusiveArchive?: boolean;
 };
 
 export type EntriesToBundleOptions = {
@@ -658,11 +660,12 @@ export async function writeBundle(
   target: string,
   opts: WriteBundleOptions = {},
 ): Promise<{ removed: string[] }> {
+  if (opts.asDirectory && opts.exclusiveArchive) throw new Error("exclusiveArchive requires an archive output");
   const entries = bundleToEntries(bundle);
 
   if (!opts.asDirectory) {
     const files = Object.fromEntries(entries.map(({ path, bytes }) => [path, bytes]));
-    await writeFile(target, zipSync(files));
+    await writeFile(target, zipSync(files), { flag: opts.exclusiveArchive ? "wx" : "w" });
     return { removed: [] };
   }
 

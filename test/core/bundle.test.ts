@@ -1496,3 +1496,15 @@ describe("special directory entries", () => {
     expect(bundle.unknownPaths).toEqual([]);
   });
 });
+
+it("allows only one concurrent exclusive archive writer", async () => {
+  const target = join(tmp, "exclusive.jetpack");
+  const outcomes = await Promise.allSettled([
+    writeBundle(sampleBundle(), target, { exclusiveArchive: true }),
+    writeBundle(sampleBundle(), target, { exclusiveArchive: true }),
+  ]);
+  expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+  const rejected = outcomes.find(result => result.status === "rejected") as PromiseRejectedResult;
+  expect(rejected.reason).toMatchObject({ code: "EEXIST" });
+  expect((await readBundle(target)).manifest.name).toBe(sampleBundle().manifest.name);
+});

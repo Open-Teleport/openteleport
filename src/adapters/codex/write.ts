@@ -3,13 +3,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "smol-toml";
+import { MAX_TEXT_ENTRY_BYTES } from "../../core/paths.js";
 import type { Bundle, ModelPref } from "../../core/schema.js";
 import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
 import { isRecord } from "../../core/values.js";
-import { lstatIfAny, replaceFile } from "../fs.js";
+import { entriesOf, lstatIfAny, replaceFile } from "../fs.js";
 import { type AgentIds, readIds, recordId } from "../marker.js";
 import { freeName, recordedCopy } from "../names.js";
-import { writeSkills } from "../skills.js";
+import { checkSkillMetadata, recordSkills, writeAssociatedSkills } from "./skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import {
   AGENT_EXTENSION,
@@ -17,7 +18,6 @@ import {
   IDS_FILE,
   agentsDir,
   codexHome,
-  userSkillsDir,
 } from "./paths.js";
 import { type CodexAgentFile, parseAgentToml } from "./read.js";
 
@@ -129,6 +129,45 @@ async function agentFileSlug(
   return slug;
 }
 
+/** File names and Codex role names are separate namespaces. Keep an update's role. */
+async function runtimeName(
+  dir: string,
+  slug: string,
+  wanted: string,
+  preserve: boolean,
+  items: Items,
+): Promise<string> {
+  const taken = new Set<string>(["default", "explorer", "worker"]);
+  let previous: string | undefined;
+  for (const entry of await entriesOf(dir)) {
+    if (!entry.isFile() || !entry.name.endsWith(AGENT_EXTENSION)) continue;
+    const file = join(dir, entry.name);
+    if (((await lstatIfAny(file))?.size ?? 0) > MAX_TEXT_ENTRY_BYTES) {
+      throw new Error(`${entry.name} is too large to check its Codex runtime name`);
+    }
+    const text = await readFile(file, "utf8");
+    let name: string;
+    try {
+      name = parseAgentToml(text, entry.name).agent.name;
+    } catch {
+      items.warnings.push(
+        `could not read runtime name from ${entry.name}; invalid agent file ignored`,
+      );
+      continue;
+    }
+    if (entry.name === slug + AGENT_EXTENSION) {
+      if (name !== "") previous = name;
+    } else if (name !== "") {
+      taken.add(name);
+    }
+  }
+  const base = preserve && previous !== undefined ? previous : wanted;
+  let name = base;
+  for (let n = 2; taken.has(name); n += 1) name = base + "-" + n;
+  if (name !== wanted) items.warnings.push("Codex runtime role name: " + JSON.stringify(name));
+  return name;
+}
+
 // -- What goes into the file ---------------------------------------------------------------------
 
 /** The first line of the instructions that is not a heading, without its list marker. */
@@ -222,7 +261,12 @@ async function keptSettings(
  * The text of the agent file for `bundle`; what the report needs to say about it goes to `items`.
  * `kept` is what the file held before (see `keptSettings`); the Bundle's own fields win over it.
  */
-function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown>): string {
+function renderBundle(
+  bundle: Bundle,
+  items: Items,
+  kept: Record<string, unknown>,
+  name: string,
+): string {
   const { manifest } = bundle;
   const model = manifest.models.find(isForCodex)?.model;
   if (model === undefined && manifest.models.length > 0) {
@@ -238,7 +282,7 @@ function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown
   const nicknames = nicknamesOf(settings.nickname_candidates, items);
 
   const agent: CodexAgentFile = {
-    name: manifest.name,
+    name,
     description: descriptionOf(bundle),
     developer_instructions: developerInstructions(bundle, items),
     ...(model === undefined ? {} : { model }),
@@ -261,7 +305,9 @@ function renderBundle(bundle: Bundle, items: Items, kept: Record<string, unknown
  * Writes a Bundle as a custom agent of the Codex home (`ctx.targetDir`, `CODEX_HOME` or
  * `~/.codex`): `agents/<slug>.toml`, its skills in `~/.agents/skills` (shared with every tool
  * that reads it, so a skill that is already there is reused and none is ever removed), and its
- * id in `openteleport-ids.json` in the Codex home. An agent file it overwrites keeps the settings
+ * id in `openteleport-ids.json` in the Codex home. Skill associations are recorded separately in
+ * `openteleport-skills/<slug>.json` for custom-agent re-export; shared skills are never deleted.
+ * An agent file it overwrites keeps the settings
  * the Bundle has no place for. `config.toml`, `AGENTS.md` and the memory are not touched, and
  * `bundle` is not changed.
  */
@@ -280,16 +326,23 @@ export async function writeCodexAgent(
   const slug = await agentFileSlug(dir, bundle, opts, ids, items);
   const path = join(dir, `${slug}${AGENT_EXTENSION}`);
   const kept = await keptSettings(path, `agents/${slug}${AGENT_EXTENSION}`, items);
-  const text = renderBundle(bundle, items, kept);
+  const name = await runtimeName(
+    dir, slug, bundle.manifest.name,
+    opts.onConflict === "update" && Object.hasOwn(ids, slug) && ids[slug] === bundle.manifest.id,
+    items,
+  );
+  await checkSkillMetadata(home, slug);
+  const text = renderBundle(bundle, items, kept, name);
 
-  await writeSkills(userSkillsDir(ctx), bundle.skills, items);
+  const skills = await writeAssociatedSkills(ctx, bundle.skills, items);
   if (bundle.skills.length > 0) {
     items.warnings.push("Codex skills are shared by every tool reading ~/.agents/skills");
   }
   await replaceFile(path, text);
   await recordId(idsFile, slug, bundle.manifest.id, items);
+  await recordSkills(home, slug, bundle.manifest.id, skills);
   items.warnings.push(
-    `Use the agent in Codex as @${slug} (custom agents need \`agents.enabled\`, on by default)`,
+    `Use the Codex agent named ${JSON.stringify(name)} (file: ${slug}.toml)`,
   );
 
   return { outcome: "done", targetAgentId: slug, artifactPath: path, items };

@@ -1,0 +1,27 @@
+{
+  "name": "@openteleport/openclaw",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenTeleport commands for OpenClaw",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "index.mjs",
+    "commands.mjs",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "openteleport": "file:../..",
+    "execa": "^9"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ]
+  }
+}
