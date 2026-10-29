@@ -197,10 +197,10 @@ In PowerShell: `$env:OPENTELEPORT_EXTRA_ADAPTER = "./my-app.js"; npx opentelepor
 
 Apache-2.0.
 
-## From inside Claude Code and MCP clients (upcoming v0.3)
+## From inside Claude Code and MCP clients (0.4.0)
 
-The local stdio server and Claude Code plugin support reviewed agent transfers from a session. Build this checkout first; this is not yet an npm release. See [setup, tools, and the preview/apply workflow](docs/integrations/mcp.md).
+The local stdio server and Claude Code plugin support reviewed agent transfers from a session. Available in the `openteleport@0.4.0` npm package. See [setup, tools, and the preview/apply workflow](docs/integrations/mcp.md).
 
-## Native OpenClaw and Hermes commands (upcoming v0.4)
+## Native OpenClaw and Hermes commands (0.4.0 source plugins)
 
-Development plugins add a teleport command group to each host and reuse the existing transfer engine. See [installation, behavior, and verification limits](docs/integrations/native-plugins.md). These plugins are not published releases.
+Source plugins in the `v0.4.0` repository tag add a teleport command group to each host and reuse the existing transfer engine. See [installation, behavior, and verification limits](docs/integrations/native-plugins.md). Install these plugins from the tagged repository; they are not separate npm or pip packages.

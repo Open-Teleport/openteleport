@@ -1,6 +1,8 @@
 # Hermes directory plugin (v0.4 source)
 
-Build OpenTeleport once with Node >=24. Set OPENTELEPORT_CLI to its absolute dist/cli.js path.
+Use this directory from the v0.4.0 repository tag. With Node >=24, install openteleport@0.4.0
+locally or build the repository. Set OPENTELEPORT_CLI to its absolute dist/cli.js path
+(for npm: <install-prefix>/node_modules/openteleport/dist/cli.js).
 Set OPENTELEPORT_NODE to an absolute Node executable if node is not on Hermes's PATH.
 
 Copy this directory's plugin.yaml and __init__.py into the selected profile's

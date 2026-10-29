@@ -11,7 +11,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 - **CLI**: `move`, `export`, `import`, `list`, `inspect`, `validate`, `adapters`; `--json` output; exit codes 0/1/2/3; conflict modes `update`/`copy`/`replace`; extra adapters via `OPENTELEPORT_EXTRA_ADAPTER`.
 - **Safety**: a secret scanner that blocks exports, imports and moves; routines land disabled; the source is never modified; destructive `--replace` needs confirmation or `--yes`.
 - **Docs**: `README.md`, `docs/design.md` (the design and the reasoning), `docs/demo.md` (demo scenario and the end-to-end test), `docs/openclaw-plugin.md` (a proposal for an OpenClaw plugin), `CHANGELOG.md`.
-- **Website**: `site/` (Astro), not deployed yet.
+- **Website**: `site/` (Astro), deployed through Vercel.
 
 ### v0.2 (merged into `main` on 2026-10-29; version 0.2.0, published to npm on 2026-10-29)
 
@@ -30,6 +30,12 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 - **Fixes**: a closed pipe keeps an earlier failure's exit code; the id cache asks for an agent's identity only when the agent has no id; a fact an adapter skipped is no longer counted as moved.
 - **Tests**: 2,623 passing, 12 skipped on this machine (the end-to-end test that needs a real OpenClaw, and tests that need a platform feature). CI runs them on Ubuntu, macOS and Windows against the built CLI in a sandbox.
 
+### v0.3 and v0.4 (combined as 0.4.0)
+
+PRs #4, #6 and #7 are merged. This release adds the local MCP preview/apply server, Claude Code plugin, native OpenClaw and Hermes source plugins, memory selection and exclusive wizard exports. Codex copy names and imported-skill re-export are fixed with regression tests.
+
+The combined integration passed 2,719 tests (12 skipped) locally and CI on Ubuntu, macOS and Windows. Native host smoke checks covered Hermes 0.13.0 and OpenClaw 2026.5.28 help, list, export and copy-import with synthetic data. They did not verify live model behavior or Gateway-backed routine execution. See `docs/integrations/` for setup and boundaries.
+
 ## What is verified
 
 Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). The evidence is `docs/superpowers/research/2026-10-29-real-install-check.md`.
@@ -37,14 +43,11 @@ Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). Th
 - **Hermes** (0.13.0): import, same-id update, copy and export through the engine, with Hermes's own code reading the result back. It recovered the facts, the skill, the three routines (all paused, none run) and both profiles, and `skills/.bundled_manifest` has `name:hash` lines. Two edge cases came out of it, both fixed on this branch and not yet rechecked on an install:
   - A one-off time without an offset (`once.run_at`, as a hand-written job has it) is read by Hermes in the machine's time zone, not the profile's. The adapter now reads it the same way and warns about the assumption; cron expressions keep the profile's zone.
   - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
-- **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the open defects below.
+- **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the fixes and remaining verification below.
 
-## Open defects
+## Codex fixes
 
-Found on the same real install and reproduced through OpenTeleport itself. A fix for both is in progress on a separate branch (the report has the steps). Until it merges, do not call Codex round-trip portability verified.
-
-- **Codex: copies share the runtime `name`.** `--copy`, or a name conflict, writes `<slug>-2.toml` with the same `name = "..."`. Codex keys a role by `name`, so it exposes one role and the original is no longer separately selectable. The `@<slug>` in the Codex hint is also wrong for a name that slugifies differently.
-- **Codex: a custom-agent export drops its skills.** Importing an agent reports its skill as moved and Codex finds it, but exporting that custom agent gives a bundle with no skills and no warning. Only the global setup (`--agent default`) exports skills.
+PR #4 fixes duplicate runtime names on copies and preserves associated imported skills on re-export. Regression tests cover both. A complete round trip interpreted by the live Codex application remains to be verified.
 
 ## What is not verified yet
 
@@ -62,13 +65,12 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
 - A folder whose `files/` exceeds 100 MiB cannot be read even without `--include-files`.
 - The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
 - Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
-- Codex (open until its branch merges): copies of one agent share a runtime `name`, and exporting a custom agent drops its skills. See "Open defects".
 - A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
 
-## What comes next (v0.3)
+## What comes next
 
-1. A Claude Code plugin and an MCP server (approved by the owner on 2026-10-28), so that an agent can be moved from inside a session.
-2. Plugins for OpenClaw (`docs/openclaw-plugin.md`) and Hermes.
+1. Run the pilot in `docs/integrations/pilot.md` across technical users, personal assistants and teams.
+2. Verify remaining adapter assumptions on real installations.
 3. SSH transport (`--to openclaw@server`).
 4. An Ed25519 signature in the manifest (the field is reserved).
 5. Letta Cloud over REST, once its authorization header and `agents.update` are checked on a real account.
@@ -77,13 +79,13 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
 
 ## Release
 
-The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly. [OpenTeleport 0.2.0](https://www.npmjs.com/package/openteleport/v/0.2.0) was published on 2026-10-29 and is the npm `latest` version as of this check.
+The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly. [OpenTeleport 0.2.0](https://www.npmjs.com/package/openteleport/v/0.2.0) was published on 2026-10-29 as the first public version.
 
 The `v0.2.0` tag points to commit `ee4371a52a40cd6f85533344067601c45dc53cac`. [Release workflow 40862578050](https://github.com/Open-Teleport/openteleport/actions/runs/40862578050) checked the version, linted, built, tested and published the package with provenance. npm briefly returned the prior staging version while processing the accepted publication; the public registry now serves 0.2.0.
 
 A fresh-cache check outside the repository ran `npx openteleport@0.2.0 --version`, exported a synthetic folder agent, imported the resulting archive into a fresh folder, and verified that the instructions were preserved. This checks the published CLI path; it does not establish real-application behavior for every adapter.
 
-Users with Node.js 24+ can start with `npx openteleport`. Use `npx openteleport@0.2.0` to select this exact release. The MCP and native plugin integrations being reviewed in PRs #6 and #7 are not included in this published artifact.
+Users with Node.js 24+ can start with `npx openteleport`. The 0.4.0 release combines the merged session and native plugin milestones. Use `npx openteleport@0.4.0` for its CLI and MCP server; install source plugins from the `v0.4.0` repository tag. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
 
 ## How decisions are recorded
 
