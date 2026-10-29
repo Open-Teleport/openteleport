@@ -27,7 +27,9 @@ Only trusted local clients should launch the server; it has the launching user's
 Do not expose this stdio process as an unauthenticated remote service.
 
 Plans last ten minutes, are limited to eight per session and 32 MiB of serialized content each, and are
-lost on server restart. Apply consumes a plan before execution, including on failure; writes are serialized.
+lost on server restart. Pending reads reserve a slot before accessing the source. Expiry timers release
+snapshots even while idle; closing the transport clears retained plans. An already-started write continues
+and must be inspected if its client disconnects. Apply consumes a plan before execution, including on failure; writes are serialized.
 A source edited after preview does not change the reviewed snapshot. The destination is not reserved:
 conflicts are checked at execution, and adapter writes are not transactional. Inspect partial results before
 retrying a failed operation. There is no automatic rollback or exact file-diff preview.
