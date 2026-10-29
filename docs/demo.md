@@ -1,6 +1,6 @@
 # Demo and end-to-end test
 
-Three things live here: the 60-second recording, the demo scripts it is recorded from, and the end-to-end round trip that checks OpenTeleport against the OpenClaw and Claude Code installed on a machine.
+Four things live here: the 60-second recording, the demo scripts it is recorded from, scenarios for the five v0.2 adapters that need no app, and the end-to-end round trip that checks OpenTeleport against the OpenClaw and Claude Code installed on a machine.
 
 Versions on the machine the demo and the e2e were written on (from `openclaw --version` and `claude --version`): OpenClaw 2026.5.28 (e932160), Claude Code 2.1.273, Node.js 24.11.1, Windows 11. The e2e prints the versions it ran against; once it has passed, they go in the table at the end.
 
@@ -44,6 +44,78 @@ As the e2e does, the scripts first clear every `OPENCLAW_*` and `OPENTELEPORT_*`
 - `agents/reviewer/`: the agent folder the last move writes.
 
 The scripts print every command before running it, stop at the first one that fails, and end by printing the move report of the last move (saved under `home/.openteleport/reports/`; `export` would have written it as `move-report.md` next to the `.jetpack`). Nothing starts a Gateway; the agents carry no routines, so none is needed. Delete the temporary folder when you are done.
+
+## Scenarios for the five v0.2 adapters
+
+One scenario per new adapter, to run from the repository root after `npm run build`. They use the fixtures in `test/fixtures/` and a throwaway folder, so no real app is needed and nothing goes to your home folder: `OPENTELEPORT_HOME` stands in for it. Hermes and Codex are written into copies of their fixtures; the other three make a file or a folder in `out/`. In all of them the source is the `ada` agent of `test/fixtures/jetpack` (a persona, instructions, one skill, two facts, some notes and one enabled routine, which arrives disabled).
+
+```bash
+DEMO=$(mktemp -d)
+export OPENTELEPORT_HOME="$DEMO/home"
+mkdir "$DEMO/out"
+cp -r test/fixtures/hermes/home "$DEMO/hermes"
+cp -r test/fixtures/codex/home/.codex "$DEMO/codex"
+```
+
+```powershell
+$demo = Join-Path ([IO.Path]::GetTempPath()) ("openteleport-v02-demo-" + [guid]::NewGuid())
+New-Item -ItemType Directory "$demo/out" | Out-Null
+$env:OPENTELEPORT_HOME = "$demo/home"
+Copy-Item -Recurse test/fixtures/hermes/home "$demo/hermes"
+Copy-Item -Recurse test/fixtures/codex/home/.codex "$demo/codex"
+```
+
+The commands below are written for bash (`$DEMO`); in PowerShell use `$demo`. The fixtures are rebuilt from documentation and source code, so the results show what OpenTeleport writes, not that the app accepts it; the table at the end of this page lists what a real run has to settle.
+
+| Adapter | Result of a write | What you do after |
+| --- | --- | --- |
+| `hermes` | `done` | Restart the Hermes gateway if it is running; resume a cron job with `hermes cron resume <id>`. |
+| `codex` | `done` | Use the agent in Codex as `@ada`. |
+| `openbot` | `handoff` | Import `ada-openbot-import.zip` in OpenBot, under Server settings. |
+| `grok-bot` | `handoff` | Follow the five steps in `ada-for-grok-bot/README.md`. |
+| `letta` | `handoff` | Run `ada-letta-memory/letta-commands.sh` (or `.ps1`) and give it the agent id. |
+
+### Hermes: a named profile, `done`
+
+```bash
+node dist/cli.js move --from folder --source-dir test/fixtures/jetpack --agent ada --to hermes --target-dir "$DEMO/hermes"
+```
+
+Expected: `Outcome: done`. A new profile `$DEMO/hermes/profiles/ada/` with `SOUL.md` (persona, then instructions), `skills/web-brief/`, `memories/MEMORY.md` (the two facts), `cron/jobs.json`, `profile.yaml` and `config.yaml`. The default profile and the `reviewer` profile are not touched. The routine is in `jobs.json` with `"enabled": false` and `"state": "paused"`. Approximated: the model (Hermes holds one) and the shared `SOUL.md`; skipped: notes and the avatar. Run it again and the same profile is updated, not copied as `ada-2`, and the old `jobs.json` is kept beside the new one as `jobs.json.bak-<time>`.
+
+### Codex: a custom agent file, `done`
+
+```bash
+node dist/cli.js move --from folder --source-dir test/fixtures/jetpack --agent ada --to codex --target-dir "$DEMO/codex"
+```
+
+Expected: `Outcome: done`. A new `$DEMO/codex/agents/ada.toml`, next to the fixture's `reviewer.toml`, and the skill in `$OPENTELEPORT_HOME/.agents/skills/web-brief/` (Codex's user skills live under the home folder, not in `CODEX_HOME`). `config.toml` and `AGENTS.md` are byte for byte what they were. Approximated: the persona and the facts, which become one `developer_instructions` text with a `# Facts` section; skipped: the routine (Codex has no format for it), notes and the avatar. Warning: the skills folder is shared by every tool that reads it.
+
+### OpenBot: an import zip, `handoff`
+
+```bash
+node dist/cli.js move --from folder --source-dir test/fixtures/jetpack --agent ada --to openbot --target-dir "$DEMO/out"
+```
+
+Expected: `Outcome: handoff`, the file `$DEMO/out/ada-openbot-import.zip`, and a last line `Next step: Open OpenBot, go to Server settings, choose Import and pick <the zip>`. The zip holds the instructions (the persona joined to them), the skill, the routine, the facts and the avatar. Skipped: notes and the model, which the import format has no field for. The zip is also a source: `node dist/cli.js list --from openbot --source-dir "$DEMO/out/ada-openbot-import.zip"` lists `ada`, and moving it into Hermes updates the profile above in place.
+
+### Grok Bot: a paste pack, `handoff`
+
+```bash
+node dist/cli.js move --from folder --source-dir test/fixtures/jetpack --agent ada --to grok-bot --target-dir "$DEMO/out"
+```
+
+Expected: `Outcome: handoff`, the folder `$DEMO/out/ada-for-grok-bot/` with `README.md` (the five steps), `1-paste-into-chat.md`, `2-memory.txt`, `3-routines.md` (a line such as `Create a routine named "Morning digest" that runs every weekday at 08:30 (Europe/Warsaw): ... (paused)`) and `skills/web-brief/`. Approximated: the persona, instructions and facts, which are pasted into the chat; skipped: notes, the avatar and the model. Warnings: Grok Bot keeps one set of skills for the whole account, and the format of its memory import is a guess. Reading goes the other way, from the zip the OpenBot export skill makes: `node dist/cli.js list --from grok-bot --source-dir "$DEMO/out/ada-openbot-import.zip"` (the zip from the OpenBot scenario has the same shape) lists `ada`.
+
+### Letta Code: memory folder and script, `handoff`
+
+```bash
+node dist/cli.js move --from folder --source-dir test/fixtures/jetpack --agent ada --to letta --target-dir "$DEMO/out"
+```
+
+Expected: `Outcome: handoff`, the folder `$DEMO/out/ada-letta-memory/` with `memory/` (`MEMORY.md`, `persona.md`, `instructions.md`, `human.md`, `reference/`, `skills/`), `routines/morning-digest.txt`, `letta-commands.sh` and `letta-commands.ps1`, and a last line telling you to run the script. The script runs `letta agents create --name "Ada" ... --model "anthropic/claude-opus-5-5"`, asks for the id it printed, runs `letta memory restore --agent "$AGENT_ID" --from <memory folder> --force`, and holds the `letta cron add` line for the routine commented out, because routines move disabled. Approximated: the model handle, the instructions (kept in `instructions.md`, not the system prompt) and the routine's time zone. Warnings: `memory restore` replaces the new agent's whole memory, and restoring from a plain folder is unverified. Reading works on the Letta fixture: `node dist/cli.js list --from letta --source-dir test/fixtures/letta/home/.letta` lists a local agent and a Cloud agent.
+
+Delete the temporary folder when you are done.
 
 ## Running the end-to-end test
 
@@ -137,5 +209,12 @@ The OpenClaw adapter was written against `--help` of OpenClaw 2026.5.28 and its 
 | The Windows `.cmd` shim and multi-line routines | The adapter reads the npm `openclaw.cmd` shim and runs the script it names with this node, so a routine instruction with a line break arrives whole. When the shim cannot be read, that routine is skipped as "cannot be passed through the Windows shim" rather than cut. | (d): its interval routine has two lines; the skip fails the test, and with a Gateway the listed job must hold both lines. | _to fill_ |
 | The OpenClaw half of `scripts/demo.sh` and `scripts/demo.ps1` | Onboarding with the flags above, the five moves into OpenClaw, `openclaw agents list` on the throwaway install, and the move back into a folder all run. Only the part before onboarding was tried (setup, `list`, an `export`, `openclaw --version`). | Not in the e2e: run both scripts once. | _to fill_ |
 | Stopping `openclaw gateway run` on Windows | Killing the node process the test started stops the Gateway. A process the Gateway started itself could outlive it. | `OPENTELEPORT_E2E_GATEWAY=1`, `gatewayPortClosedAfterStop`; after the run, also look for a `node` process left from the sandbox. | _to fill_ |
+| Hermes: `cron/jobs.json`, the bundled-skills manifest and the profile | A named profile `profiles/<name>/` with `SOUL.md`, `profile.yaml` and `config.yaml` is one Hermes lists and can select. Its `cron/jobs.json` is `{ "jobs": [...], "updated_at" }` with Hermes's own job fields, each job `enabled: false`, `state: "paused"`, `next_run_at: null`, and `hermes cron resume <id>` starts it. `skills/.bundled_manifest` holds `name` or `name:hash` lines. | Not in the e2e: run the Hermes scenario against a throwaway `HERMES_HOME` and look at `hermes cron list`. | _to fill_ |
+| Codex: the agent file and the skills folder | `agents/<name>.toml` with `name`, `description`, `developer_instructions` and `model` is listed and usable as `@<name>` with `agents.enabled` on. `~/.agents/skills/<name>/SKILL.md` is where Codex reads user skills. | Not in the e2e: run the Codex scenario against a throwaway `CODEX_HOME`. | _to fill_ |
+| OpenBot: the database and the import zip | `<userData>/openbot.db` is at migration 47 with the four tables the reader needs (`projection_agents`, `projection_agent_memories`, `projection_agent_routines`, `projection_routine_triggers`). Server settings, Import accepts the zip the adapter writes, including the `x-openteleport` key in its manifest, which OpenBot's manifest decoder does not read (read from its source, not tried). | Not in the e2e: `list --from openbot` on a copy of a real database, and the OpenBot scenario's zip imported by hand. | _to fill_ |
+| Grok Bot: the export zip and the paste pack | The zip the OpenBot export skill makes is an `openbot-agent-import` v1 archive (`source.app`, `agents[].key`). Pasting `1-paste-into-chat.md` makes a Bot adopt the persona and instructions, and Settings, General, Import takes `2-memory.txt` as plain text, one fact per line. | Not in the e2e: `list --from grok-bot` on a real export, then the Grok Bot scenario's pack pasted into a new Bot. | _to fill_ |
+| Letta Code: the commands and the files | `letta agents create --name --description --model` prints an agent id. `letta memory restore --agent <id> --from <folder> --force` accepts a plain memory folder that `letta memory backup` did not make. `letta cron add --prompt --cron --agent` takes the options the script uses. The reader's shapes (`lc-local-backend/agents/<id>.json`, `agents/<id>/memory/`, `crons.json`) match a real `~/.letta`. | Not in the e2e: `list --from letta` on a real `~/.letta`, then the Letta scenario's script with a real `letta`. | _to fill_ |
+
+The last five rows came with v0.2. Their fixtures were rebuilt from documentation and source code, not recorded from an install, so nothing here shows that the apps accept what the adapters write; fill the last column after running the scenarios above against the real app.
 
 Versions of the passing run: OpenClaw _to fill_, Claude Code _to fill_.

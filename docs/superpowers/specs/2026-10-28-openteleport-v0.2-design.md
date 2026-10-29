@@ -100,6 +100,8 @@ Nazwa CLI `hermes`, `displayName` „Hermes Agent". Pewność researchu: wysoka.
 ### 4.4 `write`
 
 - Cel: **profil nazwany** `profiles/<slug>/` w katalogu domowym, nigdy profil domyślny (zapis do `default` nadpisywałby konfigurację użytkownika). `slug` jak w adapterze `folder`. Nowy profil dostaje `profile.yaml` z `display_name: <name>` i, jeśli manifest ma `title`, `description: <title>`.
+
+  Uwaga (wykonanie): nazwy profili, które Hermes zastrzega (`default` i `profiles` są odrzucane, a poza nimi m.in. `hermes`, `test`, `tmp`, `root`, `sudo` oraz nazwy podpoleceń Hermesa, np. `chat`, `status`, `cron`), dostają przyrostek `-agent` z ostrzeżeniem (`Hermes reserves the profile name 'test'; written as 'test-agent'`); `default` i `profiles` nadal kończą się odmową. Powód: przeniesienie agenta o nazwie „Test” nie powinno kończyć się błędem, a profil o zastrzeżonej nazwie Hermes wyświetla, ale nie da się go wybrać.
 - `SOUL.md` = persona + sekcja instrukcji (3.9). `config.yaml`: w nowym profilu `model: { default, provider }` z pierwszej preferencji, która ma `model`; w istniejącym profilu `config.yaml` nie jest dotykany, a model trafia do `approximated` („kept the profile's own model").
 - Skille → `skills/<name>/` w profilu (reguła 3.5 dla kolizji; `.hub/` nietykane).
 - Fakty → wpisy `memories/MEMORY.md` (rozdzielacz `\n§\n`), do limitu `memory.memory_char_limit` z `config.yaml` profilu (domyślnie 2200) [H3][H5], liczonego na całym pliku po zapisie. Przy `update` wpisy OpenTeleportu z poprzedniego zapisu są zastępowane (lista wpisów w znaczniku), wpisy obce zostają. Nadmiar → `skipped`. Notatki → `skipped` (`notes: false`), bo Hermes nie ma na nie miejsca, które by czytał.
@@ -246,6 +248,8 @@ Nazwa CLI `letta`, `displayName` „Letta Code". Pewność: średnia. Zapis to `
 - Backend lokalny: każdy `lc-local-backend/agents/*.json` → `id` = `id` z rekordu, `name` = `name`, `title` = `description`, `location` = katalog MemFS.
 - Cloud: każdy `agents/<agentId>/` z katalogiem `memory/` → `id` = `agentId`, `name` = `name` z frontmattera `memory/persona.md`, jeśli jest, inaczej `agentId`; `location` = katalog. Rekordu z nazwą nie ma lokalnie [ZAŁ research 7.4], więc nazwa jest przybliżona.
 
+  Uwaga (wykonanie): `name` we frontmatterze `memory/persona.md` jest w MemFS etykietą bloku pamięci (`persona`), nie nazwą agenta, więc nie służy za nazwę. Agent Cloud bez rekordu jest wymieniany po swoim `agentId`, a z frontmattera bierze się tylko `description` (jako `title`). Nazwa agenta trafia wyłącznie do `letta agents create --name`.
+
 ### 8.3 `read`
 
 | `Bundle` | Letta Code MemFS [L10] | Reguła |
@@ -265,6 +269,8 @@ Nazwa CLI `letta`, `displayName` „Letta Code". Pewność: średnia. Zapis to `
 ### 8.4 `write`
 
 - Tworzy katalog `<targetDir ?? cwd>/<slug>-letta-memory/` (`-N` przy kolizji) w układzie MemFS v2: `MEMORY.md` (indeks: lista plików z jednolinijkowym opisem, format z [L10]), `persona.md` (frontmatter `name`, `description` + persona), `instructions.md` (instrukcje; plik w korzeniu jest pamięcią rdzeniową ładowaną co turę [L10], więc działa jak instrukcje; `approximated`), `human.md` (fakty jako punkty), `reference/<note>.md` (notatki, z własnym `reference/MEMORY.md` jako indeksem), `skills/<name>/`.
+
+  Uwaga (wykonanie): frontmatter `persona.md` ma `name: persona` (etykieta bloku pamięci, jak w dokumentacji Letty), nie nazwę agenta, a `description` to `title` z manifestu albo „Persona of <nazwa agenta>”. Nazwa agenta jest tylko w `letta agents create --name`. Z tego samego powodu odczyt (8.2, 8.3) nie bierze nazwy agenta z tego frontmattera.
 - Obok: `letta-commands.sh` (i `letta-commands.ps1`) jako **skrypt do uruchomienia, nie do edycji**: 1) `letta agents create --name "<name>" --description "<title>" [--model "<provider/model>"]` (model z pierwszej preferencji, która ma `provider` i `model` [L9][L20]; `approximated`, bo uchwyt może nie istnieć w Lecie); 2) pytanie o id: `read -r -p "Agent id printed above: " AGENT_ID` / `$AGENT_ID = Read-Host "Agent id printed above"` (kształt JSON z `agents create` nie jest potwierdzony, więc skrypt nie parsuje go sam); 3) `letta memory restore --agent "$AGENT_ID" --from "<katalog>/memory" --force` [L19]; 4) po jednym `letta cron add --name "..." --prompt "$(cat "<katalog>/routines/<slug>.txt")" --cron "..." --agent "$AGENT_ID"` (lub `--at "<ISO>"`) na rutynę [L9][L12], z instrukcją w pliku `routines/<slug>.txt` (prompt wieloliniowy w ps1: `(Get-Content -Raw ...)`); rutyny wyłączone są w skrypcie zakomentowane z linią `# paused in the source; uncomment to add it` (CLI nie ma flagi pauzy [L9]). Układ MemFS leży w podkatalogu `memory/`, żeby `restore --from` dostał czysty katalog pamięci. `every` → cron (`*/30 * * * *` dla `30m`, `0 */2 * * *` dla `2h`, `0 0 */3 * *` dla `3d`), `approximated`.
 - `.openteleport.json` w korzeniu katalogu (reguła 3.4 o artefaktach `handoff`), poza `memory/`, żeby nie trafił do MemFS.
 - Wynik: `handoff`, `artifactPath` = katalog, `nextStep` = „Run <katalog>/letta-commands.sh (or .ps1): it creates the agent, restores its memory and adds the routines". Ostrzeżenia: „`letta memory restore` replaces the agent's whole memory directory; the script runs it on the new agent only" [L19] oraz „Letta's `memory restore --from <dir>` is documented for backups made by `memory backup`; a plain memory folder is assumed to work (unverified)".
@@ -303,6 +309,8 @@ Harmonogramy OpenBota ↔ `Schedule`:
 | `once{date: "YYYY-MM-DD", time}` (tylko transfer; `oneTimeRoutines[]`) | `at` = `date`T`time` w strefie rutyny, zapisane jako ISO z offsetem |
 
 Kształty `schedule` pochodzą z `packages/contracts/src/ipc-routines.ts` (28.10.2026): `hourly`, `daily`, `weekdays`, `weekly`, `monthly`, `interval`, `advanced`, `custom`, `once`; `once` nie występuje w formacie importu. Przy zapisie w drugą stronę cron jest rozpoznawany: pięć pól, gdzie pasuje do jednego z wzorców wyżej (także `advanced` dla list w polach dnia i miesiąca z `*` w dniu tygodnia), wraca do kształtu nazwanego, inaczej `custom`. Funkcje mapujące (`fromOpenBotSchedule`, `toOpenBotSchedule`) żyją w `src/core/schedule.ts` jako czyste funkcje z testami, nie w module zipa.
+
+Uwaga (wykonanie): na drucie (w `openbot-import.json` i `openbot-transfer.json`) `advanced` jest zagnieżdżony: `{ kind: "advanced", months, days: { kind: "days-of-month" | "days-of-week" | "every-day", days }, time: { kind: "at-time", time } }`, a nie płaski `{ months, days, time }` z tabeli wyżej. Typ `OpenBotSchedule` w repozytorium zostaje płaski (miesiące, dni miesiąca, godzina), `fromOpenBotSchedule` czyta obie postacie i zamienia je na cron (`days-of-week` trafia do pola dnia tygodnia, `every-day` zostawia w nim `*`), a każdy zapis dla OpenBota przechodzi przez `toOpenBotWireSchedule`; płaska postać na drucie sprawiłaby, że OpenBot odrzuciłby rutynę.
 
 ### 9.3 Zapis `openbot-agent-import` v1
 
