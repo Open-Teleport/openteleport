@@ -31,7 +31,7 @@ async function markedIds(path: string): Promise<string[]> {
 }
 
 /** The `<stem>-N.zip` (lowest N from 2) with nothing at that path, not even a link. */
-async function freeSibling(stem: string): Promise<string> {
+async function freeArchiveSibling(stem: string): Promise<string> {
   for (let n = 2; ; n += 1) {
     const candidate = `${stem}-${n}${ARTIFACT_EXTENSION}`;
     if ((await lstatIfAny(candidate)) === undefined) return candidate;
@@ -42,7 +42,7 @@ async function freeSibling(stem: string): Promise<string> {
  * The `<stem>-N.zip` (lowest N first) that carries the marker of the agent with `id`, as an
  * earlier move may have left it; `undefined` when there is none.
  */
-async function ownSibling(stem: string, id: string): Promise<string | undefined> {
+async function ownArchiveSibling(stem: string, id: string): Promise<string | undefined> {
   if (id === "") return undefined;
   let names: string[];
   try {
@@ -88,7 +88,7 @@ async function claimTarget(
   const wanted = `${stem}${ARTIFACT_EXTENSION}`;
   const taken = await lstatIfAny(wanted);
   if (taken === undefined) return wanted;
-  if (onConflict === "copy") return freeSibling(stem);
+  if (onConflict === "copy") return freeArchiveSibling(stem);
 
   const ids = taken.isFile() ? await markedIds(wanted) : [];
   if (onConflict === "replace") {
@@ -102,9 +102,9 @@ async function claimTarget(
   }
 
   if (id !== "" && ids.includes(id)) return wanted;
-  const own = await ownSibling(stem, id);
+  const own = await ownArchiveSibling(stem, id);
   if (own !== undefined) return own;
-  const path = await freeSibling(stem);
+  const path = await freeArchiveSibling(stem);
   const why = taken.isSymbolicLink()
     ? "is a symbolic link, which is not written through"
     : ids.length === 0

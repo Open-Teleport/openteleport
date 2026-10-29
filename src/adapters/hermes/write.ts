@@ -13,7 +13,7 @@ import type { Item } from "../../core/report.js";
 import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
 import { byCodeUnit, mergeInstructions, slugify } from "../../core/text.js";
-import { isRecord } from "../../core/values.js";
+import { isRecord, nonBlank } from "../../core/values.js";
 import { freeSibling, isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { readSkillFiles } from "../skill-files.js";
@@ -86,9 +86,6 @@ const HERMES_RESERVED_PROFILES: ReadonlySet<string> = new Set([
 ]);
 
 const RESERVED_SUFFIX = "-agent";
-
-const nonBlank = (value: string | undefined): string | undefined =>
-  value === undefined || value.trim() === "" ? undefined : value.trim();
 
 /** The number of characters as Python's `len` counts them, which is how Hermes keeps its limit. */
 const charCount = (value: string): number => Array.from(value).length;

@@ -114,7 +114,6 @@ export function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-
 /** Rows under a header, each column as wide as its widest cell, two spaces apart. */
 export function table(header: readonly string[], rows: readonly (readonly string[])[]): string {
   const cleaned = rows.map((row) => row.map(oneLine));

@@ -7,7 +7,7 @@ import { describeSchedule, everyToMs, msToEvery, zonedToInstant } from "../../co
 import type { Routine, Schedule } from "../../core/schema.js";
 import { withoutMark } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
-import { backUp, lstatIfAny, replaceFile } from "../fs.js";
+import { backUp, isNotFound, lstatIfAny, replaceFile } from "../fs.js";
 
 /** A job record as far as the adapter needs it; everything else in it is kept as it is. */
 export type HermesJob = Record<string, unknown> & {
@@ -50,8 +50,7 @@ export async function readJobsFile(file: string): Promise<JobsFile | { error: st
   try {
     source = await readFile(file, "utf8");
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return { jobs: [], rest: {}, ignored: [] };
+    if (isNotFound(error)) return { jobs: [], rest: {}, ignored: [] };
     return { error: `${file} could not be read (${(error as Error).message})` };
   }
   let data: unknown;

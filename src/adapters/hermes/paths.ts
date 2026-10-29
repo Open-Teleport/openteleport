@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { isTimeZone } from "../../core/schema.js";
-import { isRecord, nonBlank as text } from "../../core/values.js";
-import { isSafeName, lstatIfAny } from "../fs.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { isNotFound, isSafeName, lstatIfAny } from "../fs.js";
 import type { Ctx } from "../types.js";
 
 /**
@@ -24,7 +24,7 @@ export const PROFILE_FILES = [
 /** The profile that is the Hermes home itself. Every other profile is `profiles/<id>/`. */
 export const DEFAULT_PROFILE = "default";
 
-const nonBlank = (value: string | undefined): string | undefined =>
+const nonBlankAsIs = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value;
 
 /** `~` alone or followed by a separator stands for the home directory (`~other` does not). */
@@ -42,9 +42,9 @@ function expandHome(path: string, home: string): string {
 export function hermesHome(ctx: Ctx, platform: NodeJS.Platform = process.platform): string {
   const fallback =
     platform === "win32"
-      ? join(nonBlank(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local"), "hermes")
+      ? join(nonBlankAsIs(ctx.env.LOCALAPPDATA) ?? join(ctx.home, "AppData", "Local"), "hermes")
       : join(ctx.home, ".hermes");
-  const home = ctx.sourceDir ?? ctx.targetDir ?? nonBlank(ctx.env.HERMES_HOME) ?? fallback;
+  const home = ctx.sourceDir ?? ctx.targetDir ?? nonBlankAsIs(ctx.env.HERMES_HOME) ?? fallback;
   return resolve(ctx.cwd, expandHome(home, ctx.home));
 }
 
@@ -119,14 +119,14 @@ function configOf(raw: Record<string, unknown>): HermesConfig {
   // `model: provider/name` is the short form of `model: { default: provider/name }`.
   const model =
     typeof raw.model === "string"
-      ? text(raw.model) && { default: text(raw.model) as string }
-      : section(raw.model, ["default", "provider", "base_url"], text);
+      ? nonBlank(raw.model) && { default: nonBlank(raw.model) as string }
+      : section(raw.model, ["default", "provider", "base_url"], nonBlank);
   if (model) config.model = model;
-  const timezone = text(raw.timezone);
+  const timezone = nonBlank(raw.timezone);
   if (timezone !== undefined) config.timezone = timezone;
   const memory = section(raw.memory, ["memory_char_limit", "user_char_limit"], count);
   if (memory) config.memory = memory;
-  const agent = section(raw.agent, ["system_prompt"], text);
+  const agent = section(raw.agent, ["system_prompt"], nonBlank);
   if (agent) config.agent = agent;
   return config;
 }
@@ -144,8 +144,7 @@ export async function readConfig(
   try {
     source = await readFile(file, "utf8");
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
   const raw = parseYaml(file, source);

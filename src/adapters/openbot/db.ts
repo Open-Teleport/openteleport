@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { isRecord, nonBlank } from "../../core/values.js";
+import { isNotFound } from "../fs.js";
 import { DB_FILE } from "./paths.js";
 
 type Sqlite = typeof import("node:sqlite");
@@ -129,8 +130,7 @@ export async function withDatabaseCopy<T>(
   const present = await stat(original).then(
     (info) => info.isFile(),
     (error: unknown) => {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return false;
+      if (isNotFound(error)) return false;
       throw error;
     },
   );

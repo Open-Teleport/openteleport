@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { isNotFound } from "../fs.js";
 import type { Ctx } from "../types.js";
 
 /** OpenBot's database, inside its `userData` folder (with `-wal` and `-shm` beside it). */
@@ -42,8 +43,7 @@ export async function zipSource(ctx: Ctx): Promise<string | undefined> {
   try {
     return (await stat(given)).isFile() ? given : undefined;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
 }

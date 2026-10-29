@@ -50,7 +50,6 @@ const MAX_TITLE_CHARS = 120;
 const AVATAR_EXTENSIONS: ReadonlySet<string> = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SCHEDULE_KINDS: ReadonlySet<string> = new Set(["cron", "every", "at"]);
 
-
 /** Whether `path` is `root` itself or below it; both absolute. */
 function isWithin(root: string, path: string): boolean {
   const rel = relative(root, path);

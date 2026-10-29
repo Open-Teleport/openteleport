@@ -7,6 +7,7 @@ import { stat } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import type { Bundle } from "../../core/schema.js";
 import { type OpenBotZipAgent, readOpenBotZip } from "../../formats/openbot-zip.js";
+import { isNotFound } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
 
 /** The `origin.app` of every Bot read here, whatever app the archive says made it. */
@@ -21,8 +22,7 @@ async function statIfAny(path: string): Promise<Stats | undefined> {
   try {
     return await stat(path);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
 }

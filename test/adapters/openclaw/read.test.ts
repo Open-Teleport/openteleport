@@ -1018,6 +1018,41 @@ describe("readOpenClawAgent", () => {
       ]);
     });
 
+    it.skipIf(!canSymlink)("leaves a link inside a skill out, as a file that is not a regular one", async () => {
+      const dir = await makeState(
+        {},
+        {
+          "workspace/AGENTS.md": "x\n",
+          "workspace/SOUL.md": "s\n",
+          "workspace/IDENTITY.md": "",
+          "workspace/skills/alpha/SKILL.md": "# Alpha\n",
+          "shared/secret.txt": "not for export\n",
+          "shared-dir/notes.md": "n\n",
+        },
+      );
+      const alpha = join(dir, "workspace", "skills", "alpha");
+      await symlink(join(dir, "shared", "secret.txt"), join(alpha, "linked.txt"), "file");
+      await symlink(join(dir, "shared", "secret.txt"), join(alpha, ".env"), "file");
+      await symlink(join(dir, "shared-dir"), join(alpha, "linked-dir"), "dir");
+
+      const { bundle, warnings } = await readOpenClawAgent(
+        makeCtx({ sourceDir: dir }, noJobs),
+        "main",
+      );
+
+      expect(bundle.skills.map(({ name, files }) => [name, files.map(({ path }) => path)])).toEqual([
+        ["alpha", ["SKILL.md"]],
+      ]);
+      // OpenClaw's own words: a link is a file that is not a regular one, and a link whose name
+      // never goes into an archive is named as that.
+      expect(warnings).toEqual([
+        CAPABILITIES_WARNING,
+        "skill 'alpha': left out .env",
+        "skill 'alpha': left out linked-dir (not a regular file)",
+        "skill 'alpha': left out linked.txt (not a regular file)",
+      ]);
+    });
+
     it("exports no skill for an empty allowlist", async () => {
       const { bundle } = await readSkills(
         { skills: [] },

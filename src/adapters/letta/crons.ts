@@ -5,6 +5,7 @@ import { everyToCron, parseCron } from "../../core/schedule.js";
 import { type Routine, RoutineSchema, ScheduleSchema, isTimeZone } from "../../core/schema.js";
 import { oneLine, withoutMark } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
+import { isNotFound } from "../fs.js";
 
 /** One entry of `tasks[]` in `crons.json`; the fields Letta keeps beyond these stay in it. */
 export type LettaCronTask = Record<string, unknown> & {
@@ -32,8 +33,7 @@ export async function readCrons(
   try {
     source = await readFile(file, "utf8");
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return { tasks: [] };
+    if (isNotFound(error)) return { tasks: [] };
     return { error: `${file} cannot be read: ${(error as Error).message}` };
   }
   let json: unknown;

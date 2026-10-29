@@ -57,7 +57,6 @@ const isStrings = (value: unknown): value is string[] =>
 /** The text with Windows line endings turned into line feeds. */
 const lf = (text: string): string => text.replace(/\r\n/g, "\n");
 
-
 /** What the TOML parser objected to, on one line, with the line it found it on. */
 function tomlProblem(error: unknown): string {
   const { line } = error as { line?: unknown };
