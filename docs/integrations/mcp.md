@@ -161,7 +161,11 @@ This receipt workflow currently covers MCP apply; native CLI wrappers keep their
 
 After npm run build, run npm run verify:package. The check packs the npm artifact without rerunning
 build hooks, installs it with production dependencies in a temporary directory, imports its public API,
-and exercises a folder transfer and operation receipt through the installed MCP entry point. It does
+and exercises folder transfer, archive export/import, optional attachments, disabled routines, source
+preservation and operation receipts through the installed MCP entry point. A synthetic Codex home checks
+that unsupported fields are disclosed in both preview and final report. A Grok Bot handoff checks that
+the remaining manual step survives in the result and receipt. These checks do not run either host app
+or prove that an agent behaves identically after migration. It does
 not load adapters from src, publish a package, modify application profiles or install anything globally.
 It needs npm registry access (or cached dependencies) and removes its temporary installation afterwards.
 CI runs this check on Linux, macOS and Windows. It verifies the root npm package; native plugin releases
