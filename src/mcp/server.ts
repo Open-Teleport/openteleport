@@ -8,7 +8,9 @@ import { registerTools } from "./tools.js";
 
 export function createMcpServer(ctx: Ctx): McpServer {
   const server = new McpServer({ name: "openteleport", version: VERSION });
-  registerTools(server, new TransferSession(ctx));
+  const session = new TransferSession(ctx);
+  registerTools(server, session);
+  server.server.onclose = () => session.dispose();
   return server;
 }
 

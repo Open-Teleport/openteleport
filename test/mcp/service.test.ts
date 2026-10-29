@@ -126,3 +126,89 @@ it("serializes writes and isolates source/target paths", async () => {
   await first;
   await session.apply(b.planId, true);
 });
+
+
+it("reserves slots before concurrent source reads and releases failed reservations", async () => {
+  const { source } = adapters();
+  const original = source.read;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let reads = 0;
+  source.read = async (context, agent) => {
+    reads++;
+    await gate;
+    return original(context, agent);
+  };
+  const session = new TransferSession(ctx);
+  const pending = Array.from({ length: 8 }, () => session.plan(request));
+  await expect(session.plan(request)).rejects.toThrow("Too many");
+  release();
+  const plans = await Promise.all(pending);
+  expect(reads).toBe(8);
+  plans.forEach((plan) => session.cancel(plan.planId));
+  source.read = async () => { throw new Error("read failed"); };
+  for (let n = 0; n < 9; n++) await expect(session.plan(request)).rejects.toThrow("read failed");
+  source.read = original;
+  const retry = await session.plan(request);
+  expect(retry.planId).toBeTruthy();
+  session.dispose();
+});
+
+it("releases expired snapshots without waiting for another request", async () => {
+  adapters();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const session = new TransferSession(ctx);
+  try {
+    const plan = await session.plan(request);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(600000);
+    expect(vi.getTimerCount()).toBe(0);
+    // cancel cannot find the data even though no intervening plan/apply performed a sweep.
+    expect(session.cancel(plan.planId)).toEqual({ cancelled: false });
+  } finally {
+    session.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("cancellation and transport disposal clear timers and invalidate plans", async () => {
+  adapters();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const session = new TransferSession(ctx);
+  try {
+    const a = await session.plan(request);
+    const b = await session.plan(request);
+    expect(vi.getTimerCount()).toBe(2);
+    session.cancel(a.planId);
+    expect(vi.getTimerCount()).toBe(1);
+    session.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(session.cancel(b.planId)).toEqual({ cancelled: false });
+    await expect(session.plan(request)).rejects.toThrow("closed");
+    await expect(session.apply(b.planId, true)).rejects.toThrow("closed");
+  } finally {
+    session.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("does not retain a preview whose source finishes reading after transport disposal", async () => {
+  const { source } = adapters();
+  const original = source.read;
+  let release!: () => void;
+  let started!: () => void;
+  const reading = new Promise<void>((resolve) => { started = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  source.read = async (context, agent) => {
+    started();
+    await gate;
+    return original(context, agent);
+  };
+  const session = new TransferSession(ctx);
+  const pending = session.plan(request);
+  await reading;
+  session.dispose();
+  release();
+  await expect(pending).rejects.toThrow("closed");
+  expect(await readdir(home)).toEqual([]);
+});

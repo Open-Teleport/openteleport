@@ -42,6 +42,9 @@ export function summary(bundle: Bundle) {
 export class TransferSession {
   private readonly plans = new Map<string, Pending>();
   private busy = false;
+  private preparing = 0;
+  private closed = false;
+  private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly ctx: Ctx, private readonly now = Date.now) {}
 
@@ -72,7 +75,36 @@ export class TransferSession {
     return readBundle(absolute, { requireManifest: !(await stat(absolute)).isDirectory() });
   }
 
+  private discard(planId: string): boolean {
+    clearTimeout(this.expiryTimers.get(planId));
+    this.expiryTimers.delete(planId);
+    return this.plans.delete(planId);
+  }
+
+  /** Release retained private snapshots when the transport closes. In-flight writes continue. */
+  dispose(): void {
+    this.closed = true;
+    for (const id of this.plans.keys()) this.discard(id);
+  }
+
   async plan(input: Transfer) {
+    if (this.closed) throw new UsageError("Session is closed.");
+    for (const [id, pending] of this.plans) {
+      if (pending.expires <= this.now()) this.discard(id);
+    }
+    // Reserve before any await/read, including simultaneous requests on one MCP connection.
+    if (this.plans.size + this.preparing >= LIMIT) {
+      throw new UsageError("Too many pending plans; cancel one first.");
+    }
+    this.preparing += 1;
+    try {
+      return await this.prepare(input);
+    } finally {
+      this.preparing -= 1;
+    }
+  }
+
+  private async prepare(input: Transfer) {
     const ctx = this.context(input);
     const from = input.operation === "import" ? undefined : getAdapter(input.from ?? "");
     const to = input.operation === "export" ? undefined : getAdapter(input.to ?? "");
@@ -105,13 +137,15 @@ export class TransferSession {
     }
     const skipped = to ? diffCapabilities(bundle, to.capabilities, to.displayName).skipped : [];
     const expires = this.now() + TTL;
-    for (const [id, pending] of this.plans) if (pending.expires <= this.now()) this.plans.delete(id);
-    if (this.plans.size >= LIMIT) throw new UsageError("Too many pending plans; cancel one first.");
+    if (this.closed) throw new UsageError("Session closed while preparing the preview.");
     const planId = randomUUID();
     this.plans.set(planId, {
       expires, bundle, ctx, warnings, from, to, agent, identity,
       input: { ...input, ...(out ? { out } : {}) },
     });
+    const expiryTimer = setTimeout(() => this.discard(planId), TTL);
+    expiryTimer.unref();
+    this.expiryTimers.set(planId, expiryTimer);
     return {
       planId, expiresAt: new Date(expires).toISOString(), operation: input.operation,
       source: { app: from?.name ?? "jetpack", agent: agent ?? bundle.manifest.name,
@@ -131,18 +165,19 @@ export class TransferSession {
     };
   }
 
-  cancel(planId: string) { return { cancelled: this.plans.delete(planId) }; }
+  cancel(planId: string) { return { cancelled: this.discard(planId) }; }
 
   async apply(planId: string, confirmed: boolean) {
+    if (this.closed) throw new UsageError("Session is closed.");
     if (!confirmed) throw new UsageError("Review the plan with the user before applying.");
     if (this.busy) throw new UsageError("Another transfer is running; retry after it finishes.");
     const pending = this.plans.get(planId);
     if (!pending || pending.expires <= this.now()) {
-      this.plans.delete(planId);
+      this.discard(planId);
       throw new UsageError("Plan is missing or expired; prepare a new preview.");
     }
     // Consume before starting: retries must never replay a partly completed write.
-    this.plans.delete(planId);
+    this.discard(planId);
     this.busy = true;
     try {
       const { input, bundle, ctx, from, to, agent, identity, warnings } = pending;
