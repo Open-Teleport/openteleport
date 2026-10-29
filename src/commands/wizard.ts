@@ -107,7 +107,7 @@ const notFound = (hint: string | undefined): string =>
 
 /** One sentence on what is about to happen, the last thing the user reads before saying yes. */
 function summarize(agent: string, from: Adapter, to: Adapter | undefined, file: string, copy = false): string {
-  if (to === undefined) return `Save ${agent} from ${from.displayName} as ${file} in this folder.`;
+  if (to === undefined) return `Save ${agent} from ${from.displayName} as ${file} in this folder. Existing archives are kept.`;
   const ending =
     to.handoff === true
       ? `${to.displayName} needs one more step after this, which the report names.`
@@ -214,7 +214,7 @@ export async function runWizard(
   if (go !== true) return stop(prompter, "Cancelled.");
 
   if (to === undefined) {
-    await exportTo({ ...opts, ...(!memory ? { memory: false } : {}), from: source.name, agent: agent.id, out: file });
+    await exportTo({ ...opts, ...(!memory ? { memory: false } : {}), from: source.name, agent: agent.id, out: file, overwrite: false });
   } else {
     await move({ ...opts, ...(!memory ? { memory: false, copy } : {}), from: source.name, to: to.name, agent: agent.id });
   }

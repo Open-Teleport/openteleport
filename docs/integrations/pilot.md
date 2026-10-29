@@ -42,8 +42,10 @@ node dist/cli.js validate examples/pilot-reviewer
 node dist/cli.js export --from folder --agent . --source-dir examples/pilot-reviewer --out /absolute/new/pilot-reviewer.jetpack
 ```
 
-Use a new output directory: the ordinary CLI export can overwrite its archive and neighbouring
-`move-report.md`. The MCP and native plugin export flows refuse existing archives.
+Use a new output directory, or add `--no-overwrite`: ordinary CLI export without that flag can
+overwrite its archive and neighbouring `move-report.md`. The wizard always refuses existing archives
+and saves a unique report under the OpenTeleport home. MCP and native plugin exports also refuse
+existing archives. An interrupted write can leave a partial new file; this is not transactional storage.
 Inspect the archive with `node dist/cli.js inspect /absolute/new/pilot-reviewer.jetpack`.
 Expected contents: instructions, persona, one skill, two memory facts, no routines and no attachments. Memory facts are reserialized; Windows CRLF line endings can become LF without changing the facts.
 The source folder has no fixed identity; export assigns and retains one through the normal identity cache.
