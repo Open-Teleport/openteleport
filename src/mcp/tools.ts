@@ -1,3 +1,4 @@
+import { publicFindings } from "./findings.js";
 import { ApplyFailedError } from "./receipts.js";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
@@ -35,7 +36,7 @@ export function registerTools(server: McpServer, session: TransferSession) {
     inspect: async (input: z.output<typeof schemas.inspect>) => summary(await session.read(input.path)),
     validate: async (input: z.output<typeof schemas.validate>) => {
       const bundle = await session.read(input.path);
-      const findings = scanSecrets(bundle);
+      const findings = publicFindings(scanSecrets(bundle));
       return { ok: findings.length === 0, findings, warnings: summary(bundle).warnings };
     },
     export: (input: z.output<typeof schemas.export>) => session.plan({ operation: "export", ...input }),
@@ -89,8 +90,15 @@ export function registerTools(server: McpServer, session: TransferSession) {
             content: [{ type: "text" as const, text: error.message }],
           };
         }
-        const expected = error instanceof NotDetectedError || error instanceof UsageError || error instanceof UnknownAdapterError ||
-          error instanceof SecretsFoundError;
+        if (error instanceof SecretsFoundError) {
+          const findings = publicFindings(error.findings);
+          return {
+            isError: true,
+            structuredContent: { ok: false, findings },
+            content: [{ type: "text" as const, text: "Possible secrets found; nothing was written. Remove the reported credentials and prepare a new preview. " + JSON.stringify(findings) }],
+          };
+        }
+        const expected = error instanceof NotDetectedError || error instanceof UsageError || error instanceof UnknownAdapterError;
         const message = expected ? error.message : error instanceof z.ZodError
           ? "Invalid tool arguments."
           : "Operation failed. Check paths, permissions and application availability. If apply was attempted, inspect the destination before retrying.";
