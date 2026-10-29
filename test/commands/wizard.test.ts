@@ -294,7 +294,7 @@ describe("runWizard", () => {
     it("says where a .jetpack file will go, and not that routines arrive disabled", async () => {
       const { prompter, calls } = fakePrompter([ALPHA, JETPACK, INCLUDE, CANCELLED]);
       await runWizard(prompter, {}, depsFor([alpha, beta]));
-      expect(texts(calls, "note").at(-1)).toBe("Save Ada from In-memory alpha as ada.jetpack in this folder.");
+      expect(texts(calls, "note").at(-1)).toBe("Save Ada from In-memory alpha as ada.jetpack in this folder. Existing archives are kept.");
     });
   });
 
@@ -341,6 +341,7 @@ describe("runWizard", () => {
         from: "alpha",
         agent: "ada",
         out: "ada-lovelace.jetpack",
+        overwrite: false,
       });
       expect(deps.move).not.toHaveBeenCalled();
     });
@@ -380,6 +381,7 @@ describe("runWizard", () => {
         from: "alpha",
         agent: "bob",
         out: "bob-builder.jetpack",
+        overwrite: false,
       });
     });
 
@@ -429,7 +431,7 @@ describe("runWizard", () => {
       const { prompter, calls } = fakePrompter([ALPHA, JETPACK, EXCLUDE, true]);
       const deps = depsFor([alpha, beta]);
       await runWizard(prompter, {}, deps);
-      expect(deps.exportTo).toHaveBeenCalledWith({ from: "alpha", agent: "ada", out: "ada.jetpack", memory: false });
+      expect(deps.exportTo).toHaveBeenCalledWith({ from: "alpha", agent: "ada", out: "ada.jetpack", overwrite: false, memory: false });
       expect(texts(calls, "note").join(" ")).toContain("other content may still contain personal information");
       const selection = calls.findIndex(call => call.kind === "note" && call.text.includes("will be left out"));
       expect(selection).toBeGreaterThan(-1);

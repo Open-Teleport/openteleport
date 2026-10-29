@@ -63,6 +63,7 @@ const ADVANCED_FLAGS: readonly Row[] = [
   ["--yes", "replace without asking"],
   ["--enable-routines", "keep imported routines enabled (by default they are disabled)"],
   ["--keep <file.jetpack>", "move also saves the agent as a file"],
+  ["--no-overwrite", "export refuses an existing archive and saves a separate report"],
   ["--quiet", "print only the result"],
 ];
 
@@ -141,6 +142,7 @@ function buildProgram(showAll: boolean): Command {
     .option("--from <adapter>", "the app to export from (default: the agent folder you are in)")
     .option("--agent <id|name>", "the agent to export")
     .option("--out <file.jetpack>", "where to write the file (default: <name>.jetpack)")
+    .addOption(advanced("--no-overwrite", "refuse existing archives and save a separate report"))
     .option("--no-memory", "omit facts and notes; updates may remove existing imported memory")
       .option("--include-files", "carry the agent's files/ too");
   withOutput(withDirs(exporting)).action(act((opts: ExportOptions) => exportCommand(opts)));

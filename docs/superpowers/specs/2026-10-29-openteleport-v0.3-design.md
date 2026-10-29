@@ -3,7 +3,7 @@
 Based on the owner's Claude Code/MCP draft and the subsequent preview-before-write discussion.
 
 Deliver one openteleport mcp stdio subcommand in the existing package and a Claude Code plugin in
-plugins/claude-code, with a root marketplace manifest. Preserve existing CLI behavior. Do not change
+plugins/claude-code, with a root marketplace manifest. Preserve existing explicit CLI defaults. The interactive wizard refuses existing export archives and saves unique reports; explicit export offers the same policy through --no-overwrite. Exclusive creation protects existing entries, but an interrupted write can leave a partial new archive. Do not change
 adapter implementations in this PR; Codex round-trip corrections are reviewed independently in PR #4.
 
 Expose discovery, metadata inspection and validation, then export/import/move preview tools and an apply
