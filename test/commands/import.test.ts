@@ -57,6 +57,21 @@ describe("import", () => {
     expect(result.stdout).toContain(`Report written to ${path}`);
   });
 
+  it("writes into a folder named after the agent in the working directory without --to", async () => {
+    const file = await adaJetpack("ada.jetpack");
+    const result = await run(box, ["import", file]);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(join(box.cwd, "ada", "AGENTS.md"), "utf8")).toContain("# Instructions");
+    expect(result.stdout).toContain("Outcome: done");
+  });
+
+  it("does the same for an agent folder without --to", async () => {
+    const result = await run(box, ["import", ADA_DIR, "--json"]);
+    expect(result.exitCode).toBe(0);
+    expect(json<MoveReport>(result).target.app).toBe("folder");
+    expect(await readdir(join(box.cwd, "ada"))).toContain("jetpack.json");
+  });
+
   it("imports an agent folder", async () => {
     const result = await run(box, ["import", "--to", "memory", ADA_DIR, "--json"]);
     expect(result.exitCode).toBe(0);
@@ -237,7 +252,7 @@ describe("import", () => {
     expect(result.stderr).toBe("error: disk full");
   });
 
-  it("prints the next step last and exits 0 when the target hands the move over", async () => {
+  it("prints the next step once and exits 0 when the target hands the move over", async () => {
     const handoff = await adapterModule(box, "handoff.mjs", {
       name: "inbox",
       outcome: "handoff",
@@ -247,7 +262,10 @@ describe("import", () => {
     const result = await run(box, ["import", "--to", "inbox", file], { extraAdapter: handoff });
     expect(result.exitCode).toBe(0);
     const lines = result.stdout.trimEnd().split(/\r?\n/);
-    expect(lines.at(-1)).toBe("Next step: Open Inbox and drop the file on it.");
+    expect(lines.filter((line) => line.startsWith("Next step:"))).toEqual([
+      "Next step: Open Inbox and drop the file on it.",
+    ]);
+    expect(lines[1]).toBe("Next step: Open Inbox and drop the file on it.");
     expect(result.stdout).toContain("Outcome: handoff");
   });
 

@@ -1,0 +1,149 @@
+// Small file system checks every file-based adapter needs.
+import { type Dirent, type Stats, constants } from "node:fs";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { ulid } from "ulid";
+import { isSafeArchivePath } from "../core/paths.js";
+import { byCodeUnit } from "../core/text.js";
+
+/** Whether `error` says the path is not there, or that a file is on the way to it. */
+export function isNotFound(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * `lstat`, or `undefined` when nothing is there (the path is missing, or something on the way to
+ * it is a file, not a folder). A symbolic link is not followed: it is what `lstat` answers for.
+ * Any other error, such as a refused permission, is thrown.
+ */
+export async function lstatIfAny(path: string): Promise<Stats | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The text of the file at `path`, or `undefined` when nothing is there (see `isNotFound`). Any
+ * other error, such as a refused permission, is thrown.
+ */
+export async function readTextIfAny(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isNotFound(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Free means nothing is there, or an empty folder to write into. A link (symbolic link or
+ * junction) is never free, even a broken one: nothing is written through it.
+ */
+export async function isFree(path: string): Promise<boolean> {
+  const info = await lstatIfAny(path);
+  if (info === undefined) return true;
+  return info.isDirectory() && (await entriesOf(path)).length === 0;
+}
+
+/** The first free `<wanted>-2`, `<wanted>-3`... (see `isFree`). */
+export async function freeSibling(wanted: string): Promise<string> {
+  for (let n = 2; ; n += 1) {
+    const candidate = `${wanted}-${n}`;
+    if (await isFree(candidate)) return candidate;
+  }
+}
+
+/**
+ * The `<wanted>-2`, `<wanted>-3`... that exist next to `wanted` (whatever they are), in number
+ * order, gaps skipped.
+ */
+export async function numberedSiblings(wanted: string): Promise<string[]> {
+  const parent = dirname(wanted);
+  const prefix = `${basename(wanted)}-`;
+  return (await entriesOf(parent))
+    .map(({ name }) => name)
+    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
+    .map((name) => ({ name, n: Number(name.slice(prefix.length)) }))
+    .filter(({ n }) => n >= 2)
+    .sort((a, b) => a.n - b.n)
+    .map(({ name }) => join(parent, name));
+}
+
+/**
+ * The entries of `dir` with their types, in code-unit order of their names, or none when `dir` is
+ * not there (or something on the way to it is a file). The type of an entry is its own: a link is
+ * neither a file nor a directory. Any other error, such as a refused permission, is thrown.
+ */
+export async function entriesOf(dir: string): Promise<Dirent[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.sort((a, b) => byCodeUnit(a.name, b.name));
+  } catch (error) {
+    if (isNotFound(error)) return [];
+    throw error;
+  }
+}
+
+/**
+ * Replaces `file` in one step: the content goes to a temporary sibling in the same folder, which
+ * is then renamed over it. The file is never left half written, a reader of it sees the old
+ * content or the new, and a link in its place is replaced rather than written through (the
+ * temporary file is created exclusively, so a link at its name is not followed either). The
+ * folder is made when it is not there; the temporary file is removed when anything fails.
+ *
+ * `mode` sets the permission bits exactly (what `writeFile` is given is narrowed by the umask);
+ * without it the file gets the default ones.
+ */
+export async function replaceFile(
+  file: string,
+  content: string | Uint8Array,
+  opts: { mode?: number } = {},
+): Promise<void> {
+  const temporary = `${file}.${ulid()}.tmp`;
+  try {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(temporary, content, {
+      flag: "wx",
+      ...(opts.mode === undefined ? {} : { mode: opts.mode }),
+    });
+    if (opts.mode !== undefined) await chmod(temporary, opts.mode);
+    await rename(temporary, file);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
+/**
+ * Copies `file` next to itself as `<file>.bak-<stamp>`, or `<file>.bak-<stamp>-2` and so on:
+ * never over an earlier backup.
+ */
+export async function backUp(file: string, stamp: string): Promise<void> {
+  for (let n = 1; ; n += 1) {
+    const backup = `${file}.bak-${stamp}${n === 1 ? "" : `-${n}`}`;
+    try {
+      await copyFile(file, backup, constants.COPYFILE_EXCL);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+}
+
+/** A name that is one safe path segment: it cannot reach outside the directory it is put in. */
+export const isSafeName = (name: string): boolean =>
+  isSafeArchivePath(name) && !name.includes("/");

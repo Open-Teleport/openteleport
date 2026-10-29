@@ -19,7 +19,7 @@ export type MemoryAdapterOptions = {
   capabilities?: Partial<AdapterCapabilities>;
   /** The agents `list` and `read` see, by id. `write` adds to them. */
   agents?: Record<string, Bundle>;
-  /** What every `write` reports. Default `done`. */
+  /** What every `write` reports. Default `done`; `handoff` also marks the adapter `handoff: true`. */
   outcome?: "done" | "handoff";
   nextStep?: string;
 };
@@ -63,6 +63,7 @@ export function createMemoryAdapter(opts: MemoryAdapterOptions = {}): MemoryAdap
     name,
     displayName: `In-memory ${name}`,
     capabilities: { ...ALL_CAPABILITIES, ...opts.capabilities },
+    ...(opts.outcome === "handoff" ? { handoff: true } : {}),
     written,
     async detect() {
       return { found: true, location: `memory:${name}` };

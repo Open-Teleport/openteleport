@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import JSON5 from "json5";
+import { isRecord } from "../../core/values.js";
 import type { Ctx } from "../types.js";
 
 /** How an agent presents itself. `avatar` is a workspace-relative path, a URL or a data URI. */
@@ -96,9 +97,6 @@ export function openclawPaths(ctx: Ctx): OpenClawPaths {
 
   return { stateDir, configFile, workspaceFor };
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Reads `openclaw.json`, which is JSON5 (comments and trailing commas allowed). A missing file is

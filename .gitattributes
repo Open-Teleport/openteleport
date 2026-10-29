@@ -1,0 +1,15 @@
+# Check out text files with LF on every platform. The tests compare generated files against
+# fixtures byte for byte, and a CRLF checkout on a Windows runner (git's default there) used to
+# break them.
+* text=auto eol=lf
+
+# Fixtures that carry CRLF on purpose, to test readers against Windows line endings.
+test/fixtures/codex/home/.codex/AGENTS.md -text
+
+# Binary fixtures.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.zip binary
+*.db binary

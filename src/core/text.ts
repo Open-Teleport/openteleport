@@ -1,3 +1,61 @@
+import { isReservedDeviceName } from "./paths.js";
+
+/** Plain code-unit order, so that a sorted list does not depend on the locale. */
+export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Cuts `text` to `max` characters, the last one an ellipsis. */
+export const truncate = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+/**
+ * Text from an app squeezed onto one line: every run of whitespace and control characters becomes
+ * one space. A line break or an ANSI escape in an agent's name must not break a table, start a
+ * forged section of a report or drive the terminal.
+ */
+export const oneLine = (value: string): string => value.replace(/[\p{Cc}\s]+/gu, " ").trim();
+
+/** The first line of what went wrong, trimmed: an error's message, or anything else as text. */
+export const errorLine = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
+
+/** `1 skill`, `3 skills`; `many` is the plural when it is not the word with an `s`. */
+export const plural = (count: number, one: string, many = `${one}s`): string =>
+  `${count} ${count === 1 ? one : many}`;
+
+const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
+
+/** `value` without the byte order mark some editors on Windows put at the start of a file. */
+export const withoutMark = (value: string): string =>
+  value.startsWith(BYTE_ORDER_MARK) ? value.slice(1) : value;
+
+/** The longest slug an adapter makes unless it says otherwise (what Hermes accepts as an id). */
+const DEFAULT_SLUG_CHARS = 64;
+
+/**
+ * `name` as a slug: lower case, every run of characters outside `a-z0-9` one `-`, no `-` at
+ * either end, cut to `maxChars` (64). `fold` first takes the accents off letters and makes `ł`
+ * an `l`. Nothing usable gives `fallback`, or `""` without one. A Windows device name such as
+ * `con` could not be a file or folder there, so it gets `deviceSuffix` after it (`con-r`); without
+ * one it stays as it is.
+ */
+export function slugify(
+  name: string,
+  opts: { fallback?: string; deviceSuffix?: string; maxChars?: number; fold?: boolean } = {},
+): string {
+  const letters =
+    opts.fold === true ? name.normalize("NFKD").replace(/\p{M}/gu, "").replace(/ł/gi, "l") : name;
+  const slug = letters
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-/, "")
+    .slice(0, opts.maxChars ?? DEFAULT_SLUG_CHARS)
+    .replace(/-$/, "");
+  if (slug === "") return opts.fallback ?? "";
+  return opts.deviceSuffix !== undefined && isReservedDeviceName(slug)
+    ? `${slug}${opts.deviceSuffix}`
+    : slug;
+}
+
 const PERSONA_HEADING = "# Persona";
 const INSTRUCTIONS_HEADING = "# Instructions";
 

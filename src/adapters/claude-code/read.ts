@@ -1,33 +1,32 @@
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
-import type {
-  Bundle,
-  Capability,
-  FileEntry,
-  Manifest,
-  ModelPref,
-  Note,
-  Skill,
+import { MAX_FACT_CHARS } from "../../core/paths.js";
+import {
+  type Bundle,
+  type Capability,
+  type Manifest,
+  type ModelPref,
+  type Note,
+  ULID_PATTERN,
 } from "../../core/schema.js";
-import { splitInstructions } from "../../core/text.js";
+import { byCodeUnit, splitInstructions, truncate } from "../../core/text.js";
+import { entriesOf } from "../fs.js";
+import { readIds } from "../marker.js";
+import { readSkillFolders } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
-import { idsFileOf, isNoteLink, readIds } from "./write.js";
+import { idsFileOf, isNoteLink } from "./write.js";
 
 const APP = "claude-code";
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const USER_PREFIX = "user:";
 const MEMORY_FILE = "MEMORY.md";
-const SKILL_FILE = "SKILL.md";
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const PROSE_NOTE = "MEMORY-prose";
 /** The note that carries the `MEMORY.md` bullets too long to be facts. */
 const LONG_NOTE = "MEMORY-long";
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 /** Tool name prefixes, compared ignoring case, and the capability each one implies. */
 const CAPABILITY_PREFIXES: readonly { capability: Capability; prefixes: readonly string[] }[] = [
@@ -39,42 +38,6 @@ const CAPABILITY_PREFIXES: readonly { capability: Capability; prefixes: readonly
   },
   { capability: "network", prefixes: ["WebFetch", "WebSearch"] },
 ];
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-// Plain code-unit order, so that the result does not depend on the locale.
-const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-const isMissing = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException).code === "ENOENT" ||
-  (error as NodeJS.ErrnoException).code === "ENOTDIR";
-
-/** The entries of `dir`, or none when it does not exist. */
-async function entriesOf(dir: string) {
-  try {
-    return await readdir(dir, { withFileTypes: true });
-  } catch (error) {
-    if (isMissing(error)) return [];
-    throw error;
-  }
-}
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
-async function lstatOf(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isMissing(error)) return undefined;
-    throw error;
-  }
-}
-
-const linkWarning = (skill: string, path?: string): string =>
-  path === undefined
-    ? `skill '${skill}' is a symlink; not exported`
-    : `skill '${skill}': '${path}' is a symlink; not exported`;
 
 /** The stems of the `*.md` files in `dir`, sorted. */
 async function markdownStems(dir: string): Promise<string[]> {
@@ -167,62 +130,6 @@ function capabilitiesOf(tools: readonly string[]): Capability[] {
   return CAPABILITY_PREFIXES.filter(({ prefixes }) =>
     names.some((name) => prefixes.some((prefix) => name.startsWith(prefix.toLowerCase()))),
   ).map(({ capability }) => capability);
-}
-
-/**
- * Files below `dir` as `/`-separated paths. Links (symbolic links and junctions) are never
- * followed; they, forbidden paths and special files are left out and named.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    // Dirent types come from lstat, so a link is neither a file nor a directory here.
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isSymbolicLink()) {
-        warnings.push(linkWarning(skill, path));
-      } else if (isForbiddenPath(path) || !(entry.isDirectory() || entry.isFile())) {
-        warnings.push(`skill '${skill}': left out '${path}'`);
-      } else if (entry.isDirectory()) {
-        await walk(absolute, path);
-      } else {
-        files.push({ path, bytes: new Uint8Array(await readFile(absolute)) });
-      }
-    }
-  }
-  await walk(dir, "");
-  // SKILL.md first, then the others in code-unit order.
-  return files.sort((a, b) =>
-    a.path === SKILL_FILE ? -1 : b.path === SKILL_FILE ? 1 : byCodeUnit(a.path, b.path),
-  );
-}
-
-/**
- * Every real folder of `skillsDir` that holds a real `SKILL.md`, in name order. A linked skill
- * folder or `SKILL.md` is never followed, since it can point anywhere on disk; it is named in a
- * warning instead.
- */
-async function readSkills(skillsDir: string, warnings: string[]): Promise<Skill[]> {
-  const skills: Skill[] = [];
-  const names = (await entriesOf(skillsDir)).map((entry) => entry.name).sort(byCodeUnit);
-  for (const name of names) {
-    const dir = join(skillsDir, name);
-    const folder = await lstatOf(dir);
-    if (folder?.isSymbolicLink()) {
-      warnings.push(linkWarning(name));
-      continue;
-    }
-    if (!folder?.isDirectory()) continue;
-    const skillFile = await lstatOf(join(dir, SKILL_FILE));
-    if (skillFile?.isSymbolicLink()) {
-      warnings.push(linkWarning(name, SKILL_FILE));
-      continue;
-    }
-    if (!skillFile?.isFile()) continue;
-    skills.push({ name, files: await skillFiles(dir, name, warnings) });
-  }
-  return skills;
 }
 
 /**
@@ -325,7 +232,8 @@ export async function readAgent(
     if (capabilities.length > 0) warnings.push("capabilities are derived from the tools list");
   }
 
-  const skills = await readSkills(paths.projectSkills, warnings);
+  const { skills, warnings: skillWarnings } = await readSkillFolders(paths.projectSkills);
+  warnings.push(...skillWarnings);
   if (skills.length > 0) warnings.push("Claude Code skills are project-wide; all were exported");
   const { facts, notes } = await readMemory(paths.memoryDir(paths.projectDir), warnings);
 

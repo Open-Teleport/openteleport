@@ -1,0 +1,91 @@
+{
+  "format": "openbot-agent-import",
+  "version": 1,
+  "source": { "app": "grok-bot", "exportedAt": "2026-10-28T10:00:00.000Z" },
+  "agents": [
+    {
+      "key": "ada",
+      "name": "Ada",
+      "title": "Release manager",
+      "description": "Ada keeps releases on track. She drafts release notes from merged pull requests, triages incoming bug reports by urgency, and reminds the team of open blockers before every freeze. Ask her for a status summary when a release looks late. She answers briefly, plainly and never merges anything herself.",
+      "avatar": "agents/ada/avatar.png",
+      "skills": ["agents/ada/skills/release-notes", "agents/ada/skills/triage"],
+      "routines": [
+        {
+          "name": "Hourly check",
+          "instruction": "Look at the release board and report anything that changed.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "hourly", "minute": 15 }
+        },
+        {
+          "name": "Morning digest",
+          "instruction": "Summarize yesterday's merged pull requests.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "daily", "time": "08:30" }
+        },
+        {
+          "name": "Standup prompt",
+          "instruction": "Ask each owner for the status of their open blockers.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "weekdays", "time": "09:00" }
+        },
+        {
+          "name": "Weekly review",
+          "instruction": "Review the week's releases and agree on three actions.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "weekly", "weekday": 5, "time": "16:00" }
+        },
+        {
+          "name": "Monthly report",
+          "instruction": "Write the monthly release report.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "monthly", "day": 1, "time": "09:00" }
+        },
+        {
+          "name": "Inbox sweep",
+          "instruction": "Triage the bug reports that arrived in the last 90 minutes.",
+          "active": false,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "interval", "amount": 90, "unit": "minutes" }
+        },
+        {
+          "name": "Seasonal plan",
+          "instruction": "Draft the plan for the next half year.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "advanced", "months": [1, 6], "days": [1, 15], "time": "09:00" }
+        },
+        {
+          "name": "Backup ping",
+          "instruction": "Check that last night's backup finished.",
+          "active": true,
+          "timezone": "Europe/Warsaw",
+          "schedule": { "kind": "custom", "expression": "*/10 * * * *" }
+        }
+      ],
+      "memories": [
+        "The user reports in EUR.",
+        "Releases freeze on the last Thursday of the month.",
+        "Bug reports tagged security go to the user first."
+      ],
+      "files": "agents/ada/files"
+    },
+    {
+      "key": "min",
+      "name": "Min",
+      "title": "Minimal agent",
+      "description": "Answers in one sentence.",
+      "avatar": null,
+      "skills": [],
+      "routines": [],
+      "memories": [],
+      "files": null
+    }
+  ],
+  "channels": [{ "key": "ops", "name": "Ops", "members": ["ada"] }]
+}

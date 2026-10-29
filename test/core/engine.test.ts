@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Adapter, AdapterCapabilities, Ctx, WriteOpts } from "../../src/adapters/types.js";
 import { readBundle } from "../../src/core/bundle.js";
 import { SecretsFoundError, exportBundle, importBundle, move } from "../../src/core/engine.js";
+import type { Item } from "../../src/core/report.js";
 import type { Bundle, Routine } from "../../src/core/schema.js";
 import { type MemoryAdapter, createMemoryAdapter } from "../helpers/memory-adapter.js";
 
@@ -389,6 +390,110 @@ describe("move", () => {
   });
 });
 
+describe("facts the target skipped", () => {
+  const THREE = ["Prefers Polish.", "Reads on a phone.", "Works late."];
+
+  /** A target that writes everything and then says it skipped `skipped`. */
+  const skipping = (skipped: Item[]): Adapter => {
+    const memoryTarget = target();
+    return {
+      ...memoryTarget,
+      async write(writeCtx, bundle, opts) {
+        const result = await memoryTarget.write(writeCtx, bundle, opts);
+        return { ...result, items: { ...result.items, skipped } };
+      },
+    };
+  };
+  const detail = (field: string): string => `${field}: not written`;
+  const moveFacts = (skipped: Item[], facts: string[] = THREE) =>
+    move({
+      from: source(fullAgent({ facts })),
+      to: skipping(skipped),
+      agent: "ada",
+      ctx,
+      write: WRITE,
+    });
+  const factsMoved = (report: { moved: Item[] }): Item | undefined =>
+    report.moved.find(({ field }) => field === "memory.facts");
+
+  it("counts all of them when none is skipped", async () => {
+    expect(factsMoved(await moveFacts([]))).toEqual({ field: "memory.facts", detail: "3 facts" });
+  });
+
+  it("does not count a fact the target skipped", async () => {
+    const report = await moveFacts([{ field: "fact:2", detail: detail("fact:2") }]);
+
+    expect(factsMoved(report)).toEqual({ field: "memory.facts", detail: "2 facts" });
+    expect(report.skipped).toEqual([{ field: "fact:2", detail: "fact:2: not written" }]);
+  });
+
+  it("says 1 fact in the singular when two of three are skipped", async () => {
+    const report = await moveFacts([
+      { field: "fact:1", detail: detail("fact:1") },
+      { field: "fact:3", detail: detail("fact:3") },
+    ]);
+
+    expect(factsMoved(report)).toEqual({ field: "memory.facts", detail: "1 fact" });
+  });
+
+  it("leaves the facts out of what moved when all of them are skipped", async () => {
+    const report = await moveFacts(
+      THREE.map((_fact, index) => ({ field: `fact:${index + 1}`, detail: "not written" })),
+    );
+
+    expect(factsMoved(report)).toBeUndefined();
+    expect(report.moved.map(({ field }) => field)).toContain("instructions");
+  });
+
+  it("does not count down for a fact that is not there", async () => {
+    const report = await moveFacts([
+      { field: "fact:9", detail: detail("fact:9") },
+      { field: "fact:0", detail: detail("fact:0") },
+      { field: "fact:two", detail: detail("fact:two") },
+    ]);
+
+    expect(factsMoved(report)).toEqual({ field: "memory.facts", detail: "3 facts" });
+  });
+
+  it("counts a skipped fact once even when it is reported twice", async () => {
+    const report = await moveFacts([
+      { field: "fact:1", detail: "first" },
+      { field: "fact:1", detail: "again" },
+    ]);
+
+    expect(factsMoved(report)).toEqual({ field: "memory.facts", detail: "2 facts" });
+  });
+
+  it("tells equal facts apart by their place, not their text", async () => {
+    const report = await moveFacts([{ field: "fact:1", detail: detail("fact:1") }], [
+      "Same.",
+      "Same.",
+    ]);
+
+    expect(factsMoved(report)).toEqual({ field: "memory.facts", detail: "1 fact" });
+  });
+
+  it("still leaves them out when the whole field is skipped by its label", async () => {
+    const report = await moveFacts([{ field: "memory.facts", detail: "MEMORY.md is a symlink" }]);
+
+    expect(factsMoved(report)).toBeUndefined();
+  });
+
+  it("lists a target without facts as one skipped item, not one per fact", async () => {
+    const report = await move({
+      from: source(fullAgent({ facts: THREE })),
+      to: target({ facts: false }),
+      agent: "ada",
+      ctx,
+      write: WRITE,
+    });
+
+    expect(report.skipped).toEqual([
+      { field: "memory.facts", detail: "In-memory dst does not support memory.facts" },
+    ]);
+  });
+});
+
 describe("exportBundle", () => {
   it("writes a bundle with an id and reports it as exported", async () => {
     const out = join(home, "ada.jetpack");
@@ -737,6 +842,84 @@ describe("the id cache key", () => {
       expect(side.sourceDir).toBe(join(home, "from"));
       expect(side).not.toHaveProperty("targetDir");
     }
+  });
+});
+
+describe("looking up the cache identity", () => {
+  /** A source whose `cacheIdentity` counts its calls, and fails when told to. */
+  function counting(agent: Bundle, fails = false) {
+    let calls = 0;
+    const adapter: Adapter = {
+      ...source(agent),
+      cacheIdentity: () => {
+        calls += 1;
+        if (fails) throw new Error("cannot tell which agent this is");
+        return "/agents/one/ada";
+      },
+    };
+    return { adapter, calls: () => calls };
+  }
+  const idsFile = (): string => join(home, ".openteleport", "ids.json");
+  const exists = (path: string): Promise<boolean> =>
+    stat(path).then(
+      () => true,
+      () => false,
+    );
+
+  it("asks once for an agent without an id", async () => {
+    const { adapter, calls } = counting(fullAgent());
+
+    await move({ from: adapter, to: target(), agent: "ada", ctx, write: WRITE });
+
+    expect(calls()).toBe(1);
+    expect(Object.keys(JSON.parse(await readFile(idsFile(), "utf8")))).toEqual([
+      "src//agents/one/ada",
+    ]);
+  });
+
+  it("does not ask for an agent that has an id", async () => {
+    const agent = fullAgent();
+    agent.manifest.id = KNOWN_ID;
+    const { adapter, calls } = counting(agent);
+    const to = target();
+
+    await move({ from: adapter, to, agent: "ada", ctx, write: WRITE });
+
+    expect(calls()).toBe(0);
+    expect(writtenTo(to).manifest.id).toBe(KNOWN_ID);
+    expect(await exists(idsFile())).toBe(false);
+  });
+
+  it("does not let a failing identity stop an agent that has an id", async () => {
+    const agent = fullAgent();
+    agent.manifest.id = KNOWN_ID;
+    const { adapter, calls } = counting(agent, true);
+
+    const { bundle } = await exportBundle({
+      from: adapter,
+      agent: "ada",
+      ctx,
+      includeFiles: false,
+    });
+
+    expect(calls()).toBe(0);
+    expect(bundle.manifest.id).toBe(KNOWN_ID);
+  });
+
+  it("still asks on an export of an agent without an id", async () => {
+    const { adapter, calls } = counting(fullAgent());
+
+    await exportBundle({ from: adapter, agent: "ada", ctx, includeFiles: false });
+
+    expect(calls()).toBe(1);
+  });
+
+  it("still fails when the identity of an agent without an id cannot be told", async () => {
+    const { adapter } = counting(fullAgent(), true);
+
+    await expect(
+      move({ from: adapter, to: target(), agent: "ada", ctx, write: WRITE }),
+    ).rejects.toThrow("cannot tell which agent this is");
   });
 });
 

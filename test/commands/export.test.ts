@@ -90,6 +90,74 @@ describe("export", () => {
     expect(bundle.unknownPaths).toEqual([]);
   });
 
+  describe("without --from", () => {
+    /** A folder called `name` in the sandbox, with an AGENTS.md in it. */
+    async function agentFolder(name: string): Promise<string> {
+      const folder = join(box.cwd, name);
+      await mkdir(folder, { recursive: true });
+      await writeFile(join(folder, "AGENTS.md"), "Be brief.\n");
+      return folder;
+    }
+
+    it("exports the agent folder you are in, to <name>.jetpack with its report", async () => {
+      const folder = await agentFolder("Ada Lovelace");
+      const result = await run(box, ["export"], { cwd: folder });
+      expect(result.exitCode).toBe(0);
+
+      const bundle = await readBundle(join(folder, "ada-lovelace.jetpack"));
+      expect(bundle.manifest.name).toBe("Ada Lovelace");
+      expect(bundle.instructions).toBe("Be brief.\n");
+      expect((await readdir(folder)).sort()).toEqual([
+        "AGENTS.md",
+        "ada-lovelace.jetpack",
+        "move-report.md",
+      ]);
+      expect(result.stdout).toContain("Outcome: exported");
+    });
+
+    it("names the folder adapter as the source in the report", async () => {
+      const folder = await agentFolder("ada");
+      const result = await run(box, ["export", "--json"], { cwd: folder });
+      expect(result.exitCode).toBe(0);
+      expect(json<MoveReport>(result).source.app).toBe("folder");
+    });
+
+    it("exits 2 in a folder without an AGENTS.md, and writes nothing", async () => {
+      const result = await run(box, ["export"]);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toBe(
+        "error: No AGENTS.md here; pass --from <app> or run from an agent folder",
+      );
+      expect(await readdir(box.cwd)).toEqual([]);
+    });
+
+    it("prints that as JSON too with --json", async () => {
+      const result = await run(box, ["export", "--json"]);
+      expect(result.exitCode).toBe(2);
+      expect(json(result)).toEqual({
+        error: {
+          code: 2,
+          message: "No AGENTS.md here; pass --from <app> or run from an agent folder",
+        },
+      });
+    });
+
+    it("looks for the AGENTS.md in --source-dir when that is given", async () => {
+      await agentFolder("ada");
+      const result = await run(box, ["export", "--source-dir", "ada", "--out", "ada.jetpack"]);
+      expect(result.exitCode).toBe(0);
+      expect((await readBundle(join(box.cwd, "ada.jetpack"))).manifest.name).toBe("ada");
+    });
+
+    it("takes the agent --agent names from the folder adapter", async () => {
+      await agentFolder("ada");
+      await agentFolder("bob");
+      const result = await run(box, ["export", "--agent", "bob"]);
+      expect(result.exitCode).toBe(0);
+      expect((await readBundle(join(box.cwd, "bob.jetpack"))).manifest.name).toBe("bob");
+    });
+  });
+
   it("keeps the id of an agent across exports", async () => {
     await run(box, ["export", "--from", "memory", "--agent", "ada", "--out", "one.jetpack"]);
     await run(box, ["export", "--from", "memory", "--agent", "ada", "--out", "two.jetpack"]);

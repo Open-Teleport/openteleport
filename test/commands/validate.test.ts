@@ -11,6 +11,7 @@ import {
   type Sandbox,
   json,
   run,
+  runWithClosedStdout,
   sandbox,
 } from "../helpers/cli.js";
 
@@ -106,5 +107,41 @@ describe("validate", () => {
   it("exits 2 for a path that does not exist", async () => {
     const result = await run(box, ["validate", "nope.jetpack"]);
     expect(result.exitCode).toBe(2);
+  });
+
+  // `validate x | head -1` ends the program when the reader has gone, but not with 0: the file
+  // was not valid, and the exit code says so whatever happens to the output.
+  it("keeps exit code 1 for an invalid file when stdout is closed early", async () => {
+    const file = join(box.root, "broken.jetpack");
+    await writeFile(file, "this is not a zip file");
+
+    const { exitCode, stderr } = await runWithClosedStdout(box, ["validate", file], {
+      extraAdapter: null,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).not.toMatch(STACK_LINE);
+    expect(stderr).not.toContain("EPIPE");
+  });
+
+  it("keeps exit code 1 for a secret when stdout is closed early", async () => {
+    const leaky = join(box.root, "leaky");
+    await cp(ADA_DIR, leaky, { recursive: true });
+    await writeFile(join(leaky, "SOUL.md"), `Calm.\nMy key is ${FAKE_KEY}\n`);
+
+    const { exitCode } = await runWithClosedStdout(box, ["validate", leaky, "--json"], {
+      extraAdapter: null,
+    });
+
+    expect(exitCode).toBe(1);
+  });
+
+  it("still exits 0 for a valid folder when stdout is closed early", async () => {
+    const { exitCode, stderr } = await runWithClosedStdout(box, ["validate", ADA_DIR], {
+      extraAdapter: null,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr).not.toContain("EPIPE");
   });
 });

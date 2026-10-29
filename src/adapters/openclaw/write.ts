@@ -1,30 +1,19 @@
 // Writes a Bundle into an OpenClaw install. The agent is created (or found) and configured
 // through the `openclaw` CLI; its workspace files are written directly, since they are plain
 // files that OpenClaw reads as they are.
-import type { Stats } from "node:fs";
-import { constants } from "node:fs";
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import JSON5 from "json5";
-import { ulid } from "ulid";
 import { SecretsFoundError } from "../../core/engine.js";
-import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
+import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
 import { toOpenClawFlags } from "../../core/schedule.js";
 import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { scanSecrets } from "../../core/secrets.js";
-import { factsToProse } from "../../core/text.js";
+import { factsToProse, slugify } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { backUp, lstatIfAny, replaceFile } from "../fs.js";
+import { MARKER_FILE, carriesMarker, renderMarker } from "../marker.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
 import {
@@ -37,8 +26,6 @@ import {
 } from "./paths.js";
 
 const MAX_ID_CHARS = 32;
-/** Left in every workspace this adapter writes, so that a later move of the agent updates it. */
-const MARKER_FILE = ".openteleport.json";
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 /** The note that is the workspace's `USER.md`. */
@@ -68,16 +55,6 @@ const ACP_AGENTS: ReadonlyMap<string, string> = new Map([
 
 type Items = WriteResult["items"];
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-empty string, or `undefined`. */
-function label(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
 /** One line of text: every run of whitespace, line breaks included, becomes one space. */
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 
@@ -106,33 +83,15 @@ function warnGatewayDown(items: Items): void {
   if (!items.warnings.includes(GATEWAY_WARNING)) items.warnings.push(GATEWAY_WARNING);
 }
 
-/** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
-async function lstatIfAny(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
-    throw error;
-  }
-}
-
 // -- Where the agent goes ----------------------------------------------------------------------
 
 /**
- * The agent id for a name: lower case, every run of characters outside `a-z0-9` one `-`, dashes
- * trimmed, at most 32 characters. Nothing usable gives `agent`; a Windows device name such as
- * `con` gets `-r`, since its workspace folder could not be created there.
+ * The agent id for a name: a slug of at most 32 characters (see `slugify`). Nothing usable gives
+ * `agent`; a Windows device name such as `con` gets `-r`, since its workspace folder could not
+ * be created there.
  */
 function agentIdFor(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_ID_CHARS)
-    .replace(/-$/, "");
-  if (base === "") return "agent";
-  return isReservedDeviceName(base) ? `${base}-r` : base;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-r", maxChars: MAX_ID_CHARS });
 }
 
 /** `<base>-<n>`, the base cut so that the whole stays within 32 characters. */
@@ -150,22 +109,9 @@ function existingWorkspace(
 ): string {
   const entries = cfg.agents?.entries;
   const entry = isRecord(entries) && Object.hasOwn(entries, id) ? entries[id] : undefined;
-  if (isRecord(entry) && label(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
+  if (isRecord(entry) && nonBlank(entry.workspace) !== undefined) return paths.workspaceFor(id, cfg);
   const listed = rows.find((row) => row.id === id)?.workspace;
   return listed !== undefined && isAbsolute(listed) ? listed : paths.workspaceFor(id, cfg);
-}
-
-/** Whether the workspace holds the marker of the agent whose manifest id is `id`. */
-async function carriesMarker(workspace: string, id: string): Promise<boolean> {
-  if (id === "") return false;
-  const file = join(workspace, MARKER_FILE);
-  if (!(await lstatIfAny(file))?.isFile()) return false;
-  try {
-    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
-    return isRecord(marker) && marker.id === id;
-  } catch {
-    return false;
-  }
 }
 
 type Target = {
@@ -303,7 +249,7 @@ function memoryText(bundle: Bundle): string | undefined {
 function emojiOf(manifest: Bundle["manifest"]): string | undefined {
   const vendor = manifest["x-openclaw"];
   const identity = isRecord(vendor) ? vendor.identity : undefined;
-  return isRecord(identity) ? label(identity.emoji) : undefined;
+  return isRecord(identity) ? nonBlank(identity.emoji) : undefined;
 }
 
 type Identity = { name: string; theme?: string; emoji: string; avatar?: string };
@@ -365,7 +311,7 @@ async function writeWorkspace(workspace: string, bundle: Bundle, items: Items): 
     name: oneLine(bundle.manifest.name),
     emoji: oneLine(emojiOf(bundle.manifest) ?? DEFAULT_EMOJI),
   };
-  const theme = label(bundle.manifest.title);
+  const theme = nonBlank(bundle.manifest.title);
   if (theme !== undefined) identity.theme = oneLine(theme);
   if (bundle.avatar !== undefined) {
     const rel = `avatars/${bundle.avatar.name}`;
@@ -381,28 +327,13 @@ async function writeWorkspace(workspace: string, bundle: Bundle, items: Items): 
 
 // -- Config ------------------------------------------------------------------------------------
 
-/** Copies `file` next to itself as `<file>.bak-<timestamp>`, never over an earlier backup. */
-async function backUp(file: string): Promise<void> {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (let n = 1; ; n += 1) {
-    const backup = `${file}.bak-${stamp}${n === 1 ? "" : `-${n}`}`;
-    try {
-      await copyFile(file, backup, constants.COPYFILE_EXCL);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-  }
-}
-
 /**
- * Replaces `file` in one step, as `replaceCache` in `core/ids.ts` does: the content goes to a
- * sibling temporary file, which is then renamed over it, so a crash or a full disk leaves the
- * old file or the new one, never a truncated one, and a running Gateway never reads half of it.
- * The file keeps its mode (`openclaw.json` holds credentials; a new one is owner-only), and a
- * symbolic link stays one: the file it points to is replaced.
+ * Replaces `file` in one step (`replaceFile`), so a crash or a full disk leaves the old file or
+ * the new one, never a truncated one, and a running Gateway never reads half of it. The file
+ * keeps its mode (`openclaw.json` holds credentials; a new one is owner-only), and a symbolic
+ * link stays one: the file it points to is replaced.
  */
-async function replaceFile(file: string, content: string): Promise<void> {
+async function replaceConfigFile(file: string, content: string): Promise<void> {
   let real = file;
   try {
     real = await realpath(file);
@@ -415,16 +346,7 @@ async function replaceFile(file: string, content: string): Promise<void> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const temporary = `${real}.${ulid()}.tmp`;
-  try {
-    await writeFile(temporary, content, { encoding: "utf8", mode });
-    // The mode given to `writeFile` is narrowed by the umask; this sets it exactly.
-    await chmod(temporary, mode);
-    await rename(temporary, real);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  await replaceFile(real, content, { mode });
 }
 
 /**
@@ -464,8 +386,8 @@ async function rewriteConfig(
   }
   Object.assign(entry, values);
 
-  if (source !== undefined) await backUp(file);
-  await replaceFile(file, `${JSON.stringify(config, null, 2)}\n`);
+  if (source !== undefined) await backUp(file, new Date().toISOString().replace(/[:.]/g, "-"));
+  await replaceConfigFile(file, `${JSON.stringify(config, null, 2)}\n`);
   return source !== undefined;
 }
 
@@ -509,10 +431,10 @@ function modelConfig(models: ModelPref[], approximated: Item[]): [string, unknow
   const named = (pref: ModelPref): boolean =>
     pref.provider !== undefined || pref.model !== undefined;
   const chosen = models.find(
-    (pref) => label(pref.provider) !== undefined && label(pref.model) !== undefined,
+    (pref) => nonBlank(pref.provider) !== undefined && nonBlank(pref.model) !== undefined,
   );
   if (chosen !== undefined) {
-    const ref = `${label(chosen.provider)}/${label(chosen.model)}`;
+    const ref = `${nonBlank(chosen.provider)}/${nonBlank(chosen.model)}`;
     values.push(["model", ref]);
     const others = models.filter((pref) => pref !== chosen && named(pref)).length;
     if (others > 0) {
@@ -528,7 +450,7 @@ function modelConfig(models: ModelPref[], approximated: Item[]): [string, unknow
     });
   }
 
-  const runtime = label(models[0]?.runtime);
+  const runtime = nonBlank(models[0]?.runtime);
   if (runtime !== undefined) {
     const agent = ACP_AGENTS.get(runtime);
     if (agent !== undefined) {
@@ -681,7 +603,7 @@ export async function writeOpenClawAgent(
   if (bundle.manifest.capabilities.length > 0) {
     items.approximated.push({ field: "capabilities", detail: CAPABILITIES_DETAIL });
   }
-  if (label(bundle.manifest.description) !== undefined) {
+  if (nonBlank(bundle.manifest.description) !== undefined) {
     items.skipped.push({ field: "description", detail: "OpenClaw has no field for it" });
   }
 
@@ -741,11 +663,7 @@ async function finishWrite(
 ): Promise<WriteResult> {
   const identity = await writeWorkspace(target.workspace, bundle, items);
   const marker = { id: bundle.manifest.id, movedAt: new Date().toISOString() };
-  const unmarked = await writeInside(
-    target.workspace,
-    MARKER_FILE,
-    `${JSON.stringify(marker, null, 2)}\n`,
-  );
+  const unmarked = await writeInside(target.workspace, MARKER_FILE, renderMarker(marker));
   if (unmarked !== undefined) {
     items.warnings.push(
       `${unmarked}; not written, so a later move will not update this agent in place`,

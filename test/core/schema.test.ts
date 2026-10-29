@@ -4,6 +4,8 @@ import { ZodError, z } from "zod";
 import {
   MANIFEST_SCHEMA_ID,
   RoutineSchema,
+  ULID_PATTERN,
+  isTimeZone,
   manifestJsonSchema,
   parseManifest,
 } from "../../src/core/schema.js";
@@ -212,5 +214,30 @@ describe("JSON Schema export", () => {
     expect(properties.schemaVersion).toEqual({ type: "string", const: "0.1" });
     expect(properties.name?.maxLength).toBe(80);
     expect(properties.title?.maxLength).toBe(120);
+  });
+});
+
+describe("ULID_PATTERN", () => {
+  it("matches a 26 character ULID in capitals and nothing else", () => {
+    expect(ULID_PATTERN.test("01HZX3Q8M5N6P7R9T2V4W6Y8Z0")).toBe(true);
+    expect(ULID_PATTERN.test("01hzx3q8m5n6p7r9t2v4w6y8z0")).toBe(false);
+    expect(ULID_PATTERN.test("01HZX3Q8M5N6P7R9T2V4W6Y8Z")).toBe(false);
+    // The first character stops at 7, and I, L, O and U are not in the alphabet.
+    expect(ULID_PATTERN.test("81HZX3Q8M5N6P7R9T2V4W6Y8Z0")).toBe(false);
+    expect(ULID_PATTERN.test("01HZX3Q8M5N6P7R9T2V4W6Y8ZI")).toBe(false);
+  });
+});
+
+describe("isTimeZone", () => {
+  it("accepts IANA names and the aliases routines use", () => {
+    for (const zone of ["Europe/Warsaw", "UTC", "Etc/UTC", "US/Pacific"]) {
+      expect(isTimeZone(zone)).toBe(true);
+    }
+  });
+
+  it("refuses what is not a time zone", () => {
+    for (const zone of ["Mars/Olympus", "", "not a zone"]) {
+      expect(isTimeZone(zone)).toBe(false);
+    }
   });
 });

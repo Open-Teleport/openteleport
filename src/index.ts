@@ -1,9 +1,4 @@
-import { createRequire } from "node:module";
-
-const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
-
-export const VERSION: string = pkg.version;
-
+export { VERSION } from "./version.js";
 export { readBundle, writeBundle } from "./core/bundle.js";
 export { SecretsFoundError, exportBundle, importBundle, move } from "./core/engine.js";
 export { scanSecrets } from "./core/secrets.js";

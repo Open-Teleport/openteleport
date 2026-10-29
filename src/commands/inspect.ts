@@ -1,11 +1,11 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelPref } from "../core/schema.js";
+import { oneLine } from "../core/text.js";
 import {
   type CommonOptions,
   NO_MANIFEST_WARNING,
   existingPath,
-  oneLine,
   readInput,
   writeJson,
   writeOut,
