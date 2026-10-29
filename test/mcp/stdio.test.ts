@@ -7,8 +7,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 let home: string;
 let client: Client;
 let transport: StdioClientTransport;
-beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), "openteleport-mcp-stdio-"));
+async function connect() {
   client = new Client({ name: "isolated-test", version: "1.0.0" });
   transport = new StdioClientTransport({
     command: process.execPath, args: [resolve("dist/cli.js"), "mcp"], cwd: home,
@@ -21,6 +20,10 @@ beforeEach(async () => {
     }, stderr: "pipe",
   });
   await client.connect(transport);
+}
+beforeEach(async () => {
+  home = await mkdtemp(join(tmpdir(), "openteleport-mcp-stdio-"));
+  await connect();
 });
 afterEach(async () => {
   await client?.close(); await transport?.close();
@@ -31,7 +34,7 @@ const call = (name: string, args: Record<string, unknown> = {}) =>
 it("advertises strict schemas and the write boundary", async () => {
   const { tools } = await client.listTools();
   expect(tools.map((tool) => tool.name).sort()).toEqual([
-    "adapters", "apply", "cancel", "export", "import", "inspect", "list", "move", "validate",
+    "adapters", "apply", "cancel", "export", "import", "inspect", "list", "move", "validate", "operation_status",
   ].map((name) => "openteleport_" + name).sort());
   expect(tools.find((t) => t.name === "openteleport_apply")!.annotations)
     .toMatchObject({ readOnlyHint: false, destructiveHint: true });
@@ -87,4 +90,35 @@ it("round trips an archive and reports secret locations without values", async (
 it("keeps serving after an unreadable input", async () => {
   expect((await call("inspect", { path: join(home, "missing") })).isError).toBe(true);
   expect((await call("list", { from: "memory" })).isError).not.toBe(true);
+});
+
+
+it("retrieves completion after restarting the stdio server without replaying the write", async () => {
+  const preview = await call("move", { from: "memory", agent: "ada", to: "folder", targetDir: join(home, "Imported") });
+  const planId = (preview.structuredContent as { planId: string }).planId;
+  const applied = await call("apply", { planId, confirmed: true });
+  expect(applied.structuredContent).toMatchObject({ operationId: planId, receiptSaved: true });
+  await client.close();
+  await transport.close();
+  await connect();
+  expect((await call("operation_status", { operationId: planId })).structuredContent).toMatchObject({
+    state: "completed", execution: "completed", result: { outcome: "done" },
+  });
+  expect((await call("apply", { planId, confirmed: true })).isError).toBe(true);
+  expect((await call("operation_status", { operationId: "../outside" })).isError).toBe(true);
+});
+
+it("returns structured recovery information when the destination writer fails", async () => {
+  const target = join(home, "existing-file");
+  await writeFile(target, "sentinel");
+  const preview = await call("move", { from: "memory", agent: "ada", to: "folder", targetDir: target });
+  const planId = (preview.structuredContent as { planId: string }).planId;
+  const failed = await call("apply", { planId, confirmed: true });
+  expect(failed.isError).toBe(true);
+  expect(failed.structuredContent).toMatchObject({
+    operationId: planId, state: "needs_review", retrySafe: false, receiptSaved: true,
+  });
+  expect(await readFile(target, "utf8")).toBe("sentinel");
+  expect((await call("operation_status", { operationId: planId })).structuredContent)
+    .toMatchObject({ state: "needs_review" });
 });

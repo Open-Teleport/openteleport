@@ -1,3 +1,4 @@
+import { ApplyFailedError, readReceipt, writeReceipt, type Receipt } from "./receipts.js";
 import { randomUUID } from "node:crypto";
 import { copyFile, constants } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -42,6 +43,7 @@ export function summary(bundle: Bundle) {
 export class TransferSession {
   private readonly plans = new Map<string, Pending>();
   private busy = false;
+  private activeOperationId: string | undefined;
   private preparing = 0;
   private closed = false;
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -147,7 +149,7 @@ export class TransferSession {
     expiryTimer.unref();
     this.expiryTimers.set(planId, expiryTimer);
     return {
-      planId, expiresAt: new Date(expires).toISOString(), operation: input.operation,
+      planId, operationId: planId, expiresAt: new Date(expires).toISOString(), operation: input.operation,
       source: { app: from?.name ?? "jetpack", agent: agent ?? bundle.manifest.name,
         path: input.path ? resolve(ctx.cwd, input.path) : ctx.sourceDir ?? null },
       destination: { app: to?.name ?? "jetpack", path: out ?? ctx.targetDir ?? null,
@@ -167,6 +169,27 @@ export class TransferSession {
 
   cancel(planId: string) { return { cancelled: this.discard(planId) }; }
 
+  async operationStatus(operationId: string) {
+    try {
+      const receipt = await readReceipt(this.ctx.home, operationId);
+      return {
+        ...receipt,
+        execution: receipt.state === "started"
+          ? this.activeOperationId === operationId ? "in_progress" : "unknown"
+          : receipt.state,
+        guidance: receipt.state === "started" || receipt.state === "needs_review"
+          ? "Completion is not proven. Inspect the destination before preparing another transfer; do not replay automatically."
+          : receipt.state === "not_applied"
+            ? "The destination writer was not invoked. Correct the problem and prepare a new preview."
+            : receipt.result?.outcome === "handoff"
+              ? "The transfer produced a handoff. Read the saved report for the remaining step."
+              : "The engine reported completion. Read the saved report for approximations and skipped fields.",
+      };
+    } catch {
+      throw new UsageError("Operation receipt was not found or could not be read safely.");
+    }
+  }
+
   async apply(planId: string, confirmed: boolean) {
     if (this.closed) throw new UsageError("Session is closed.");
     if (!confirmed) throw new UsageError("Review the plan with the user before applying.");
@@ -179,8 +202,28 @@ export class TransferSession {
     // Consume before starting: retries must never replay a partly completed write.
     this.discard(planId);
     this.busy = true;
+    let destinationWriteStarted = false;
+    let receiptPath: string | undefined;
+    const { input, bundle, ctx, from, to, agent, identity, warnings } = pending;
+    let receipt: Receipt = {
+      schemaVersion: 1, operationId: planId, operation: input.operation, state: "started",
+      startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      source: { app: from?.name ?? "jetpack", agent: agent ?? bundle.manifest.name },
+      destination: { app: to?.name ?? "jetpack", path: input.out ?? ctx.targetDir ?? null, cwd: ctx.cwd },
+    };
     try {
-      const { input, bundle, ctx, from, to, agent, identity, warnings } = pending;
+      try { receiptPath = await writeReceipt(ctx.home, receipt, true); }
+      catch {
+        throw new UsageError("Cannot record the transfer before writing. The destination was not changed. Check the OpenTeleport home and prepare a new preview.");
+      }
+      this.activeOperationId = planId;
+      const trackedTarget: Adapter | undefined = to ? {
+        ...to,
+        write: async (targetCtx, data, options) => {
+          destinationWriteStarted = true;
+          return to.write(targetCtx, data, options);
+        },
+      } : undefined;
       const write: WriteOpts = {
         onConflict: input.onConflict ?? "update",
         enableRoutines: input.enableRoutines === true, includeFiles: input.includeFiles === true,
@@ -199,18 +242,51 @@ export class TransferSession {
           ({ report } = await exportBundle({
             from: snapshot!, agent: agent!, ctx, out: archive, includeFiles: write.includeFiles,
           }));
+          destinationWriteStarted = true;
           await promisify(copyFile)(archive, input.out!, constants.COPYFILE_EXCL);
         } finally { await rm(temporary, { recursive: true, force: true }); }
       } else if (input.operation === "move") {
-        report = await move({ from: snapshot!, to: to!, agent: agent!, ctx, write });
+        report = await move({ from: snapshot!, to: trackedTarget!, agent: agent!, ctx, write });
       } else {
-        report = await importBundle({ to: to!, bundle, ctx, write });
+        report = await importBundle({ to: trackedTarget!, bundle, ctx, write });
       }
       let reportPath: string | undefined;
       try { reportPath = await saveReport(report, ctx.home, bundle.manifest.name); }
       catch { report.warnings.push("Transfer completed, but its report could not be saved; retain this result."); }
-      return { ...report, ...(reportPath ? { reportPath } : {}),
+      receipt = {
+        ...receipt, state: "completed", updatedAt: new Date().toISOString(),
+        result: {
+          outcome: report.outcome,
+          ...(report.nextStep ? { nextStep: report.nextStep } : {}),
+          ...(report.target?.agent ? { targetAgentId: report.target.agent } : {}),
+          ...(reportPath ? { reportPath } : {}),
+          ...(input.out ? { artifactPath: input.out } : {}),
+        },
+      };
+      let receiptSaved = true;
+      try { await writeReceipt(ctx.home, receipt); }
+      catch {
+        receiptSaved = false;
+        report.warnings.push("Transfer completed, but its receipt could not be finalized. Retain this result; a later status query may be inconclusive.");
+      }
+      return { ...report, operationId: planId, receiptPath, receiptSaved,
+        ...(reportPath ? { reportPath } : {}),
         ...(input.out ? { artifactPath: input.out } : {}) };
-    } finally { this.busy = false; }
+    } catch (error) {
+      if (!receiptPath) throw error;
+      const code = (error as NodeJS.ErrnoException)?.code;
+      const errorCode = ["EACCES", "EPERM", "ENOENT", "ENOSPC", "EEXIST", "ETIMEDOUT"].includes(code ?? "")
+        ? code as NonNullable<Receipt["errorCode"]> : "TRANSFER_FAILED";
+      receipt = {
+        ...receipt, state: destinationWriteStarted ? "needs_review" : "not_applied",
+        updatedAt: new Date().toISOString(), errorCode,
+      };
+      let receiptSaved = true;
+      try { await writeReceipt(ctx.home, receipt); } catch { receiptSaved = false; }
+      throw new ApplyFailedError(receipt, receiptPath, receiptSaved);
+    } finally {
+      this.activeOperationId = undefined;
+      this.busy = false;
+    }
   }
 }
