@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: npm ci
+      - run: npm run check:plugin-versions
       - run: npm run lint
       - run: npm run build
       - run: npm test
