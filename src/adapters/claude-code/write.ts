@@ -1,23 +1,16 @@
-import {
-  appendFile,
-  lstat,
-  mkdir,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Item } from "../../core/report.js";
-import { isReservedDeviceName, isSafeArchivePath } from "../../core/paths.js";
-import type { Bundle, Manifest, Skill } from "../../core/schema.js";
-import { factsToProse, mergeInstructions } from "../../core/text.js";
+import type { Bundle, Manifest } from "../../core/schema.js";
+import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
+import { isSafeName, lstatIfAny, readTextIfAny } from "../fs.js";
+import { type AgentIds, readIds, recordId } from "../marker.js";
+import { freeName, recordedCopy } from "../names.js";
+import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudePaths } from "./paths.js";
 
-const MAX_SLUG_CHARS = 64;
 const MAX_DESCRIPTION_CHARS = 120;
 const MEMORY_FILE = "MEMORY.md";
 /**
@@ -35,43 +28,7 @@ type Items = WriteResult["items"];
  * a Windows device name such as `con` gets `-agent`.
  */
 export function agentSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "") return "agent";
-  return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
-}
-
-/** A name that is one safe path segment: it cannot reach outside the directory it is put in. */
-const isSafeName = (name: string): boolean => isSafeArchivePath(name) && !name.includes("/");
-
-/** Cuts `text` to `max` characters, the last one an ellipsis. */
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is. */
-async function lstatOf(path: string) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-/**
- * `<base><ext>` in `dir`, or the first of `<base>-2<ext>`, `<base>-3<ext>`... that is free. A
- * link, even a broken one, takes its name.
- */
-async function freeName(dir: string, base: string, ext: string): Promise<string> {
-  let name = base;
-  for (let n = 2; (await lstatOf(join(dir, `${name}${ext}`))) !== undefined; n += 1) {
-    name = `${base}-${n}`;
-  }
-  return name;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-agent" });
 }
 
 /** The first sentence of the instructions' prose, headings and list markers left out. */
@@ -95,28 +52,6 @@ function toolsOf(manifest: Manifest): string[] | undefined {
 }
 
 /**
- * The `<base>-N` stem that `ids` records for the agent with `id`, the lowest N first, when its
- * file is not a link; `undefined` when there is none.
- */
-async function recordedCopy(
-  dir: string,
-  base: string,
-  id: string,
-  ids: AgentIds,
-): Promise<string | undefined> {
-  const prefix = `${base}-`;
-  const copies = Object.entries(ids)
-    .filter(([slug, recorded]) => recorded === id && slug.startsWith(prefix))
-    .map(([slug]) => ({ slug, n: slug.slice(prefix.length) }))
-    .filter(({ n }) => /^[1-9]\d*$/.test(n) && Number(n) >= 2)
-    .sort((a, b) => Number(a.n) - Number(b.n));
-  for (const { slug } of copies) {
-    if (!(await lstatOf(join(dir, `${slug}.md`)))?.isSymbolicLink()) return slug;
-  }
-  return undefined;
-}
-
-/**
  * The stem of the agent file to write. A free `<slug>.md` is taken. When it is taken, `copy`
  * goes to the first free `<slug>-2.md`, `<slug>-3.md`...; a link is never written through, so it
  * gets a name of its own in every mode; `replace` writes over the file; and `update` writes
@@ -132,7 +67,7 @@ async function agentFileSlug(
   items: Items,
 ): Promise<string> {
   const base = agentSlug(bundle.manifest.name);
-  const existing = await lstatOf(join(dir, `${base}.md`));
+  const existing = await lstatIfAny(join(dir, `${base}.md`));
   if (existing === undefined) return base;
 
   if (opts.onConflict === "copy") {
@@ -153,7 +88,7 @@ async function agentFileSlug(
   const { id } = bundle.manifest;
   if (id !== "" && ids[base] === id) return base;
   // An earlier move may already have given this agent a `-N` file of its own: update that one.
-  const own = id === "" ? undefined : await recordedCopy(dir, base, id, ids);
+  const own = id === "" ? undefined : await recordedCopy(dir, base, ".md", id, ids);
   if (own !== undefined) return own;
   const slug = await freeName(dir, base, ".md");
   items.warnings.push(`agent '${base}' already exists; written as '${slug}'`);
@@ -212,85 +147,6 @@ async function writeAgentFile(
   return { slug, path };
 }
 
-/**
- * True when the real directory `dir` holds exactly the files of `skill`, byte for byte. A link
- * anywhere below it, or any other special file, makes it different: links are never followed.
- */
-async function holdsSkill(dir: string, skill: Skill): Promise<boolean> {
-  const found = new Map<string, string>();
-  async function walk(current: string, prefix: string): Promise<boolean> {
-    // Dirent types come from lstat, so a link is neither a file nor a directory here.
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
-      const absolute = join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (!(await walk(absolute, path))) return false;
-      } else if (entry.isFile()) {
-        found.set(path, absolute);
-      } else {
-        return false;
-      }
-    }
-    return true;
-  }
-  if (!(await walk(dir, "")) || found.size !== skill.files.length) return false;
-  for (const file of skill.files) {
-    const absolute = found.get(file.path);
-    if (absolute === undefined || !(await readFile(absolute)).equals(file.bytes)) return false;
-  }
-  return true;
-}
-
-/**
- * The folder name to write `skill` under, or `undefined` to reuse a folder that already holds
- * it. `<name>`, then `<name>-2`, `<name>-3`... are tried in order: the first real folder with the
- * same files and bytes is reused, else the first free name is returned, with a warning when it
- * is not `<name>`. Skills belong to the whole project, so a folder that differs is never
- * removed, whatever the conflict mode: `replace` only replaces the agent. A link (symbolic link
- * or junction) is never followed: it counts as a taken name that differs.
- */
-async function placeSkill(dir: string, skill: Skill, items: Items): Promise<string | undefined> {
-  for (let n = 1; ; n += 1) {
-    const name = n === 1 ? skill.name : `${skill.name}-${n}`;
-    const path = join(dir, name);
-    const existing = await lstatOf(path);
-    if (existing === undefined) {
-      if (name !== skill.name) {
-        items.warnings.push(
-          `skill '${skill.name}' already exists with different content; written as '${name}'`,
-        );
-      }
-      return name;
-    }
-    // lstat: a symbolic link or junction is never a directory here.
-    if (!existing.isDirectory()) continue;
-    if (await holdsSkill(path, skill)) return undefined;
-  }
-}
-
-/**
- * Skills go to `<project>/.claude/skills/<name>/`, where the whole project shares them, so one
- * that is already there is reused rather than written again (see `placeSkill`).
- */
-async function writeSkills(dir: string, bundle: Bundle, items: Items) {
-  for (const skill of bundle.skills) {
-    if (!isSafeName(skill.name) || skill.files.some((file) => !isSafeArchivePath(file.path))) {
-      items.skipped.push({
-        field: `skill:${skill.name}`,
-        detail: "its name or a file path is not safe to write",
-      });
-      continue;
-    }
-    const name = await placeSkill(dir, skill, items);
-    if (name === undefined) continue;
-    for (const file of skill.files) {
-      const path = join(dir, name, ...file.path.split("/"));
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, file.bytes);
-    }
-  }
-}
-
 /** The facts `MEMORY.md` already holds: its `- ` lines, as `readAgent` reads them. */
 function factsIn(memory: string): Set<string> {
   const facts = new Set<string>();
@@ -299,15 +155,6 @@ function factsIn(memory: string): Set<string> {
     if (trimmed.startsWith("- ")) facts.add(trimmed.slice(2).trim());
   }
   return facts;
-}
-
-async function readText(path: string): Promise<string> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw error;
-  }
 }
 
 /** A skipped item for a memory file that is a link: it is never written through. */
@@ -354,14 +201,14 @@ async function appendMemory(
 ) {
   if (facts.length === 0 && links.length === 0) return;
   const path = join(memoryDir, MEMORY_FILE);
-  if ((await lstatOf(path))?.isSymbolicLink()) {
+  if ((await lstatIfAny(path))?.isSymbolicLink()) {
     if (facts.length > 0) items.skipped.push(linkedMemory("memory.facts", path));
     if (links.length > 0) {
       items.warnings.push(`${path} is a symlink; the imported notes are not linked from it`);
     }
     return;
   }
-  const existing = await readText(path);
+  const existing = (await readTextIfAny(path)) ?? "";
   const known = factsIn(existing);
   const fresh: string[] = [];
   for (const bullet of [...facts.map((fact) => factsToProse([fact]).slice(2)), ...links]) {
@@ -401,7 +248,7 @@ async function writeNotes(
       continue;
     }
     const path = join(memoryDir, name);
-    if ((await lstatOf(path))?.isSymbolicLink()) {
+    if ((await lstatIfAny(path))?.isSymbolicLink()) {
       items.skipped.push(linkedMemory(`note:${note.name}`, path));
       continue;
     }
@@ -427,63 +274,9 @@ function unsupported(bundle: Bundle, opts: WriteOpts): Item[] {
   return skipped;
 }
 
-/** Agent slug → manifest id, as `IDS_FILE` holds it. */
-export type AgentIds = Record<string, string>;
-
 /** Where the ids of a project's agents are recorded: beside its memory directory. */
 export function idsFileOf(paths: ClaudePaths): string {
   return join(dirname(paths.memoryDir(paths.projectDir)), IDS_FILE);
-}
-
-/**
- * The ids recorded for a project. A missing file records none, and so does one that is not a
- * JSON object: it is replaced on the next write, which costs only an update that becomes a copy.
- * Any other read error is thrown before anything is written.
- */
-export async function readIds(path: string): Promise<AgentIds> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    return {};
-  }
-  if (typeof json !== "object" || json === null || Array.isArray(json)) return {};
-  return Object.fromEntries(
-    Object.entries(json).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
-    ),
-  );
-}
-
-/**
- * Records that `<slug>.md` holds the agent with `id`, keeping what was recorded for the other
- * slugs. The file is replaced in one step through a temporary sibling, so it is never left half
- * written and a link in its place is replaced rather than written through. A failure only costs
- * a later in-place update, so it becomes a warning.
- */
-async function recordId(path: string, slug: string, id: string, items: Items): Promise<void> {
-  if (id === "") return;
-  const temporary = `${path}.${process.pid}-${Date.now()}.tmp`;
-  try {
-    const ids = { ...(await readIds(path)), [slug]: id };
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporary, `${JSON.stringify(ids, null, 2)}
-`, "utf8");
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    items.warnings.push(
-      `could not record the agent's id in ${path} (${(error as Error).message}); a later move ` +
-        "will write a copy instead of updating it",
-    );
-  }
 }
 
 /**
@@ -502,7 +295,7 @@ export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Pro
 
   const ids = await readIds(idsFile);
   const agent = await writeAgentFile(paths.projectAgents, bundle, opts, ids, items);
-  await writeSkills(paths.projectSkills, bundle, items);
+  await writeSkills(paths.projectSkills, bundle.skills, items);
   const links = await writeNotes(memoryDir, agent.slug, bundle, items);
   await appendMemory(memoryDir, bundle.facts, links, items);
   items.skipped.push(...unsupported(bundle, opts));

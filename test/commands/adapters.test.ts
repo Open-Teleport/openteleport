@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("adapters", () => {
-  it("prints one row per adapter: the three built in, then the extra one", async () => {
+  it("prints one row per adapter: the built-in ones, then the extra one", async () => {
     const result = await run(box, ["adapters"]);
     expect(result.exitCode).toBe(0);
     const names = result.stdout
@@ -29,7 +29,17 @@ describe("adapters", () => {
       .slice(1)
       .filter((line) => line.trim() !== "")
       .map((line) => line.split(/\s+/)[0]);
-    expect(names).toEqual(["folder", "openclaw", "claude-code", "memory"]);
+    expect(names).toEqual([
+      "folder",
+      "openclaw",
+      "claude-code",
+      "hermes",
+      "codex",
+      "openbot",
+      "grok-bot",
+      "letta",
+      "memory",
+    ]);
     const [header] = result.stdout.split(/\r?\n/);
     expect(header).toMatch(/^name\s+app\s+found\s+version\s+location\s+hint$/);
   });
@@ -38,14 +48,24 @@ describe("adapters", () => {
     const result = await run(box, ["adapters", "--json"]);
     expect(result.exitCode).toBe(0);
     const rows = json<Record<string, unknown>[]>(result);
-    expect(rows.map((row) => row.name)).toEqual(["folder", "openclaw", "claude-code", "memory"]);
+    expect(rows.map((row) => row.name)).toEqual([
+      "folder",
+      "openclaw",
+      "claude-code",
+      "hermes",
+      "codex",
+      "openbot",
+      "grok-bot",
+      "letta",
+      "memory",
+    ]);
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual(
         ["displayName", "found", "hint", "location", "name", "version"].sort(),
       );
       expect(typeof row.found).toBe("boolean");
     }
-    expect(rows[3]).toEqual({
+    expect(rows[8]).toEqual({
       name: "memory",
       displayName: "In-memory memory",
       found: true,
@@ -53,9 +73,37 @@ describe("adapters", () => {
       version: null,
       hint: null,
     });
-    // Nothing of OpenClaw or Claude Code lives in the sandbox home.
-    expect(rows[1]).toMatchObject({ found: false, hint: expect.any(String) });
-    expect(rows[2]).toMatchObject({ found: false, hint: expect.any(String) });
+    // Nothing of OpenClaw, Claude Code, Hermes, Codex, OpenBot or Letta Code lives in the sandbox
+    // home, and Grok Bot has no home at all: it is found only through a zip.
+    expect(rows[1]).toMatchObject({ name: "openclaw", found: false, hint: expect.any(String) });
+    expect(rows[2]).toMatchObject({ name: "claude-code", found: false, hint: expect.any(String) });
+    expect(rows[3]).toMatchObject({
+      name: "hermes",
+      displayName: "Hermes Agent",
+      found: false,
+      hint: "Install Hermes Agent or pass --source-dir <HERMES_HOME>",
+    });
+    expect(rows[4]).toMatchObject({ name: "codex", found: false, hint: expect.any(String) });
+    expect(rows[5]).toMatchObject({
+      name: "openbot",
+      displayName: "OpenBot",
+      found: false,
+      hint: expect.stringContaining("pass --source-dir <export.zip>"),
+    });
+    expect(rows[6]).toEqual({
+      name: "grok-bot",
+      displayName: "Grok Bot",
+      found: false,
+      location: null,
+      version: null,
+      hint: "Grok Bot keeps agents in the cloud. Ask your Bot to run the OpenBot export skill, then run: openteleport list --from grok-bot --source-dir <openbot-export-*.zip>",
+    });
+    expect(rows[7]).toMatchObject({
+      name: "letta",
+      displayName: "Letta Code",
+      found: false,
+      hint: expect.stringContaining("npm i -g @letta-ai/letta-code"),
+    });
   });
 
   it("lists only the built-in adapters without an extra one", async () => {
@@ -65,6 +113,11 @@ describe("adapters", () => {
       "folder",
       "openclaw",
       "claude-code",
+      "hermes",
+      "codex",
+      "openbot",
+      "grok-bot",
+      "letta",
     ]);
   });
 });

@@ -34,7 +34,9 @@ export type WriteResult = {
    * Only what the adapter itself approximated, skipped or wants to warn about. What the engine
    * stripped before `write` (fields the capabilities mark `false`, routines with a schedule kind
    * not in `schedules`, `files` without `includeFiles`) is already in the report and is never
-   * reported again here.
+   * reported again here. A skipped item names a field of the report (`memory.facts`) or one part
+   * of it as `<prefix>:<name>` (`skill:web-brief`, `routine:Daily`, `note:diary`, and `fact:<n>`
+   * for the n-th fact, counted from 1); the engine then does not list what was skipped as moved.
    */
   items: { approximated: Item[]; skipped: Item[]; warnings: string[] };
 };
@@ -68,6 +70,18 @@ export type Adapter = {
   name: string;
   displayName: string;
   capabilities: AdapterCapabilities;
+  /**
+   * `true`: `write` creates its target (a file or a folder), so the app need not be installed on
+   * the target side and `detect` is not asked about it. Left out or `false`, a target that
+   * `detect` does not find ends the command with exit code 3. A source is always checked.
+   */
+  createsOnWrite?: boolean;
+  /**
+   * `true`: `write` never finishes the move itself. It prepares a file or a folder and returns
+   * `outcome: "handoff"` with the one step left to the user, so the wizard says so before it asks
+   * for a go-ahead. Left out or `false`, a `write` that succeeds is `done`.
+   */
+  handoff?: boolean;
   detect(ctx: Ctx): Promise<{ found: boolean; location?: string; version?: string; hint?: string }>;
   list(ctx: Ctx): Promise<AgentRef[]>;
   /** Never modifies the source. */

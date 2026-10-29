@@ -11,7 +11,7 @@ import { UnknownAdapterError, listAdapters, registerAdapter } from "../adapters/
 import type { Adapter, AgentRef, Ctx, WriteOpts } from "../adapters/types.js";
 import { SecretsFoundError } from "../core/engine.js";
 import { readBundle } from "../core/bundle.js";
-import { isReservedDeviceName } from "../core/paths.js";
+import { oneLine, slugify } from "../core/text.js";
 import { type MoveReport, renderReportMarkdown, renderReportTerminal } from "../core/report.js";
 import type { Bundle } from "../core/schema.js";
 import type { SecretFinding } from "../core/secrets.js";
@@ -97,11 +97,13 @@ export function reportFailure(error: unknown, json: boolean): void {
 
 /**
  * For the `error` event of stdout and stderr: a reader that went away (`| head`) ends the
- * program quietly with 0, never with a stack trace; any other error is thrown on.
+ * program quietly, never with a stack trace; any other error is thrown on. The exit code is the
+ * one the command has set (`process.exitCode`), 0 when it has set none: a reader that leaves
+ * early does not turn a failure into a success.
  */
 export function exitOnBrokenPipe(error: NodeJS.ErrnoException): void {
   if (error.code !== "EPIPE") throw error;
-  process.exit(0);
+  process.exit();
 }
 
 export function writeOut(text: string): void {
@@ -110,14 +112,6 @@ export function writeOut(text: string): void {
 
 export function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-/**
- * Text from an app squeezed onto one line: a line break or a control character (an ANSI escape
- * included) in an agent's name must not break a table or drive the terminal.
- */
-export function oneLine(text: string): string {
-  return text.replace(/[\p{Cc}\s]+/gu, " ").trim();
 }
 
 /** Rows under a header, each column as wide as its widest cell, two spaces apart. */
@@ -142,7 +136,8 @@ const useColor = (): boolean => process.stdout.isTTY === true && !process.env.NO
 /**
  * The outcome of an export, import or move. With `--json` stdout carries only the report, and
  * the report file is mentioned on stderr unless `--quiet`. Otherwise the report is printed, then
- * where its file went (unless `--quiet`), then, for a hand-over, the step left to the user.
+ * where its file went (unless `--quiet`). The step a hand-over leaves to the user is part of the
+ * report (its `Next step` line), so it is said once.
  */
 export function printReport(report: MoveReport, opts: CommonOptions, reportPath: string): void {
   const written = `Report written to ${reportPath}`;
@@ -153,9 +148,6 @@ export function printReport(report: MoveReport, opts: CommonOptions, reportPath:
   }
   const lines = [renderReportTerminal(report, { color: useColor() }), ""];
   if (opts.quiet !== true) lines.push(written);
-  if (report.outcome === "handoff" && report.nextStep !== undefined) {
-    lines.push(`Next step: ${oneLine(report.nextStep)}`);
-  }
   writeOut(lines.join("\n").trimEnd());
 }
 
@@ -164,18 +156,9 @@ export function printReport(report: MoveReport, opts: CommonOptions, reportPath:
 /** What `inspect` and `validate` say about an agent folder that holds no `jetpack.json`. */
 export const NO_MANIFEST_WARNING = "no jetpack.json; manifest would be synthesized";
 
-const MAX_SLUG_CHARS = 64;
-
 /** A file name made from an agent's name: `Ada Lovelace` → `ada-lovelace`. */
 export function fileSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "") return "agent";
-  return isReservedDeviceName(slug) ? `${slug}-agent` : slug;
+  return slugify(name, { fallback: "agent", deviceSuffix: "-agent" });
 }
 
 /**
@@ -282,23 +265,27 @@ export function boundTo(adapter: Adapter, ctx: Ctx): Adapter {
 // -- Adapters -------------------------------------------------------------------------------
 
 /**
- * A folder target is created when the agent is written, so a folder adapter that finds no agent
- * there yet does not mean an app is missing; its `detect` only answers for a source.
+ * Exit code 3, with the adapter's hint, when the app is not there. A target that
+ * `createsOnWrite` is created when the agent is written, so that no app is found there does not
+ * mean one is missing (the folder adapter's `detect` only answers for a source); it is not asked.
  */
-const CREATED_ON_WRITE: ReadonlySet<string> = new Set(["folder"]);
-
-/** Exit code 3, with the adapter's hint, when the app is not there. */
 export async function ensureDetected(
   adapter: Adapter,
   ctx: Ctx,
   side: "source" | "target",
 ): Promise<void> {
-  if (side === "target" && CREATED_ON_WRITE.has(adapter.name)) return;
+  if (side === "target" && adapter.createsOnWrite === true) return;
   const { found, location, hint } = await adapter.detect(ctx);
   if (found) return;
   const where = location === undefined ? "" : ` at ${location}`;
+  // Adapters word their hint for a source. A target is pointed to with `--target-dir`, and
+  // `--source-dir` changes nothing there (see `sideOf`), so a target is told so.
+  const advice =
+    side === "target" && hint?.includes("--source-dir") === true
+      ? `${hint} (as a target, pass --target-dir in place of --source-dir)`
+      : hint;
   throw new NotDetectedError(
-    `${adapter.displayName} was not detected${where}${hint === undefined ? "" : `. ${hint}`}`,
+    `${adapter.displayName} was not detected${where}${advice === undefined ? "" : `. ${advice}`}`,
   );
 }
 
@@ -385,9 +372,13 @@ class CancelledError extends Error {
   }
 }
 
+/** True when both ends, stdin and stdout, are a terminal. */
+export const hasTerminal = (): boolean =>
+  process.stdin.isTTY === true && process.stdout.isTTY === true;
+
 /** Prompts only when both ends are a terminal, and never under `--json`, which is for scripts. */
 export function isInteractive(opts: CommonOptions): boolean {
-  return opts.json !== true && process.stdin.isTTY === true && process.stdout.isTTY === true;
+  return opts.json !== true && hasTerminal();
 }
 
 const describeAgent = ({ id, name }: AgentRef): string =>

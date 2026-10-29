@@ -16,12 +16,19 @@ import {
   writeOptsOf,
 } from "./shared.js";
 
-export type ImportOptions = CommonOptions & WriteFlags & { to: string };
+export type ImportOptions = CommonOptions &
+  WriteFlags & {
+    /** Default: `folder`, a folder named after the agent in the working directory. */
+    to?: string;
+  };
 
-/** `import --to <adapter> <file.jetpack|folder>`: writes the bundle into the app. */
+/**
+ * `import --to <adapter> <file.jetpack|folder>`: writes the bundle into the app, by default
+ * into a folder of its own in the working directory.
+ */
 export async function importCommand(source: string, opts: ImportOptions): Promise<void> {
   const onConflict = conflictMode(opts);
-  const to = getAdapter(opts.to);
+  const to = getAdapter(opts.to ?? "folder");
   const { path, isDirectory } = await existingPath(source);
   const ctx = sideOf(buildCtx(opts), "target");
   await ensureDetected(to, ctx, "target");

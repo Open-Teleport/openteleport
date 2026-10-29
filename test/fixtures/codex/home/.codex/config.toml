@@ -1,0 +1,8 @@
+# Codex user configuration. Values are invented for the test.
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+approval_policy = "on-request"
+
+[mcp_servers.x]
+command = "npx"
+args = ["-y", "example-mcp-server"]

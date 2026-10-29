@@ -1,20 +1,24 @@
-import type { Dirent, Stats } from "node:fs";
-import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { splitFrontmatter } from "../../core/frontmatter.js";
 import { MAX_AVATAR_BYTES, MAX_FACT_CHARS, isForbiddenPath } from "../../core/paths.js";
 import { fromOpenClawJob } from "../../core/schedule.js";
 import {
   type Bundle,
   type Capability,
-  type FileEntry,
   type Manifest,
   type ModelPref,
   type Note,
   type Routine,
   RoutineSchema,
   type Skill,
+  ULID_PATTERN,
 } from "../../core/schema.js";
+import { byCodeUnit, errorLine } from "../../core/text.js";
+import { isRecord, nonBlank } from "../../core/values.js";
+import { entriesOf, isNotFound, lstatIfAny, readTextIfAny } from "../fs.js";
+import { readMarker } from "../marker.js";
+import { type SkillMessages, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli } from "./cli.js";
 import {
@@ -40,43 +44,11 @@ const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declar
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 const MEMORY_PROSE_NOTE = "MEMORY-prose";
 const USER_NOTE = "USER";
-/** Left in a workspace by the write side, with the manifest id of the agent it wrote there. */
-const MARKER_FILE = ".openteleport.json";
-/** Same rule as the manifest `id` in `schema.ts`. */
-const ULID_PATTERN = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 
 const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const AVATAR_EXTENSIONS: ReadonlySet<string> = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const SCHEDULE_KINDS: ReadonlySet<string> = new Set(["cron", "every", "at"]);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-empty string, or `undefined`. */
-function label(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
-const errorLine = (error: unknown): string =>
-  (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]?.trim() ?? "";
-
-const isNotFound = (error: unknown): boolean => {
-  const code = (error as NodeJS.ErrnoException).code;
-  return code === "ENOENT" || code === "ENOTDIR";
-};
-
-/** `lstat`, or `undefined` when nothing is there. Symbolic links are not followed. */
-async function lstatIfAny(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  }
-}
 
 /** Whether `path` is `root` itself or below it; both absolute. */
 function isWithin(root: string, path: string): boolean {
@@ -88,34 +60,11 @@ function isWithin(root: string, path: string): boolean {
 const toBytes = (buffer: Buffer): Uint8Array =>
   new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
-// Plain code-unit order, so that the result does not depend on the locale.
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-async function readText(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isNotFound(error)) return undefined;
-    throw error;
-  }
-}
-
 async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory();
   } catch (error) {
     if (isNotFound(error)) return false;
-    throw error;
-  }
-}
-
-/** The entries of a directory sorted by name; none when it does not exist. */
-async function listDirectory(path: string): Promise<Dirent[]> {
-  try {
-    const entries = await readdir(path, { withFileTypes: true });
-    return entries.sort((a, b) => compare(a.name, b.name));
-  } catch (error) {
-    if (isNotFound(error)) return [];
     throw error;
   }
 }
@@ -145,7 +94,7 @@ function parseIdentityFile(text: string): OpenClawIdentity {
   for (const line of text.split(/\r?\n/)) {
     const match = IDENTITY_LINE.exec(line);
     const key = match?.[1] === undefined ? undefined : IDENTITY_KEYS.get(match[1].toLowerCase());
-    const value = label(match?.[2]);
+    const value = nonBlank(match?.[2]);
     if (key !== undefined && value !== undefined && !PLACEHOLDER.test(value)) {
       identity[key] ??= value;
     }
@@ -161,7 +110,7 @@ function mergeIdentity(
   const config = isRecord(fromConfig) ? fromConfig : {};
   const merged: OpenClawIdentity = {};
   for (const key of ["name", "theme", "emoji", "avatar"] as const) {
-    const value = label(config[key]) ?? fromFile[key];
+    const value = nonBlank(config[key]) ?? fromFile[key];
     if (value !== undefined) merged[key] = value;
   }
   return Object.keys(merged).length > 0 ? merged : undefined;
@@ -181,7 +130,7 @@ async function readProfile(
 ): Promise<Profile> {
   const entry = entryOf(cfg, agentId);
   const workspace = paths.workspaceFor(agentId, cfg);
-  const file = await readText(join(workspace, "IDENTITY.md"));
+  const file = await readTextIfAny(join(workspace, "IDENTITY.md"));
   const identity = mergeIdentity(entry.identity, file === undefined ? {} : parseIdentityFile(file));
   return {
     workspace,
@@ -192,7 +141,7 @@ async function readProfile(
 }
 
 const agentName = (agentId: string, { entry, identity }: Profile): string =>
-  identity?.name ?? label(entry.name) ?? agentId;
+  identity?.name ?? nonBlank(entry.name) ?? agentId;
 
 /** Cuts `value` to `max` UTF-16 units, never through a surrogate pair, and says so. */
 function clip(value: string, max: number, field: string, warnings: string[]): string {
@@ -206,7 +155,7 @@ function clip(value: string, max: number, field: string, warnings: string[]): st
 // -- Models ------------------------------------------------------------------------------------
 
 function modelPref(ref: unknown): ModelPref | undefined {
-  const text = label(ref);
+  const text = nonBlank(ref);
   if (text === undefined) return undefined;
   const slash = text.indexOf("/");
   if (slash <= 0 || slash === text.length - 1) return { model: text };
@@ -221,7 +170,7 @@ function modelsFor(entry: OpenClawAgentEntry): ModelPref[] {
     : [model];
   const models = refs.flatMap((ref) => modelPref(ref) ?? []);
   const runtime: unknown = entry.runtime;
-  const acp = isRecord(runtime) && isRecord(runtime.acp) ? label(runtime.acp.agent) : undefined;
+  const acp = isRecord(runtime) && isRecord(runtime.acp) ? nonBlank(runtime.acp.agent) : undefined;
   if (acp === undefined) return models;
   const [first, ...rest] = models;
   return [{ runtime: acp, ...first }, ...rest];
@@ -240,7 +189,7 @@ async function readMemory(
   const facts: string[] = [];
   const prose: string[] = [];
   const warnings: string[] = [];
-  const memory = (await readText(join(workspace, "MEMORY.md"))) ?? "";
+  const memory = (await readTextIfAny(join(workspace, "MEMORY.md"))) ?? "";
   memory.split(/\r?\n/).forEach((line, index) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
@@ -263,11 +212,11 @@ async function readMemory(
 
   const notes: Note[] = [];
   if (prose.length > 0) notes.push({ name: MEMORY_PROSE_NOTE, text: prose.join("\n") });
-  const user = await readText(join(workspace, "USER.md"));
+  const user = await readTextIfAny(join(workspace, "USER.md"));
   if (user !== undefined) notes.push({ name: USER_NOTE, text: user });
 
   const memoryDir = join(workspace, "memory");
-  for (const dirent of await listDirectory(memoryDir)) {
+  for (const dirent of await entriesOf(memoryDir)) {
     if (!dirent.isFile() || !/\.md$/i.test(dirent.name)) continue;
     const name = dirent.name.slice(0, -".md".length);
     if (notes.some((note) => note.name === name)) {
@@ -276,7 +225,7 @@ async function readMemory(
     }
     notes.push({ name, text: await readFile(join(memoryDir, dirent.name), "utf8") });
   }
-  notes.sort((a, b) => compare(a.name, b.name));
+  notes.sort((a, b) => byCodeUnit(a.name, b.name));
   return { facts, notes, warnings };
 }
 
@@ -284,44 +233,25 @@ async function readMemory(
 
 const SKILL_FILE = "SKILL.md";
 
+const leftOutOfSkill: SkillMessages["leftOut"] = (skill, path, why) =>
+  why === "forbidden"
+    ? `skill '${skill}': left out ${path}`
+    : `skill '${skill}': left out ${path} (not a regular file)`;
+
+/** OpenClaw's words for what is left out of a skill; a link below it is not a regular file. */
+const SKILL_MESSAGES: SkillMessages = {
+  link: (skill, path = "") =>
+    leftOutOfSkill(skill, path, isForbiddenPath(path) ? "forbidden" : "special"),
+  leftOut: leftOutOfSkill,
+};
+
 /** The `name` in a SKILL.md frontmatter block, if there is one. */
 function frontmatterName(bytes: Uint8Array): string | undefined {
-  const text = new TextDecoder().decode(bytes);
-  const block = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1];
-  if (block === undefined) return undefined;
   try {
-    const data: unknown = parseYaml(block);
-    return isRecord(data) ? label(data.name) : undefined;
+    return nonBlank(splitFrontmatter(new TextDecoder().decode(bytes)).data.name);
   } catch {
     return undefined;
   }
-}
-
-/**
- * Every file of a skill directory except SKILL.md, sorted by path. Paths that never go into an
- * archive (`.env*`, `node_modules`, `.git`, nested archives) and anything that is not a regular
- * file or directory are left out, with a warning.
- */
-async function skillFiles(dir: string, skill: string, warnings: string[]): Promise<FileEntry[]> {
-  const files: FileEntry[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    for (const dirent of await listDirectory(current)) {
-      const path = prefix === "" ? dirent.name : `${prefix}/${dirent.name}`;
-      if (path === SKILL_FILE) continue;
-      const absolute = join(current, dirent.name);
-      if (isForbiddenPath(dirent.name)) {
-        warnings.push(`skill '${skill}': left out ${path}`);
-      } else if (dirent.isDirectory()) {
-        await walk(absolute, path);
-      } else if (dirent.isFile()) {
-        files.push({ path, bytes: toBytes(await readFile(absolute)) });
-      } else {
-        warnings.push(`skill '${skill}': left out ${path} (not a regular file)`);
-      }
-    }
-  }
-  await walk(dir, "");
-  return files.sort((a, b) => compare(a.path, b.path));
 }
 
 /**
@@ -334,14 +264,14 @@ async function readSkills(
   allowlist: unknown,
 ): Promise<{ skills: Skill[]; warnings: string[] }> {
   const allowed = Array.isArray(allowlist)
-    ? new Set(allowlist.flatMap((name) => label(name) ?? []))
+    ? new Set(allowlist.flatMap((name) => nonBlank(name) ?? []))
     : undefined;
   const skills: Skill[] = [];
   const warnings: string[] = [];
   const present = new Set<string>();
   const root = join(workspace, "skills");
 
-  for (const dirent of await listDirectory(root)) {
+  for (const dirent of await entriesOf(root)) {
     if (isForbiddenPath(dirent.name)) continue;
     if (dirent.isSymbolicLink()) {
       warnings.push(`skills/${dirent.name} is a symbolic link; not exported`);
@@ -366,8 +296,8 @@ async function readSkills(
       warnings.push(`skill '${dirent.name}' is not on the agent's skill allowlist; not exported`);
       continue;
     }
-    const rest = await skillFiles(dir, dirent.name, warnings);
-    skills.push({ name: dirent.name, files: [{ path: SKILL_FILE, bytes: mainBytes }, ...rest] });
+    const files = await readSkillFiles(dir, dirent.name, warnings, SKILL_MESSAGES);
+    skills.push({ name: dirent.name, files });
   }
 
   for (const name of allowed ?? []) {
@@ -384,7 +314,7 @@ const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZ
 /** A routine with, optionally, a note about it; or the warning that says why the job is skipped. */
 function toRoutine(job: JobRow): { routine: Routine; note?: string } | { warning: string } {
   const skipped = (reason: string) => ({ warning: `automation '${job.name}' skipped: ${reason}` });
-  const kind = isRecord(job.schedule) ? label(job.schedule.kind) : undefined;
+  const kind = isRecord(job.schedule) ? nonBlank(job.schedule.kind) : undefined;
   if (kind === undefined) return skipped("it has no schedule kind");
   if (!SCHEDULE_KINDS.has(kind)) return skipped(`unsupported schedule kind '${kind}'`);
   const converted = fromOpenClawJob(job);
@@ -487,15 +417,8 @@ async function readAvatar(
  * which only costs a new id.
  */
 async function markerId(workspace: string): Promise<string> {
-  const file = join(workspace, MARKER_FILE);
-  try {
-    if (!(await lstatIfAny(file))?.isFile()) return "";
-    const marker: unknown = JSON.parse(await readFile(file, "utf8"));
-    if (!isRecord(marker) || typeof marker.id !== "string") return "";
-    return ULID_PATTERN.test(marker.id) ? marker.id : "";
-  } catch {
-    return "";
-  }
+  const id = (await readMarker(workspace))?.id ?? "";
+  return ULID_PATTERN.test(id) ? id : "";
 }
 
 /**
@@ -519,9 +442,9 @@ export async function readOpenClawAgent(
   const { entry, identity } = profile;
 
   const missing: string[] = [];
-  const instructions = await readText(join(workspace, "AGENTS.md"));
+  const instructions = await readTextIfAny(join(workspace, "AGENTS.md"));
   if (instructions === undefined) missing.push("AGENTS.md not found");
-  const persona = await readText(join(workspace, "SOUL.md"));
+  const persona = await readTextIfAny(join(workspace, "SOUL.md"));
   if (persona === undefined) missing.push("SOUL.md not found");
   if (!profile.hasIdentityFile) missing.push("IDENTITY.md not found");
 

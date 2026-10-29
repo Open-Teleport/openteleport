@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  byCodeUnit,
+  errorLine,
   factsToProse,
   mergeInstructions,
+  oneLine,
+  plural,
   proseToFacts,
+  slugify,
   splitInstructions,
+  truncate,
+  withoutMark,
 } from "../../src/core/text.js";
 
 describe("mergeInstructions", () => {
@@ -203,5 +210,144 @@ describe("factsToProse", () => {
       "2024. was a good year",
     ];
     expect(proseToFacts(factsToProse(facts))).toStrictEqual({ facts, truncated: 0 });
+  });
+});
+
+describe("byCodeUnit", () => {
+  it("orders by UTF-16 code unit, whatever the locale: capitals before small letters", () => {
+    expect(["b", "a", "B", "_", "ä", "A", "Z", "z"].sort(byCodeUnit)).toEqual([
+      "A",
+      "B",
+      "Z",
+      "_",
+      "a",
+      "b",
+      "z",
+      "ä",
+    ]);
+  });
+
+  it("is 0 for equal strings", () => {
+    expect(byCodeUnit("same", "same")).toBe(0);
+  });
+});
+
+describe("slugify", () => {
+  it.each([
+    ["Ada Lovelace", "ada-lovelace"],
+    ["  Ada --  Lovelace!! ", "ada-lovelace"],
+    ["Web_Brief v2", "web-brief-v2"],
+    ["already-a-slug", "already-a-slug"],
+    ["2026 plan", "2026-plan"],
+  ])("makes %j into %j", (name, slug) => {
+    expect(slugify(name)).toBe(slug);
+  });
+
+  it("cuts to 64 characters and does not end in a dash", () => {
+    const slug = slugify(`${"a".repeat(63)} b`);
+
+    expect(slug).toBe("a".repeat(63));
+    expect(slugify("x".repeat(100))).toHaveLength(64);
+  });
+
+  it("cuts to the length it is given", () => {
+    expect(slugify("hermes profile name", { maxChars: 7 })).toBe("hermes");
+    expect(slugify("abcdefghij", { maxChars: 4 })).toBe("abcd");
+  });
+
+  it("is empty for a name with no letter or digit, or the fallback", () => {
+    expect(slugify("")).toBe("");
+    expect(slugify("---")).toBe("");
+    expect(slugify("Łódź", {})).toBe("d");
+    expect(slugify("***", { fallback: "agent" })).toBe("agent");
+    expect(slugify("Ada", { fallback: "agent" })).toBe("ada");
+  });
+
+  it("leaves accents as characters outside a-z unless it folds them", () => {
+    expect(slugify("Zażółć gęślą jaźń")).toBe("za-g-l-ja");
+    expect(slugify("Zażółć gęślą jaźń", { fold: true })).toBe("zazolc-gesla-jazn");
+    expect(slugify("Łukasz Ñandú", { fold: true })).toBe("lukasz-nandu");
+  });
+
+  it.each(["con", "NUL", "Aux", "com1", "lpt9"])("puts the suffix after the device name %s", (name) => {
+    expect(slugify(name, { deviceSuffix: "-r" })).toBe(`${name.toLowerCase()}-r`);
+    expect(slugify(name, { deviceSuffix: "-agent" })).toBe(`${name.toLowerCase()}-agent`);
+  });
+
+  it("leaves a device name alone without a suffix, and any other name with one", () => {
+    expect(slugify("con")).toBe("con");
+    expect(slugify("console", { deviceSuffix: "-r" })).toBe("console");
+    expect(slugify("con.txt", { deviceSuffix: "-r" })).toBe("con-txt");
+  });
+
+  it("gives the fallback, not the suffix, for nothing usable", () => {
+    expect(slugify("", { fallback: "agent", deviceSuffix: "-r" })).toBe("agent");
+  });
+});
+
+describe("truncate", () => {
+  it("leaves a text of at most max characters alone", () => {
+    expect(truncate("Ada", 3)).toBe("Ada");
+    expect(truncate("", 1)).toBe("");
+  });
+
+  it("cuts to max characters, the last one an ellipsis", () => {
+    expect(truncate("Reviews pull requests", 10)).toBe("Reviews p\u2026");
+    expect(truncate("Reviews pull requests", 10)).toHaveLength(10);
+  });
+});
+
+describe("oneLine", () => {
+  it("turns every run of whitespace and control characters into one space", () => {
+    expect(oneLine("  Ada\r\n\tLovelace \u0007 wrote\n\nnotes ")).toBe("Ada Lovelace wrote notes");
+  });
+
+  it("is empty for a text with nothing in it", () => {
+    expect(oneLine(" \n\t ")).toBe("");
+  });
+});
+
+describe("plural", () => {
+  it("counts in the singular for 1 and the plural for anything else", () => {
+    expect(plural(1, "skill")).toBe("1 skill");
+    expect(plural(0, "skill")).toBe("0 skills");
+    expect(plural(3, "skill")).toBe("3 skills");
+  });
+
+  it("takes the plural it is given when the word with an s is not it", () => {
+    expect(plural(1, "memory entry", "memory entries")).toBe("1 memory entry");
+    expect(plural(2, "memory entry", "memory entries")).toBe("2 memory entries");
+  });
+});
+
+describe("withoutMark", () => {
+  it("drops one byte order mark at the start", () => {
+    expect(withoutMark("\uFEFF# Persona")).toBe("# Persona");
+    expect(withoutMark("\uFEFF\uFEFFx")).toBe("\uFEFFx");
+  });
+
+  it("leaves a text without one, or with one inside, alone", () => {
+    expect(withoutMark("# Persona")).toBe("# Persona");
+    expect(withoutMark("a\uFEFFb")).toBe("a\uFEFFb");
+    expect(withoutMark("")).toBe("");
+  });
+});
+
+describe("errorLine", () => {
+  it("is the first line of the message of an error, trimmed", () => {
+    expect(errorLine(new Error("  Unexpected token at line 2: \n\nname: [x\n      ^"))).toBe(
+      "Unexpected token at line 2:",
+    );
+    expect(errorLine(new Error("one line"))).toBe("one line");
+  });
+
+  it("is the text of anything that is not an error", () => {
+    expect(errorLine("plain failure\nsecond line")).toBe("plain failure");
+    expect(errorLine(404)).toBe("404");
+    expect(errorLine(undefined)).toBe("undefined");
+  });
+
+  it("is empty for an error with no message", () => {
+    expect(errorLine(new Error(""))).toBe("");
   });
 });

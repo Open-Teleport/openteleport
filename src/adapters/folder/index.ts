@@ -1,12 +1,13 @@
 // The universal adapter: an agent that lives in a plain folder, in the same layout a `.jetpack`
 // archive uses (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/`, ...). It reads any folder with an
 // `AGENTS.md`, with or without a `jetpack.json`, and writes the full layout, `jetpack.json` too.
-import { lstat, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
-import { isReservedDeviceName } from "../../core/paths.js";
 import type { Bundle } from "../../core/schema.js";
+import { byCodeUnit, slugify } from "../../core/text.js";
+import { freeSibling, isFree, isNotFound, lstatIfAny, numberedSiblings } from "../fs.js";
 import type {
   Adapter,
   AdapterCapabilities,
@@ -20,8 +21,6 @@ const INSTRUCTIONS_FILE = "AGENTS.md";
 const MANIFEST_FILE = "jetpack.json";
 /** Files whose absence from a source folder is worth a warning. */
 const OPTIONAL_FILES = ["SOUL.md", "MEMORY.md"] as const;
-
-const MAX_SLUG_CHARS = 64;
 
 const DETECT_HINT = "Pass --source-dir <folder> with an AGENTS.md inside";
 const ROUTINES_WARNING = "routines are stored in the folder; no app runs them from here yet";
@@ -41,26 +40,12 @@ const CAPABILITIES: AdapterCapabilities = {
 
 // -- Disk helpers ---------------------------------------------------------------------------
 
-const isMissing = (error: unknown): boolean =>
-  (error as NodeJS.ErrnoException).code === "ENOENT" ||
-  (error as NodeJS.ErrnoException).code === "ENOTDIR";
-
 /** What `stat` says about a path, or `undefined` when nothing is there. Follows symbolic links. */
 async function statOrUndefined(path: string): Promise<Stats | undefined> {
   try {
     return await stat(path);
   } catch (error) {
-    if (isMissing(error)) return undefined;
-    throw error;
-  }
-}
-
-/** What is at `path` itself, a link never followed; `undefined` when nothing is there. */
-async function lstatOrUndefined(path: string): Promise<Stats | undefined> {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isMissing(error)) return undefined;
+    if (isNotFound(error)) return undefined;
     throw error;
   }
 }
@@ -74,7 +59,7 @@ async function namesIn(folder: string): Promise<string[]> {
   try {
     return await readdir(folder);
   } catch (error) {
-    if (isMissing(error)) return [];
+    if (isNotFound(error)) return [];
     throw error;
   }
 }
@@ -87,16 +72,13 @@ const baseDir = (ctx: Ctx): string => resolve(ctx.cwd, ctx.sourceDir ?? ctx.targ
 /** Folders that hold other things than agents are not searched. */
 const isSearched = (name: string): boolean => name !== "node_modules" && !name.startsWith(".");
 
-/** Plain code-unit order, so that the result does not depend on the locale. */
-const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 /** The immediate subfolders of `dir` that hold an `AGENTS.md`, sorted by name. */
 async function agentFolders(dir: string): Promise<string[]> {
   const names = (await namesIn(dir)).filter(isSearched);
   const holding = await Promise.all(
     names.map(async (name) => ((await isFile(join(dir, name, INSTRUCTIONS_FILE))) ? name : "")),
   );
-  return holding.filter((name) => name !== "").sort(byName);
+  return holding.filter((name) => name !== "").sort(byCodeUnit);
 }
 
 /** `name` from the folder's `jetpack.json`, else the folder's own name. */
@@ -142,20 +124,10 @@ function folderOf(dir: string, agent: string): string {
 // -- Writing --------------------------------------------------------------------------------
 
 /**
- * Lowercases a name, turns every run of characters outside `a-z0-9` into one `-`, trims the
- * dashes and cuts the result to 64 characters. Nothing usable gives `agent`; a Windows device
- * name such as `con` gets `-r` because a folder of that name cannot be created there.
+ * The folder name for an agent's name (see `slugify`). Nothing usable gives `agent`; a Windows
+ * device name such as `con` gets `-r` because a folder of that name cannot be created there.
  */
-function slug(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (base === "") return "agent";
-  return isReservedDeviceName(base) ? `${base}-r` : base;
-}
+const slug = (name: string): string => slugify(name, { fallback: "agent", deviceSuffix: "-r" });
 
 /** A copy of the Bundle as this adapter stores it; the argument is left alone. */
 function prepareBundle(bundle: Bundle, opts: WriteOpts): Bundle {
@@ -184,7 +156,7 @@ async function canonical(path: string): Promise<string> {
   try {
     return await realpath(absolute);
   } catch (error) {
-    if (!isMissing(error)) throw error;
+    if (!isNotFound(error)) throw error;
     const parent = dirname(absolute);
     if (parent === absolute) return absolute;
     return join(await canonical(parent), basename(absolute));
@@ -211,42 +183,12 @@ async function assertRemovable(ctx: Ctx, wanted: string): Promise<void> {
 }
 
 /**
- * Free means nothing is there, or there is an empty folder to write into. A link (symbolic link
- * or junction) is never free, wherever it leads: nothing is written through one.
- */
-async function isFree(path: string): Promise<boolean> {
-  const info = await lstatOrUndefined(path);
-  if (info === undefined) return true;
-  return info.isDirectory() && (await namesIn(path)).length === 0;
-}
-
-/** The first free `<wanted>-2`, `<wanted>-3`... */
-async function freeSibling(wanted: string): Promise<string> {
-  for (let n = 2; ; n += 1) {
-    const candidate = `${wanted}-${n}`;
-    if (await isFree(candidate)) return candidate;
-  }
-}
-
-/** The `<wanted>-2`, `<wanted>-3`... that exist next to `wanted`, in number order, gaps skipped. */
-async function numberedSiblings(wanted: string): Promise<string[]> {
-  const parent = dirname(wanted);
-  const prefix = `${basename(wanted)}-`;
-  return (await namesIn(parent))
-    .filter((name) => name.startsWith(prefix) && /^[1-9]\d*$/.test(name.slice(prefix.length)))
-    .map((name) => ({ name, n: Number(name.slice(prefix.length)) }))
-    .filter(({ n }) => n >= 2)
-    .sort((a, b) => a.n - b.n)
-    .map(({ name }) => join(parent, name));
-}
-
-/**
  * The first `<wanted>-N` folder that already holds the agent with `id`, as an earlier move may
  * have left it. Only real folders count: a link is never read through.
  */
 async function sameAgentSibling(wanted: string, id: string): Promise<string | undefined> {
   for (const sibling of await numberedSiblings(wanted)) {
-    const info = await lstatOrUndefined(sibling);
+    const info = await lstatIfAny(sibling);
     if (info?.isDirectory() && (await manifestId(sibling)) === id) return sibling;
   }
   return undefined;
@@ -289,7 +231,7 @@ async function claimTarget(
   if (await isFree(wanted)) return { target: wanted };
   if (onConflict === "copy") return { target: await freeSibling(wanted) };
 
-  const info = await lstatOrUndefined(wanted);
+  const info = await lstatIfAny(wanted);
   if (info?.isSymbolicLink()) {
     // A link leads somewhere else: what it holds is never read, and nothing is written through it.
     if (onConflict === "replace") {
@@ -340,6 +282,7 @@ export const folderAdapter: Adapter = {
   name: "folder",
   displayName: "Folder",
   capabilities: CAPABILITIES,
+  createsOnWrite: true,
 
   async detect(ctx) {
     const dir = baseDir(ctx);

@@ -54,6 +54,7 @@
 // line break is refused rather than cut.
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isRecord, nonBlank as label } from "../../core/values.js";
 import type { Ctx } from "../types.js";
 
 /** A job as `openclaw automations list` reports it, normalised; `schedule` is passed on raw. */
@@ -71,16 +72,6 @@ export type AgentRow = { id: string; name?: string; workspace?: string };
 
 /** The command family for jobs: `cron` up to 2026.5, `automations` from 2026.6. */
 export type JobCommand = "automations" | "cron";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** A trimmed, non-empty string, or `undefined`. */
-function label(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
 
 /** A string with something other than whitespace in it, kept as it is. */
 const nonBlank = (value: unknown): string | undefined =>

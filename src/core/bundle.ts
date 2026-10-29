@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { unzipSync, zipSync } from "fflate";
+import { zipSync } from "fflate";
 import { ZodError } from "zod";
 import {
   MAX_ARCHIVE_BYTES,
@@ -11,7 +11,6 @@ import {
   MAX_SKILLS,
   MAX_TEXT_ENTRY_BYTES,
   isForbiddenPath,
-  isReservedDeviceName,
   isSafeArchivePath,
 } from "./paths.js";
 import {
@@ -24,6 +23,8 @@ import {
   type Skill,
   parseManifest,
 } from "./schema.js";
+import { byCodeUnit, slugify } from "./text.js";
+import { type ZipPolicy, readZipEntries } from "./zip.js";
 
 const MANIFEST_PATH = "jetpack.json";
 const INSTRUCTIONS_PATH = "AGENTS.md";
@@ -356,22 +357,13 @@ export function entriesToBundle(
 
 // -- Bundle -> archive entries ---------------------------------------------------------------
 
-const MAX_SLUG_CHARS = 64;
-
 /**
- * Lowercases a routine name, turns every run of characters outside `a-z0-9` into one `-`, trims
- * the dashes and cuts the result to 64 characters. A name with nothing usable, or one that would
- * make a forbidden file name, becomes `routine`; a Windows device name such as `con` gets `-r`.
+ * A slug of a routine name (see `slugify`). A name with nothing usable, or one that would make a
+ * forbidden file name, becomes `routine`; a Windows device name such as `con` gets `-r`.
  */
 function routineSlug(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-/, "")
-    .slice(0, MAX_SLUG_CHARS)
-    .replace(/-$/, "");
-  if (slug === "" || isForbiddenPath(`${slug}.json`)) return "routine";
-  return isReservedDeviceName(slug) ? `${slug}-r` : slug;
+  const slug = slugify(name, { deviceSuffix: "-r" });
+  return slug === "" || isForbiddenPath(`${slug}.json`) ? "routine" : slug;
 }
 
 /** `base`, then `base-2`, `base-3`... for the names that collapse to the same slug. */
@@ -547,100 +539,14 @@ async function readDirectoryEntries(
   return { entries, outside };
 }
 
-function unzip<T>(source: string, run: () => T): T {
-  try {
-    return run();
-  } catch (error) {
-    throw new Error(`${source} is not a valid zip archive: ${(error as Error).message}`, {
-      cause: error,
-    });
-  }
-}
-
-const isDirectoryEntry = (name: string): boolean => name.endsWith("/");
-
-/** What the central directory of a zip says about a file: sizes are declared, not verified. */
-type ZipRecord = Listing & { compressedSize: number; stored: boolean };
-
-/**
- * Checks the compressed sizes a zip declares, which `validateListing` does not see. They cannot
- * be trusted: records may point at the same data, and fflate copies the compressed size of a
- * stored entry whatever uncompressed size is declared. So the compressed sizes together are at
- * most the file, a stored entry's size equals its declared size, and an entry of the layout
- * outside `files/` is at most `MAX_TEXT_ENTRY_BYTES` compressed, which also bounds the time
- * spent inflating it.
- */
-function validateZipRecords(
-  source: string,
-  records: readonly ZipRecord[],
-  archiveBytes: number,
-): void {
-  const compressedBytes = records.reduce((sum, record) => sum + record.compressedSize, 0);
-  if (compressedBytes > archiveBytes) {
-    throw new Error(
-      `${source} declares ${compressedBytes} bytes of compressed data in a file of ` +
-        `${archiveBytes} bytes`,
-    );
-  }
-  for (const { path, size, compressedSize, stored } of records) {
-    if (stored && compressedSize !== size) {
-      throw new Error(
-        `${path} is stored with ${compressedSize} bytes but declares a size of ${size} bytes`,
-      );
-    }
+/** The zip reader's view of the layout: where a path belongs decides if it is read at all. */
+const ZIP_POLICY: ZipPolicy = {
+  kindOf: (path) => {
     const { kind } = classify(path);
-    if (kind !== "file" && kind !== "unknown" && compressedSize > MAX_TEXT_ENTRY_BYTES) {
-      throw new Error(
-        `${path} is ${compressedSize} bytes compressed, over the ${MAX_TEXT_ENTRY_BYTES} byte ` +
-          "limit for entries outside files/",
-      );
-    }
-  }
-}
-
-async function readZipEntries(source: string, archiveBytes: number): Promise<FileEntry[]> {
-  if (archiveBytes > MAX_ARCHIVE_BYTES) {
-    throw new Error(`${source} is ${archiveBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`);
-  }
-  const archive = await readFile(source);
-
-  // First pass: read the central directory only, so that unsafe names and sizes that are over
-  // the limits are rejected before any of the content is inflated.
-  const records: ZipRecord[] = [];
-  unzip(source, () =>
-    unzipSync(archive, {
-      filter: ({ name, size, originalSize, compression }) => {
-        if (!isDirectoryEntry(name)) {
-          records.push({
-            path: name,
-            size: originalSize,
-            compressedSize: size,
-            stored: compression === 0,
-          });
-        }
-        return false;
-      },
-    }),
-  );
-  validateListing(records);
-  validateZipRecords(source, records, archiveBytes);
-
-  // Second pass: inflate the paths of the layout only. What the first pass bounded is what
-  // fflate works from: the declared uncompressed size, which sizes its buffer for a deflated
-  // entry; the compressed size, which is how much it copies for a stored entry (equal to the
-  // declared size) and how much it inflates otherwise (at most the file, and at most 2 MB for
-  // an entry of the layout outside files/).
-  const inflated = unzip(source, () =>
-    unzipSync(archive, {
-      filter: ({ name }) => !isDirectoryEntry(name) && classify(name).kind !== "unknown",
-    }),
-  );
-  const entries: FileEntry[] = Object.entries(inflated).map(([path, bytes]) => ({ path, bytes }));
-  for (const { path } of records) {
-    if (classify(path).kind === "unknown") entries.push({ path, bytes: unreadBytes() });
-  }
-  return entries;
-}
+    return kind === "file" ? "file" : kind === "unknown" ? "unknown" : "text";
+  },
+  validate: validateListing,
+};
 
 /**
  * Reads a `.jetpack` zip archive or an agent directory.
@@ -659,17 +565,12 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
       requireManifest: opts.requireManifest,
       fallbackName: basename(resolve(source)).replace(/\.jetpack$/i, ""),
     });
-  if (!info.isDirectory()) return toBundle(await readZipEntries(source, info.size));
+  if (!info.isDirectory()) return toBundle(await readZipEntries(source, info.size, ZIP_POLICY));
 
   const { entries, outside } = await readDirectoryEntries(source);
   const bundle = toBundle(entries);
   bundle.unknownPaths = [...bundle.unknownPaths, ...outside].sort(byCodeUnit);
   return bundle;
-}
-
-// Plain code-unit order, so that the result does not depend on the locale.
-function byCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** What an export puts at the top of a directory besides `jetpack.json` and the avatar. */

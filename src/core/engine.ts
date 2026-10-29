@@ -112,7 +112,13 @@ const FIELDS: readonly Field[] = [
   {
     label: "memory.facts",
     capability: "facts",
-    describe: (bundle) => counted(bundle.facts.length, "fact"),
+    // A fact has no name: the target names the one it skipped by its place, `fact:<n>` from 1.
+    ...listField({
+      prefix: "fact",
+      noun: "fact",
+      names: (bundle) => bundle.facts.map((_fact, index) => String(index + 1)),
+      skippedOneByOne: false,
+    }),
     clear: (bundle) => ({ ...bundle, facts: [] }),
   },
   {
@@ -215,11 +221,14 @@ const targetSide = ({ sourceDir: _sourceDir, ...ctx }: Ctx): Ctx => ctx;
 
 /**
  * The Bundle `from` read for `agent`, with an id: its own, else the one the cache keeps for the
- * agent under `from`'s cache identity (see `Adapter.cacheIdentity`), else under `agent`.
+ * agent under `from`'s cache identity (see `Adapter.cacheIdentity`), else under `agent`. An
+ * agent that has an id never needs the identity, so it is not asked for.
  */
 async function withId(from: Adapter, agent: string, ctx: Ctx, bundle: Bundle): Promise<Bundle> {
   const agentId =
-    from.cacheIdentity === undefined ? agent : await from.cacheIdentity(sourceSide(ctx), agent);
+    from.cacheIdentity === undefined || bundle.manifest.id !== ""
+      ? agent
+      : await from.cacheIdentity(sourceSide(ctx), agent);
   return ensureId(bundle, { app: from.name, agentId }, ctx.home);
 }
 

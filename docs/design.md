@@ -115,6 +115,8 @@ Zasady:
 
 ## 8. Jak to jest zbudowane
 
+Adaptery v0.2 (Hermes, Codex, OpenBot, Grok Bot, Letta), kreator i reguły wspólne opisuje `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; tam, gdzie różni się od tej sekcji, obowiązuje on dla v0.2.
+
 ### Język i dystrybucja (mój wybór, do podmiany)
 
 TypeScript na Node.js 24 LTS, pakiet `openteleport` na npm, uruchamiany przez `npx openteleport`, bez instalacji. Powody: OpenBot i OpenClaw są w TypeScript, Claude Code i jego ekosystem też, nazwa `openteleport` na npm jest wolna, `npx` daje "zero instalacji". Hermes jest w Pythonie, ale adapter Hermesa czyta i pisze pliki, nie musi być w Pythonie. Jeśli kiedyś potrzebny będzie pojedynczy binarny plik, da się go zbudować z tego samego kodu.
@@ -138,7 +140,7 @@ Zasada: żadna aplikacja nie jest wyznacznikiem. Najpierw to, co obejmuje najwi�
 1. **`folder`**: uniwersalny. Czyta i pisze zwykły katalog w układzie z sekcji 7 (z manifestem lub bez). Obejmuje każde narzędzie, które pracuje na katalogu projektu z `AGENTS.md` i `skills/`: Codex, Cursor, Gemini CLI, Cline, workspace Hermesa i OpenClaw. Jeden adapter, kilkanaście aplikacji.
 2. **OpenClaw**: największa społeczność (ok. 390 tys. gwiazdek). Odczyt: `openclaw.json` + workspace (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `MEMORY.md`, `memory/`, `skills/`) + `openclaw automations list --json`. Zapis: przez oficjalne CLI (`openclaw agents add`, `agents set-identity`, `automations add`), bo od wersji 2026.6 automatyzacje żyją w bazie stanu, nie w pliku. Dostarczyć też jako plugin OpenClaw, bo maintainer o to prosił.
 3. **Claude Code**: najwięcej programistów. Agent = plik `.claude/agents/<nazwa>.md` (frontmatter `name`, `description`, `tools`, `model` + treść jako instrukcje), skille w `.claude/skills/`, pamięć w `~/.claude/projects/<projekt>/memory/` z `MEMORY.md` jako indeksem faktów. Rutyny Claude Code (zadania w chmurze) poza v0.1, raportowane jako pominięte.
-4. v0.2: **OpenBot** (zapis przez udokumentowany zip importu `openbot-agent-import` v1; odczyt z pliku transferu instancji `openbot-instance-transfer` v1 albo z bazy SQLite przez `node:sqlite`; notatki z researchu kodu są w planie, w załączniku), **Hermes** (`~/.hermes`), **Codex** (`~/.codex` + skille), **Grok Bot** (przez format zip OpenBota, który Grok Bot już eksportuje), **Letta .af** (import).
+4. Pozostałe aplikacje (OpenBot, Hermes, Codex, Grok Bot, Letta): v0.2, patrz `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`.
 
 ### Co jest poza v0.1, ale format ma na to miejsce
 
