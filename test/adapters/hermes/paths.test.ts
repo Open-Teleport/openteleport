@@ -39,83 +39,112 @@ const ctxOf = (overrides: Partial<Ctx> = {}): Ctx => ({
 });
 
 describe("hermesHome", () => {
-  it("is <home>/.hermes without any setting", () => {
+  it("is <home>/.hermes without any setting", async () => {
     const ctx = ctxOf();
-    expect(hermesHome(ctx, "linux")).toBe(join(ctx.home, ".hermes"));
+    expect(await hermesHome(ctx, "linux")).toBe(join(ctx.home, ".hermes"));
   });
 
-  it("takes HERMES_HOME from the environment", () => {
+  it("takes HERMES_HOME from the environment", async () => {
     const ctx = ctxOf({ env: { HERMES_HOME: join(root, "elsewhere") } });
-    expect(hermesHome(ctx, "linux")).toBe(join(root, "elsewhere"));
+    expect(await hermesHome(ctx, "linux")).toBe(join(root, "elsewhere"));
   });
 
-  it("lets --source-dir win over --target-dir and HERMES_HOME", () => {
+  it("lets --source-dir win over --target-dir and HERMES_HOME", async () => {
     const ctx = ctxOf({
       sourceDir: join(root, "source"),
       targetDir: join(root, "target"),
       env: { HERMES_HOME: join(root, "env") },
     });
-    expect(hermesHome(ctx, "linux")).toBe(join(root, "source"));
+    expect(await hermesHome(ctx, "linux")).toBe(join(root, "source"));
   });
 
-  it("lets --target-dir win over HERMES_HOME", () => {
+  it("lets --target-dir win over HERMES_HOME", async () => {
     const ctx = ctxOf({ targetDir: join(root, "target"), env: { HERMES_HOME: join(root, "env") } });
-    expect(hermesHome(ctx, "linux")).toBe(join(root, "target"));
+    expect(await hermesHome(ctx, "linux")).toBe(join(root, "target"));
   });
 
-  it("is %LOCALAPPDATA%\\hermes on Windows", () => {
+  it("is %LOCALAPPDATA%\\hermes on Windows when <home>/.hermes is not a profile", async () => {
     const localAppData = join(root, "Local");
     const ctx = ctxOf({ env: { LOCALAPPDATA: localAppData } });
-    expect(hermesHome(ctx, "win32")).toBe(resolve(ctx.cwd, join(localAppData, "hermes")));
+    expect(await hermesHome(ctx, "win32")).toBe(resolve(ctx.cwd, join(localAppData, "hermes")));
   });
 
-  it("falls back to <home>/AppData/Local/hermes on Windows without LOCALAPPDATA", () => {
+  it("falls back to <home>/AppData/Local/hermes on Windows without LOCALAPPDATA", async () => {
     const ctx = ctxOf();
-    expect(hermesHome(ctx, "win32")).toBe(join(ctx.home, "AppData", "Local", "hermes"));
+    expect(await hermesHome(ctx, "win32")).toBe(join(ctx.home, "AppData", "Local", "hermes"));
   });
 
-  it("still prefers HERMES_HOME on Windows", () => {
-    const ctx = ctxOf({ env: { HERMES_HOME: join(root, "env"), LOCALAPPDATA: join(root, "Local") } });
-    expect(hermesHome(ctx, "win32")).toBe(join(root, "env"));
-  });
-
-  it("ignores LOCALAPPDATA on other systems", () => {
+  it("is <home>/.hermes on Windows when that is a profile, as Hermes itself has it without the variable", async () => {
     const ctx = ctxOf({ env: { LOCALAPPDATA: join(root, "Local") } });
-    expect(hermesHome(ctx, "darwin")).toBe(join(ctx.home, ".hermes"));
+    await mkdir(join(ctx.home, ".hermes"), { recursive: true });
+    await writeFile(join(ctx.home, ".hermes", "config.yaml"), "");
+    await mkdir(join(root, "Local", "hermes"), { recursive: true });
+    await writeFile(join(root, "Local", "hermes", "config.yaml"), "");
+    expect(await hermesHome(ctx, "win32")).toBe(join(ctx.home, ".hermes"));
   });
 
-  it("makes a relative path absolute against the working directory", () => {
+  it("does not take <home>/.hermes on Windows when it holds no profile file", async () => {
+    const ctx = ctxOf({ env: { LOCALAPPDATA: join(root, "Local") } });
+    await mkdir(join(ctx.home, ".hermes", "profiles"), { recursive: true });
+    expect(await hermesHome(ctx, "win32")).toBe(join(root, "Local", "hermes"));
+  });
+
+  it("still prefers HERMES_HOME on Windows", async () => {
+    const ctx = ctxOf({ env: { HERMES_HOME: join(root, "env"), LOCALAPPDATA: join(root, "Local") } });
+    await mkdir(join(ctx.home, ".hermes"), { recursive: true });
+    await writeFile(join(ctx.home, ".hermes", "config.yaml"), "");
+    expect(await hermesHome(ctx, "win32")).toBe(join(root, "env"));
+  });
+
+  it("still prefers --source-dir and --target-dir on Windows", async () => {
+    const ctx = ctxOf({ env: { LOCALAPPDATA: join(root, "Local") } });
+    await mkdir(join(ctx.home, ".hermes"), { recursive: true });
+    await writeFile(join(ctx.home, ".hermes", "config.yaml"), "");
+    expect(await hermesHome({ ...ctx, sourceDir: join(root, "source") }, "win32")).toBe(
+      join(root, "source"),
+    );
+    expect(await hermesHome({ ...ctx, targetDir: join(root, "target") }, "win32")).toBe(
+      join(root, "target"),
+    );
+  });
+
+  it("ignores LOCALAPPDATA on other systems", async () => {
+    const ctx = ctxOf({ env: { LOCALAPPDATA: join(root, "Local") } });
+    expect(await hermesHome(ctx, "darwin")).toBe(join(ctx.home, ".hermes"));
+  });
+
+  it("makes a relative path absolute against the working directory", async () => {
     const ctx = ctxOf({ sourceDir: "relative/hermes" });
-    expect(hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "relative/hermes"));
+    expect(await hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "relative/hermes"));
   });
 
   describe("a leading ~", () => {
-    it("stands for the home directory, alone or followed by a separator", () => {
+    it("stands for the home directory, alone or followed by a separator", async () => {
       const ctx = ctxOf();
-      const at = (value: string): string =>
+      const at = (value: string): Promise<string> =>
         hermesHome({ ...ctx, env: { HERMES_HOME: value } }, "linux");
-      expect(at("~")).toBe(ctx.home);
-      expect(at("~/x")).toBe(join(ctx.home, "x"));
-      expect(at("~\\x")).toBe(resolve(ctx.cwd, join(ctx.home, "\\x")));
+      expect(await at("~")).toBe(ctx.home);
+      expect(await at("~/x")).toBe(join(ctx.home, "x"));
+      expect(await at("~\\x")).toBe(resolve(ctx.cwd, join(ctx.home, "\\x")));
     });
 
-    it("is expanded in --source-dir and --target-dir as well", () => {
+    it("is expanded in --source-dir and --target-dir as well", async () => {
       const ctx = ctxOf();
-      expect(hermesHome({ ...ctx, sourceDir: "~/source" }, "linux")).toBe(join(ctx.home, "source"));
-      expect(hermesHome({ ...ctx, targetDir: "~/target" }, "linux")).toBe(join(ctx.home, "target"));
+      expect(await hermesHome({ ...ctx, sourceDir: "~/source" }, "linux")).toBe(join(ctx.home, "source"));
+      expect(await hermesHome({ ...ctx, targetDir: "~/target" }, "linux")).toBe(join(ctx.home, "target"));
     });
 
-    it("is left alone in front of a name, and in the middle of a path", () => {
+    it("is left alone in front of a name, and in the middle of a path", async () => {
       const ctx = ctxOf();
-      const at = (value: string): string =>
+      const at = (value: string): Promise<string> =>
         hermesHome({ ...ctx, env: { HERMES_HOME: value } }, "linux");
-      expect(at("~other")).toBe(resolve(ctx.cwd, "~other"));
-      expect(at("a/~/b")).toBe(resolve(ctx.cwd, "a/~/b"));
+      expect(await at("~other")).toBe(resolve(ctx.cwd, "~other"));
+      expect(await at("a/~/b")).toBe(resolve(ctx.cwd, "a/~/b"));
     });
 
-    it("does not expand $VAR", () => {
+    it("does not expand $VAR", async () => {
       const ctx = ctxOf({ env: { HERMES_HOME: "$HOME/hermes", HOME: join(root, "elsewhere") } });
-      expect(hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "$HOME/hermes"));
+      expect(await hermesHome(ctx, "linux")).toBe(resolve(ctx.cwd, "$HOME/hermes"));
     });
   });
 });

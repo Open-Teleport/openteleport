@@ -5,14 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-10-29
+
+The first published release. It carries everything listed under 0.1.0 below, which was never published on its own.
 
 Five more apps, a wizard for the first run, and a few small fixes.
 
 ### Added
 
-- Five adapters, all read and write, each built from the documentation and source code of the app
-  and not yet checked on a real install:
+- Five adapters, all read and write, each built from the documentation and source code of the app.
+  Hermes and Codex were then checked on real installs: Hermes passed, and Codex has two open
+  defects (copies of one agent share a runtime `name`, and exporting a custom agent drops its
+  skills); the other three have not been checked yet:
   - `hermes` (Hermes Agent): profiles, `SOUL.md`, skills, memory entries and cron jobs. A write
     makes or updates a named profile and writes its cron jobs paused. Result: done.
   - `codex` (Codex): the global setup and the custom agents in `agents/*.toml`. A write makes a
@@ -24,11 +28,12 @@ Five more apps, a wizard for the first run, and a few small fixes.
     text to paste into a new Bot. Result: handoff (the five steps in the pack's README).
   - `letta` (Letta Code): reads the local backend and the local memory of Cloud agents, writes a
     folder with the memory in MemFS layout and a script (`letta-commands.sh` or `.ps1`) that
-    creates the agent, restores its memory and adds its routines. Result: handoff.
+    creates the agent, restores its memory and adds its routines, which stay commented out in the
+    script unless `--enable-routines` is given (for the enabled ones). Result: handoff.
 - A wizard: `npx openteleport` with no arguments, in a terminal, asks for the source app, the
   agent and the target, says in one sentence what it will do, and asks before it does it. Without
   a terminal, it prints the help and exits with 2.
-- `--help-all`, which lists every command, flag and environment variable. `--help` now shows the
+- `--help-all`, which lists every command and flag and the two `OPENTELEPORT_` variables. `--help` now shows the
   commands and flags most people need.
 - `export` without `--from` exports the agent folder you are in; `import` without `--to`
   unpacks into a new folder named after the agent.
@@ -58,7 +63,7 @@ Five more apps, a wizard for the first run, and a few small fixes.
 
 - The test timeout is 30 seconds instead of 5, since the CLI tests start the built program.
 
-## [0.1.0] - unreleased
+## [0.1.0] - not published (folded into 0.2.0)
 
 First release.
 
@@ -108,7 +113,6 @@ First release.
   subfolder of a repository, memory is read from, and written to, a place Claude Code does not use.
 - There is no SSH transport. To move an agent to another machine, export it, copy the file and
   import it there.
-- Planned for later releases: OpenBot, Hermes, Codex, Grok Bot and Letta.
 
 [0.2.0]: https://github.com/Open-Teleport/openteleport/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0

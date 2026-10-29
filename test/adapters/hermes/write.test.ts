@@ -837,6 +837,26 @@ describe("an agent that is already there", () => {
     });
   });
 
+  it("does not repeat a multi-line entry Hermes learned when the agent is read and written back", async () => {
+    await firstWrite();
+    const memoryFile = join(profile(), "memories", "MEMORY.md");
+    const native = "Deploys go out on Tuesdays.\nNever on Fridays.";
+    await writeFile(memoryFile, `${await text(memoryFile)}\n§\n${native}`);
+
+    // The reader folds the entry into one line; writing that fact back must see the entry as held.
+    const { bundle } = await hermesAdapter.read(ctx, "ada");
+    expect(bundle.facts).toContain("Deploys go out on Tuesdays. Never on Fridays.");
+    const result = await writeHermesProfile(ctx, bundle, opts());
+
+    const entries = parseEntries(await text(memoryFile));
+    expect(entries.filter((entry) => entry.includes("Tuesdays"))).toEqual([native]);
+    expect(entries).toContain(native);
+    // Not recorded as ours, so a later move leaves it alone too.
+    expect((await readMarker()).memoryEntries).not.toContain("Deploys go out on Tuesdays. Never on Fridays.");
+    expect((await readMarker()).memoryEntries).not.toContain(native);
+    expect(result.items.skipped).toEqual([]);
+  });
+
   it("removes what it wrote when the Bundle no longer has it", async () => {
     await firstWrite();
     await writeHermesProfile(ctx, ada({ facts: [], routines: [] }), opts());
@@ -952,6 +972,31 @@ describe("an agent that is already there", () => {
     const third = await writeHermesProfile(ctx, ada(), opts({ onConflict: "copy" }));
     expect([second.targetAgentId, third.targetAgentId]).toEqual(["ada-2", "ada-3"]);
     expect(second.items.warnings).not.toContainEqual(expect.stringContaining("already exists"));
+  });
+
+  it("keeps the id of a copy within the 64 characters Hermes accepts", async () => {
+    const name = "a".repeat(63);
+    const copied = (id: string): Bundle => ada({ manifest: { name, id } });
+    const first = await writeHermesProfile(ctx, copied(ADA_ID), opts());
+    expect(first.targetAgentId).toBe(name);
+
+    // `<63 a's>-2` would be 65 characters: the base is cut for the suffix instead.
+    const second = await writeHermesProfile(ctx, copied(OTHER_ID), opts());
+    expect(second.targetAgentId).toBe(`${"a".repeat(62)}-2`);
+    expect(second.targetAgentId).toHaveLength(64);
+    expect(second.items.warnings).toContain(
+      `profile '${name}' already exists; written as '${second.targetAgentId}'`,
+    );
+
+    // The copy is found again by its marker, and a third agent gets the next number.
+    const again = await writeHermesProfile(ctx, copied(OTHER_ID), opts());
+    expect(again.targetAgentId).toBe(second.targetAgentId);
+    const third = await writeHermesProfile(ctx, copied("01J9ZT3Z9K8QGQ2M6Q4Y3V6B2V"), opts());
+    expect(third.targetAgentId).toBe(`${"a".repeat(62)}-3`);
+
+    // Hermes (and `list`) accept all three.
+    const listed = (await hermesAdapter.list(ctx)).map((agent) => agent.id);
+    expect(listed).toEqual(expect.arrayContaining([name, second.targetAgentId, third.targetAgentId]));
   });
 
   it("is not written through a link, and goes to <slug>-2", async (task) => {
@@ -1119,7 +1164,8 @@ describe("hermesAdapter", () => {
     expect(bundle.manifest.id).toBe(ADA_ID);
     expect(bundle.persona).toBe("Calm and curious.");
     expect(bundle.instructions).toBe("Answer briefly.");
-    expect(bundle.facts).toEqual(FACTS);
+    // A fact with a line break is one entry in Hermes and comes back folded into one line.
+    expect(bundle.facts).toEqual(FACTS.map((fact) => fact.replace(/\n/g, " ")));
     expect(bundle.skills.map((skill) => skill.name).sort()).toEqual(["notes", "web-brief"]);
     expect(bundle.routines.map((routine) => routine.name)).toEqual([
       "Morning digest",

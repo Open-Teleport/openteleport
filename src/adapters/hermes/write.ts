@@ -6,7 +6,7 @@
 // profile in place and leaves what Hermes and the user added since.
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rm, rmdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join, posix } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { stringify } from "yaml";
 import { isSafeArchivePath } from "../../core/paths.js";
 import type { Item } from "../../core/report.js";
@@ -14,13 +14,13 @@ import { parseCron } from "../../core/schedule.js";
 import type { Bundle, FileEntry, ModelPref, Routine, Skill } from "../../core/schema.js";
 import { byCodeUnit, mergeInstructions, slugify } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
-import { freeSibling, isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
+import { isFree, isSafeName, lstatIfAny, readTextIfAny, replaceFile } from "../fs.js";
 import { type Marker, readMarker, writeMarker } from "../marker.js";
 import { readSkillFiles } from "../skill-files.js";
 import { placeSkill } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type HermesJob, newJobId, readJobsFile, routineToJob, writeJobsFile } from "./cron.js";
-import { entryText, parseEntries, renderEntries } from "./memory.js";
+import { entryText, foldLines, parseEntries, renderEntries } from "./memory.js";
 import { type HermesConfig, hermesHome, hermesTimezone, readConfig } from "./paths.js";
 
 type Items = WriteResult["items"];
@@ -205,9 +205,21 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   return (await readdir(path)).length === 0;
 }
 
-/** The first free `<base>-2`, `<base>-3`... */
+/** The longest profile id Hermes accepts (`PROFILE_ID_RE`). */
+const MAX_ID_CHARS = 64;
+
+/** `<base>-<n>`, the base cut so that the whole stays within the 64 characters of an id. */
+function withSuffix(base: string, n: number): string {
+  const suffix = `-${n}`;
+  return `${base.slice(0, MAX_ID_CHARS - suffix.length).replace(/-+$/, "")}${suffix}`;
+}
+
+/** The first free `<base>-2`, `<base>-3`... (see `withSuffix`). */
 async function freeId(profiles: string, base: string): Promise<string> {
-  return basename(await freeSibling(join(profiles, base)));
+  for (let n = 2; ; n += 1) {
+    const candidate = withSuffix(base, n);
+    if (await isFree(join(profiles, candidate))) return candidate;
+  }
 }
 
 /**
@@ -224,9 +236,9 @@ async function ownCopy(profiles: string, base: string, id: string): Promise<Targ
     throw error;
   }
   const copies = names
-    .map((name) => ({ name, n: copyNumber(name, base) }))
-    .filter(({ n }) => n !== undefined && n >= 2)
-    .sort((a, b) => (a.n as number) - (b.n as number));
+    .map((name) => ({ name, n: Number(/-([1-9]\d*)$/.exec(name)?.[1]) }))
+    .filter(({ name, n }) => n >= 2 && name === withSuffix(base, n))
+    .sort((a, b) => a.n - b.n);
   for (const { name } of copies) {
     const dir = join(profiles, name);
     if (!(await lstatIfAny(dir))?.isDirectory()) continue;
@@ -556,7 +568,9 @@ async function writeProfileSkills(
  * (`recorded`) are taken out first; entries that are not ours stay, and the new ones come after
  * them. Hermes refuses a write over its limit, so the file as a whole is held to
  * `memory_char_limit`: a fact that does not fit is skipped as `fact:<n>`. A fact the file already
- * holds is not repeated. Returns the entries to record: the ones written now.
+ * holds is not repeated; an entry with line breaks that Hermes learned on its own is read back as
+ * its folded one-line form (`foldLines`), so it holds the fact too. Returns the entries to record:
+ * the ones written now.
  */
 async function writeMemory(
   dir: string,
@@ -582,6 +596,8 @@ async function writeMemory(
     const index = kept.indexOf(entry);
     if (index !== -1) kept.splice(index, 1);
   }
+  const holds = (entry: string): boolean =>
+    kept.some((held) => held === entry || foldLines(held) === entry);
   const added: string[] = [];
   for (const [index, fact] of facts.entries()) {
     const entry = entryText(fact);
@@ -591,7 +607,7 @@ async function writeMemory(
     };
     if (entry === "") {
       skip("empty");
-    } else if (kept.includes(entry) || added.includes(entry)) {
+    } else if (holds(entry) || added.includes(entry)) {
       continue;
     } else if (charCount(renderEntries([...kept, ...added, entry])) > limit) {
       skip(`Hermes memory limit: ${limit} chars`);
@@ -799,7 +815,7 @@ export async function writeHermesProfile(
   opts: WriteOpts,
 ): Promise<WriteResult> {
   const items: Items = { approximated: [], skipped: [], warnings: [] };
-  const profiles = join(hermesHome(ctx), "profiles");
+  const profiles = join(await hermesHome(ctx), "profiles");
   const { slug, reserved } = slugOf(bundle.manifest.name);
   await assertProfilesFolder(profiles);
   if (reserved !== undefined) {

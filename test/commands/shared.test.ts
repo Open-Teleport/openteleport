@@ -13,9 +13,11 @@ import {
   fileSlug,
   exitOnBrokenPipe,
   matchAgents,
+  printReport,
   resolveAgent,
   sideOf,
 } from "../../src/commands/shared.js";
+import type { MoveReport } from "../../src/core/report.js";
 import { createMemoryAdapter } from "../helpers/memory-adapter.js";
 
 const CANCEL = Symbol("clack:cancel");
@@ -164,6 +166,28 @@ describe("ensureDetected", () => {
     expect(exitCodeOf(error)).toBe(3);
   });
 
+  it("tells a target that --target-dir is the flag that reaches it, and a source nothing more", async () => {
+    const hinted = (hint: string): Adapter => ({
+      ...missingApp().adapter,
+      detect: async () => ({ found: false, location: "/x", hint }),
+    });
+    const message = async (adapter: Adapter, side: "source" | "target"): Promise<string> =>
+      ((await ensureDetected(adapter, ctx, side).catch((e: unknown) => e)) as Error).message;
+
+    const app = hinted("Install App or pass --source-dir <APP_HOME>");
+    expect(await message(app, "target")).toBe(
+      "In-memory app was not detected at /x. Install App or pass --source-dir <APP_HOME> " +
+        "(as a target, pass --target-dir in place of --source-dir)",
+    );
+    expect(await message(app, "source")).toBe(
+      "In-memory app was not detected at /x. Install App or pass --source-dir <APP_HOME>",
+    );
+    // A hint that names no such flag is left as it is.
+    expect(await message(hinted("Install Ghost first"), "target")).toBe(
+      "In-memory app was not detected at /x. Install Ghost first",
+    );
+  });
+
   it("is exit code 3 for a target that does not create itself, said so or not", async () => {
     await expect(ensureDetected(missingApp(false).adapter, ctx, "target")).rejects.toThrow(
       NotDetectedError,
@@ -199,6 +223,46 @@ describe("ensureDetected", () => {
     const lookalike: Adapter = { ...missingApp().adapter, name: "folder" };
 
     await expect(ensureDetected(lookalike, ctx, "target")).rejects.toThrow(NotDetectedError);
+  });
+});
+
+describe("printReport", () => {
+  const handoff: MoveReport = {
+    source: { app: "folder", agent: "Ada" },
+    target: { app: "inbox", agent: "Ada" },
+    outcome: "handoff",
+    nextStep: "Open Inbox and drop the file on it.",
+    moved: [],
+    approximated: [],
+    skipped: [],
+    warnings: [],
+  };
+
+  function printed(report: MoveReport, quiet: boolean): string {
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      chunks.push(String(chunk));
+      return true;
+    });
+    try {
+      printReport(report, quiet ? { quiet: true } : {}, "/reports/ada.md");
+    } finally {
+      write.mockRestore();
+    }
+    return chunks.join("");
+  }
+
+  it("says the next step of a hand-over once, in the report", () => {
+    const out = printed(handoff, false);
+    expect(out.match(/Next step:/g)).toHaveLength(1);
+    expect(out).toContain("Next step: Open Inbox and drop the file on it.");
+    expect(out.trimEnd().split("\n").at(-1)).toBe("Report written to /reports/ada.md");
+  });
+
+  it("says it once with --quiet too, and not at all for a move that has none", () => {
+    expect(printed(handoff, true).match(/Next step:/g)).toHaveLength(1);
+    const { nextStep: _handoffOnly, ...done } = handoff;
+    expect(printed({ ...done, outcome: "done" }, false)).not.toContain("Next step");
   });
 });
 

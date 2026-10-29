@@ -21,7 +21,7 @@ import { readMarker } from "../marker.js";
 import { claimSkillName, findSkillFolders, readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { jobToRoutine, readJobsFile } from "./cron.js";
-import { parseEntries } from "./memory.js";
+import { foldLines, parseEntries } from "./memory.js";
 import {
   DEFAULT_PROFILE,
   type HermesConfig,
@@ -136,7 +136,7 @@ async function readProfileMeta(dir: string): Promise<{ meta: ProfileMeta } | { e
 /** The profiles of the Hermes home: `default`, then the named ones. */
 export async function listHermesProfiles(ctx: Ctx): Promise<AgentRef[]> {
   const refs: AgentRef[] = [];
-  for (const { id, dir } of await locateProfiles(hermesHome(ctx))) {
+  for (const { id, dir } of await locateProfiles(await hermesHome(ctx))) {
     const read = await readProfileMeta(dir);
     // Listing is for discovery: a broken profile.yaml is reported by `read`, not here.
     const meta = "meta" in read ? read.meta : {};
@@ -155,7 +155,7 @@ export async function listHermesProfiles(ctx: Ctx): Promise<AgentRef[]> {
  * of its directory (`default` is a different agent in every `HERMES_HOME`).
  */
 export async function hermesCacheIdentity(ctx: Ctx, agent: string): Promise<string> {
-  return realpath(profileDir(hermesHome(ctx), agent));
+  return realpath(profileDir(await hermesHome(ctx), agent));
 }
 
 // -- Skills ------------------------------------------------------------------------------------
@@ -246,9 +246,11 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
 // -- Memory ------------------------------------------------------------------------------------
 
 /**
- * The entries of `MEMORY.md`, then those of `USER.md`. An entry of up to 500 characters is a fact;
- * a longer one is kept whole as the note `memory-<n>` or `user-<n>`, `n` being its place in the
- * file, counted from 1.
+ * The entries of `MEMORY.md`, then those of `USER.md`. An entry of up to 500 characters is a fact,
+ * and a fact is one line, so the line breaks of an entry are folded into single spaces (as
+ * `factsToProse` does when it writes; the fact still goes back to Hermes as one entry) and a
+ * warning counts those entries. A longer entry is kept whole as the note `memory-<n>` or
+ * `user-<n>`, `n` being its place in the file, counted from 1.
  */
 async function readMemory(
   dir: string,
@@ -256,6 +258,7 @@ async function readMemory(
 ): Promise<{ facts: string[]; notes: Note[] }> {
   const facts: string[] = [];
   const notes: Note[] = [];
+  let folded = 0;
   for (const [file, prefix] of [
     ["MEMORY.md", "memory"],
     ["USER.md", "user"],
@@ -264,10 +267,18 @@ async function readMemory(
     for (const [index, entry] of parseEntries(text ?? "").entries()) {
       if (entry.length > MAX_FACT_CHARS) {
         notes.push({ name: `${prefix}-${index + 1}`, text: entry });
+      } else if (/[\r\n]/.test(entry)) {
+        folded += 1;
+        facts.push(foldLines(entry));
       } else {
         facts.push(entry);
       }
     }
+  }
+  if (folded > 0) {
+    warnings.push(
+      `${plural(folded, "memory entry", "memory entries")} had line breaks folded into one line`,
+    );
   }
   if (notes.length > 0) {
     const one = notes.length === 1;
@@ -330,6 +341,7 @@ async function readRoutines(
     names.add(name);
     routines.push({ ...entry.routine, name });
     if (Object.keys(entry.extra).length > 0) extras[name] = entry.extra;
+    if (entry.warning !== undefined) warnings.push(entry.warning);
   }
   return { routines, extras };
 }
@@ -365,7 +377,7 @@ export async function readHermesProfile(
   ctx: Ctx,
   agent: string,
 ): Promise<{ bundle: Bundle; warnings: string[] }> {
-  const home = hermesHome(ctx);
+  const home = await hermesHome(ctx);
   const profiles = await locateProfiles(home);
   const located = profiles.find(({ id }) => id === agent);
   if (located === undefined) {

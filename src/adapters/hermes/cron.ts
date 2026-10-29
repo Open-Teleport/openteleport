@@ -8,6 +8,7 @@ import type { Routine, Schedule } from "../../core/schema.js";
 import { withoutMark } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
 import { backUp, isNotFound, lstatIfAny, replaceFile } from "../fs.js";
+import { machineTimezone } from "./paths.js";
 
 /** A job record as far as the adapter needs it; everything else in it is kept as it is. */
 export type HermesJob = Record<string, unknown> & {
@@ -118,10 +119,16 @@ const WHEN =
   /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})?)?$/i;
 
 /**
- * A one-off time as the instant it names, in UTC. Python writes `isoformat()`, with an offset,
- * but a hand-written job may have none: the time is then the wall clock of `timezone`.
+ * A one-off time as the instant it names, in UTC, and the zone that had to be assumed for it.
+ * Python writes `isoformat()`, with an offset, but a hand-written job may have none; Hermes
+ * (`parse_schedule`, `_ensure_aware`) then reads the wall clock in the zone of the machine it
+ * runs on, not in the time zone of the profile (that one is for cron expressions), so
+ * `localZone` is the machine's.
  */
-function instantOf(value: unknown, timezone: string): string | undefined {
+function instantOf(
+  value: unknown,
+  localZone: string,
+): { at: string; assumedZone?: string } | undefined {
   if (typeof value !== "string") return undefined;
   const parts = WHEN.exec(value.trim());
   if (parts === null) return undefined;
@@ -129,8 +136,10 @@ function instantOf(value: unknown, timezone: string): string | undefined {
   const local = `${date}T${time}:${seconds}`;
   const ms = Number(fraction.slice(0, 3).padEnd(3, "0"));
   if (zone === undefined) {
-    const instant = zonedToInstant(local, timezone);
-    return instant === undefined ? undefined : new Date(Date.parse(instant) + ms).toISOString();
+    const instant = zonedToInstant(local, localZone);
+    return instant === undefined
+      ? undefined
+      : { at: new Date(Date.parse(instant) + ms).toISOString(), assumedZone: localZone };
   }
   const utc = zonedToInstant(local, "UTC"); // checks that the day exists
   if (utc === undefined) return undefined;
@@ -138,10 +147,15 @@ function instantOf(value: unknown, timezone: string): string | undefined {
   const [hours = 0, minutes = 0] = offset;
   if (hours > 23 || minutes > 59) return undefined;
   const sign = zone.startsWith("-") ? -1 : 1;
-  return new Date(Date.parse(utc) + ms - sign * (hours * 60 + minutes) * 60_000).toISOString();
+  return {
+    at: new Date(Date.parse(utc) + ms - sign * (hours * 60 + minutes) * 60_000).toISOString(),
+  };
 }
 
-function scheduleOf(spec: unknown, timezone: string): Schedule | null {
+function scheduleOf(
+  spec: unknown,
+  localZone: string,
+): { schedule: Schedule; assumedZone?: string } | null {
   if (!isRecord(spec)) return null;
   switch (spec.kind) {
     case "cron": {
@@ -149,17 +163,21 @@ function scheduleOf(spec: unknown, timezone: string): Schedule | null {
       // Hermes reads cron expressions with croniter, whose sixth field is seconds at the end,
       // not at the start as in the manifest: only the five field form means the same to both.
       return expression !== undefined && expression.split(/\s+/).length === 5
-        ? { kind: "cron", expression }
+        ? { schedule: { kind: "cron", expression } }
         : null;
     }
     case "interval": {
       const every =
         typeof spec.minutes === "number" ? msToEvery(spec.minutes * 60_000) : null;
-      return every === null ? null : { kind: "every", every };
+      return every === null ? null : { schedule: { kind: "every", every } };
     }
     case "once": {
-      const at = instantOf(spec.run_at, timezone);
-      return at === undefined ? null : { kind: "at", at };
+      const found = instantOf(spec.run_at, localZone);
+      if (found === undefined) return null;
+      return {
+        schedule: { kind: "at", at: found.at },
+        ...(found.assumedZone === undefined ? {} : { assumedZone: found.assumedZone }),
+      };
     }
     default:
       return null;
@@ -206,21 +224,32 @@ function isEnabled(job: HermesJob): boolean {
 }
 
 /**
- * The routine a job stands for, in the time zone of the profile, and what stays behind as
- * `extra`. `null` for a job without a prompt, or whose schedule the manifest cannot express: an
- * unknown kind, a cron expression that is not five fields, an interval that is not a whole
+ * The routine a job stands for, in the time zone of the profile (the one a cron expression is
+ * read in), and what stays behind as `extra`. A one-off time without an offset is read in
+ * `localZone`, the zone of the machine, as Hermes does, and `warning` then names that
+ * assumption. `null` for a job without a prompt, or whose schedule the manifest cannot express:
+ * an unknown kind, a cron expression that is not five fields, an interval that is not a whole
  * number of minutes, a one-off time that is not a date.
  */
 export function jobToRoutine(
   job: HermesJob,
   timezone: string,
-): { routine: Routine; extra: Record<string, unknown> } | null {
-  const schedule = scheduleOf(job.schedule, timezone);
+  localZone: string = machineTimezone(),
+): { routine: Routine; extra: Record<string, unknown>; warning?: string } | null {
+  const read = scheduleOf(job.schedule, localZone);
   const name = nonBlank(job.name) ?? nonBlank(job.id);
-  if (schedule === null || name === undefined || job.prompt.trim() === "") return null;
+  if (read === null || name === undefined || job.prompt.trim() === "") return null;
+  const { schedule, assumedZone } = read;
   return {
     routine: { name, instruction: job.prompt, enabled: isEnabled(job), timezone, schedule },
     extra: extraOf(job, schedule.kind),
+    ...(assumedZone === undefined
+      ? {}
+      : {
+          warning:
+            `cron job '${name}' has a one-off time without an offset; ` +
+            `read in this machine's time zone (${assumedZone}), as Hermes does`,
+        }),
   };
 }
 

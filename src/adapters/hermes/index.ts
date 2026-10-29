@@ -20,7 +20,7 @@ const HINT = "Install Hermes Agent or pass --source-dir <HERMES_HOME>";
 
 /** Found when the Hermes home holds one of the files that make a directory a profile. */
 async function detect(ctx: Ctx): Promise<Awaited<ReturnType<Adapter["detect"]>>> {
-  const location = hermesHome(ctx);
+  const location = await hermesHome(ctx);
   if (await isProfile(location)) return { found: true, location };
   return { found: false, location, hint: HINT };
 }

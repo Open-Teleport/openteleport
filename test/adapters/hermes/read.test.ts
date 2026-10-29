@@ -20,7 +20,12 @@ import {
   listHermesProfiles,
   readHermesProfile,
 } from "../../../src/adapters/hermes/read.js";
+import { folderAdapter } from "../../../src/adapters/folder/index.js";
+import { hermesAdapter } from "../../../src/adapters/hermes/index.js";
 import type { Ctx } from "../../../src/adapters/types.js";
+import { move } from "../../../src/core/engine.js";
+import { machineTimezone } from "../../../src/adapters/hermes/paths.js";
+import { zonedToInstant } from "../../../src/core/schedule.js";
 import { RoutineSchema, parseManifest } from "../../../src/core/schema.js";
 
 const FIXTURE = fileURLToPath(new URL("../../fixtures/hermes/home", import.meta.url));
@@ -138,7 +143,7 @@ describe("readHermesProfile", () => {
     expect(bundle.instructions).toBe("");
     expect(bundle.facts).toEqual([
       "The user prefers short answers and plain words.",
-      "Deployments happen on Tuesdays.\nNever deploy on Fridays.",
+      "Deployments happen on Tuesdays. Never deploy on Fridays.",
       "Name: Ada. Works in Europe/Warsaw.",
     ]);
     expect(bundle.notes).toHaveLength(1);
@@ -165,7 +170,8 @@ describe("readHermesProfile", () => {
         instruction: "Remind me to renew the domain before it lapses.",
         enabled: true,
         timezone: "Europe/Warsaw",
-        schedule: { kind: "at", at: "2026-12-01T07:00:00.000Z" },
+        // The fixture's `run_at` has no offset: Hermes reads it in the zone of the machine.
+        schedule: { kind: "at", at: zonedToInstant("2026-12-01T08:00:00", machineTimezone()) },
       },
     ]);
 
@@ -200,7 +206,12 @@ describe("readHermesProfile", () => {
     expect(warnings).toContain(
       "1 memory entry over 500 characters was kept as the note memory-3",
     );
-    expect(warnings).toHaveLength(2);
+    expect(warnings).toContain("1 memory entry had line breaks folded into one line");
+    expect(warnings).toContain(
+      "cron job 'Renew the domain' has a one-off time without an offset; " +
+        `read in this machine's time zone (${machineTimezone()}), as Hermes does`,
+    );
+    expect(warnings).toHaveLength(4);
   });
 
   it("reads a Bundle that the manifest and routine schemas accept", async () => {
@@ -355,17 +366,23 @@ describe("readHermesProfile", () => {
     expect(warnings).toContain("cron job 'Job 66' is over the limit of 64 routines; not exported");
   });
 
-  it("reads one-off times and cron jobs in the time zone HERMES_TIMEZONE names", async () => {
-    const { bundle } = await readHermesProfile(
-      { ...ctx, env: { ...ctx.env, HERMES_TIMEZONE: "America/New_York" } },
+  it("reads cron jobs in the time zone HERMES_TIMEZONE names and a bare one-off time in the machine's", async () => {
+    // Whatever zone the machine running the test is in, HERMES_TIMEZONE is the other of the two.
+    const host = machineTimezone();
+    const profile = host === "America/New_York" ? "Asia/Tokyo" : "America/New_York";
+    const { bundle, warnings } = await readHermesProfile(
+      { ...ctx, env: { ...ctx.env, HERMES_TIMEZONE: profile } },
       "default",
     );
-    expect(bundle.routines.map((routine) => routine.timezone)).toEqual([
-      "America/New_York",
-      "America/New_York",
-      "America/New_York",
-    ]);
-    expect(bundle.routines[2]?.schedule).toEqual({ kind: "at", at: "2026-12-01T13:00:00.000Z" });
+    expect(bundle.routines.map((routine) => routine.timezone)).toEqual([profile, profile, profile]);
+    expect(bundle.routines[2]?.schedule).toEqual({
+      kind: "at",
+      at: zonedToInstant("2026-12-01T08:00:00", host),
+    });
+    expect(warnings).toContain(
+      "cron job 'Renew the domain' has a one-off time without an offset; " +
+        `read in this machine's time zone (${host}), as Hermes does`,
+    );
   });
 
   it("warns about a config.yaml that does not parse and reads without a model", async () => {
@@ -438,6 +455,58 @@ describe("memory", () => {
     const { bundle } = await readHermesProfile(ctx, "default");
     expect(bundle.facts).toEqual(["one", "two", "three", "four"]);
     expect(bundle.notes).toEqual([]);
+  });
+
+  it("folds the line breaks of an entry of up to 500 characters into single spaces, and says so", async () => {
+    await writeFile(join(hermes, "memories", "MEMORY.md"), "one\n§\ntwo\nlines\n§\nthree  \n \n  parts");
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+    expect(bundle.facts.slice(0, 3)).toEqual(["one", "two lines", "three parts"]);
+    expect(bundle.facts.some((fact) => /[\r\n]/.test(fact))).toBe(false);
+    expect(bundle.notes).toEqual([]);
+    expect(warnings).toContain("2 memory entries had line breaks folded into one line");
+  });
+
+  it("folds the entries of USER.md the same way, counted with those of MEMORY.md", async () => {
+    await writeFile(join(hermes, "memories", "MEMORY.md"), "plain\n§\nfirst\r\nsecond");
+    await writeFile(join(hermes, "memories", "USER.md"), "likes tea\nno sugar");
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+    expect(bundle.facts).toEqual(["plain", "first second", "likes tea no sugar"]);
+    expect(warnings).toContain("2 memory entries had line breaks folded into one line");
+  });
+
+  it("does not warn when no entry has a line break", async () => {
+    await writeFile(join(hermes, "memories", "MEMORY.md"), "one\n§\ntwo");
+    await rm(join(hermes, "memories", "USER.md"), { force: true });
+    const { warnings } = await readHermesProfile(ctx, "default");
+    expect(warnings.some((warning) => warning.includes("folded"))).toBe(false);
+  });
+
+  it("keeps an entry over 500 characters with its line breaks as a note, and does not count it as folded", async () => {
+    const long = `${"first line ".repeat(30)}\nsecond line\n${"third line ".repeat(30)}`.trim();
+    expect(long.length).toBeGreaterThan(500);
+    await writeFile(join(hermes, "memories", "MEMORY.md"), `short\nentry\n§\n${long}`);
+    await rm(join(hermes, "memories", "USER.md"), { force: true });
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+    expect(bundle.facts).toEqual(["short entry"]);
+    expect(bundle.notes).toEqual([{ name: "memory-2", text: long }]);
+    expect(bundle.notes[0]?.text.split("\n")).toHaveLength(3);
+    expect(warnings).toContain("1 memory entry had line breaks folded into one line");
+    expect(warnings).toContain("1 memory entry over 500 characters was kept as the note memory-2");
+  });
+
+  it("moves into a folder, which takes facts of one line only", async () => {
+    const out = join(root, "out");
+    const report = await move({
+      from: hermesAdapter,
+      to: folderAdapter,
+      agent: "default",
+      ctx: { ...ctx, targetDir: out },
+      write: { enableRoutines: false, includeFiles: false, onConflict: "update" },
+    });
+    expect(report.outcome).toBe("done");
+    expect(report.warnings).toContain("1 memory entry had line breaks folded into one line");
+    const written = await readFile(join(out, "MEMORY.md"), "utf8");
+    expect(written).toContain("- Deployments happen on Tuesdays. Never deploy on Fridays.\n");
   });
 
   it("keeps a USER.md entry over 500 characters as the note user-<n>", async () => {
