@@ -246,9 +246,11 @@ async function readSkills(dir: string, warnings: string[]): Promise<Skill[]> {
 // -- Memory ------------------------------------------------------------------------------------
 
 /**
- * The entries of `MEMORY.md`, then those of `USER.md`. An entry of up to 500 characters is a fact;
- * a longer one is kept whole as the note `memory-<n>` or `user-<n>`, `n` being its place in the
- * file, counted from 1.
+ * The entries of `MEMORY.md`, then those of `USER.md`. An entry of up to 500 characters is a fact,
+ * and a fact is one line, so the line breaks of an entry are folded into single spaces (as
+ * `factsToProse` does when it writes; the fact still goes back to Hermes as one entry) and a
+ * warning counts those entries. A longer entry is kept whole as the note `memory-<n>` or
+ * `user-<n>`, `n` being its place in the file, counted from 1.
  */
 async function readMemory(
   dir: string,
@@ -256,6 +258,7 @@ async function readMemory(
 ): Promise<{ facts: string[]; notes: Note[] }> {
   const facts: string[] = [];
   const notes: Note[] = [];
+  let folded = 0;
   for (const [file, prefix] of [
     ["MEMORY.md", "memory"],
     ["USER.md", "user"],
@@ -264,10 +267,18 @@ async function readMemory(
     for (const [index, entry] of parseEntries(text ?? "").entries()) {
       if (entry.length > MAX_FACT_CHARS) {
         notes.push({ name: `${prefix}-${index + 1}`, text: entry });
+      } else if (/[\r\n]/.test(entry)) {
+        folded += 1;
+        facts.push(entry.replace(/\s*[\r\n]+\s*/g, " ").trim());
       } else {
         facts.push(entry);
       }
     }
+  }
+  if (folded > 0) {
+    warnings.push(
+      `${plural(folded, "memory entry", "memory entries")} had line breaks folded into one line`,
+    );
   }
   if (notes.length > 0) {
     const one = notes.length === 1;

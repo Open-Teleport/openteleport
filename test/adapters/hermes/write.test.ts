@@ -1144,7 +1144,8 @@ describe("hermesAdapter", () => {
     expect(bundle.manifest.id).toBe(ADA_ID);
     expect(bundle.persona).toBe("Calm and curious.");
     expect(bundle.instructions).toBe("Answer briefly.");
-    expect(bundle.facts).toEqual(FACTS);
+    // A fact with a line break is one entry in Hermes and comes back folded into one line.
+    expect(bundle.facts).toEqual(FACTS.map((fact) => fact.replace(/\n/g, " ")));
     expect(bundle.skills.map((skill) => skill.name).sort()).toEqual(["notes", "web-brief"]);
     expect(bundle.routines.map((routine) => routine.name)).toEqual([
       "Morning digest",
