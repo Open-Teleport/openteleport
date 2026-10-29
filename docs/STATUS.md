@@ -4,7 +4,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 
 ## What is done
 
-### v0.1 (unreleased)
+### v0.1 (never published on its own; part of 0.2.0)
 
 - **Format `.jetpack` 0.1**: a zip whose unzipped layout is a working agent folder (`jetpack.json`, `AGENTS.md`, `SOUL.md`, `skills/*/SKILL.md`, `MEMORY.md`, `memory/*.md`, `routines/*.json`, `files/`, `avatar.*`). JSON Schema in `schema/jetpack.schema.json`. Hardened zip reading (size and path checks, no symlinks, no device names).
 - **Adapters**: `folder` (any agent folder), `openclaw` (read and write through the OpenClaw CLI; supports both the `cron` and the `automations` command families), `claude-code` (read and write of `.claude/agents/*.md`, project skills and project memory).
@@ -13,7 +13,7 @@ Last updated: 2026-10-29. This page says what exists, what is verified, and what
 - **Docs**: `README.md`, `docs/design.md` (the design and the reasoning), `docs/demo.md` (demo scenario and the end-to-end test), `docs/openclaw-plugin.md` (a proposal for an OpenClaw plugin), `CHANGELOG.md`.
 - **Website**: `site/` (Astro), not deployed yet.
 
-### v0.2 (unreleased, on the `v0.2` branch)
+### v0.2 (merged into `main` on 2026-10-29; version 0.2.0, published once the npm token exists)
 
 The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; the research behind it is in `docs/superpowers/research/`.
 
@@ -56,7 +56,7 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
   - **OpenBot**: the schema of `openbot.db` (the adapter knows migration 47; a newer one gets a warning, a missing table or column an error), and that Server settings accepts the import zip it writes, including the `x-openteleport` key in its manifest.
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
-- The first npm release (needs an `NPM_TOKEN` secret and a dated CHANGELOG entry; the release workflow refuses a tag that does not match `package.json`). See "Release" below.
+- The npm publication of 0.2.0 (needs the `NPM_TOKEN` secret and the `v0.2.0` tag; the release workflow refuses a tag that does not match `package.json`). See "Release" below.
 
 ## Known small issues (good first fixes)
 
@@ -78,12 +78,12 @@ Found on the same real install and reproduced through OpenTeleport itself. A fix
 
 ## Release
 
-`package.json` stays at `0.1.0` until the owner decides. `v0.1.0` has not been released (there is no `NPM_TOKEN` secret yet, and neither the CHANGELOG entry nor a tag has a date). There are two paths:
+The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly: `package.json` is at `0.2.0` and the CHANGELOG entry is dated 2026-10-29. What is left to publish:
 
-1. Tag `v0.1.0` on commit `f1ad906` (the commit v0.2 branched from), release it, then bump to `0.2.0` after the merge and release that. Two versions on npm, the second with everything on this page.
-2. Skip `0.1.0` and release `0.2.0` directly: set `version` to `0.2.0`, date the CHANGELOG entry, tag `v0.2.0`.
+1. Add the `NPM_TOKEN` repository secret (an npm automation token with publish rights for the `openteleport` package).
+2. Tag the release commit: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow checks that the tag matches `package.json`, runs lint, build and tests, and publishes with provenance.
 
-Either way the `NPM_TOKEN` repository secret has to exist first, and the release workflow refuses a tag that does not match `package.json`.
+Until the package is on npm, `npx openteleport` and the npm link on the website do not work.
 
 ## How decisions are recorded
 
