@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
@@ -44,6 +44,13 @@ it("exports/imports through the engine and preserves context and flags", async (
   const h = harness();
   await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "reviewer.jetpack"], { from: "user" });
   expect(h.output.mock.calls[0][0].outcome).toBe("exported");
+  const exported = h.output.mock.calls[0][0];
+  expect(exported.reportSaved).toBe(true);
+  expect(JSON.parse(await readFile(exported.reportPath, "utf8"))).toMatchObject({
+    outcome: "exported", artifactPath: join(home, "reviewer.jetpack"),
+  });
+  expect(await readFile(exported.reportPath, "utf8")).not.toContain("Review changes");
+
   const imported = harness();
   const write = imported.adapter.write;
   imported.adapter.write = async (ctx, bundle, opts) => {
@@ -54,6 +61,12 @@ it("exports/imports through the engine and preserves context and flags", async (
   };
   await imported.program.parseAsync(["teleport", "import", "reviewer.jetpack", "--copy"], { from: "user" });
   expect(imported.output.mock.calls[0][0].outcome).toBe("done");
+  const received = imported.output.mock.calls[0][0];
+  expect(received.reportSaved).toBe(true);
+  expect(received.reportPath).not.toBe(exported.reportPath);
+  expect(JSON.parse(await readFile(received.reportPath, "utf8"))).toMatchObject({ outcome: "done" });
+  expect((await readdir(join(home, ".openteleport", "reports"))).length).toBe(2);
+
   expect(imported.adapter.written[0].opts).toEqual({ onConflict: "copy", includeFiles: false, enableRoutines: false });
 });
 it("refuses archive overwrite and replace, and exposes handoff", async () => {
@@ -69,4 +82,18 @@ it("refuses archive overwrite and replace, and exposes handoff", async () => {
     items: { approximated: [], skipped: [], warnings: ["Check destination"] } });
   await target.program.parseAsync(["teleport", "import", "valid.jetpack"], { from: "user" });
   expect(target.output.mock.calls[0][0]).toMatchObject({ outcome: "handoff", nextStep: "Review output", warnings: ["Check destination"] });
+});
+
+it("preserves transfer success when report storage is unavailable", async () => {
+  await mkdir(join(home, ".openteleport"));
+  const blocked = join(home, ".openteleport", "reports");
+  await writeFile(blocked, "keep this file");
+  const h = harness();
+  await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "reviewer.jetpack"], { from: "user" });
+  const result = h.output.mock.calls[0][0];
+  expect(result).toMatchObject({ outcome: "exported", reportSaved: false });
+  expect(result.reportPath).toBeUndefined();
+  expect(result.warnings).toContain("Transfer completed, but its report could not be saved; retain this JSON result.");
+  expect((await library.readBundle(join(home, "reviewer.jetpack"))).instructions).toBe("Review changes");
+  expect(await readFile(blocked, "utf8")).toBe("keep this file");
 });

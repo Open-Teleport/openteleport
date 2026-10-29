@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { copyFile, constants } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -16,6 +17,26 @@ async function runtime() {
       logger: (message) => process.stderr.write(message + "\n"),
     },
   };
+}
+
+async function retainReport(ctx, report) {
+  try {
+    const root = join(ctx.home, ".openteleport");
+    const directory = join(root, "reports");
+    for (const path of [root, directory]) {
+      try { await mkdir(path, { mode: 0o700 }); }
+      catch (error) { if (error.code !== "EEXIST") throw error; }
+      const info = await lstat(path);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe report directory");
+    }
+    const reportPath = join(directory, `openclaw-${randomUUID()}.json`);
+    await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    return { ...report, reportPath, reportSaved: true };
+  } catch {
+    // The destination operation already succeeded; do not turn a report failure into a retry.
+    return { ...report, reportSaved: false, warnings: [...report.warnings,
+      "Transfer completed, but its report could not be saved; retain this JSON result."] };
+  }
 }
 
 export function registerTeleportCommands(program, options = {}) {
@@ -54,7 +75,7 @@ export function registerTeleportCommands(program, options = {}) {
         });
         const out = resolve(ctx.cwd, flags.out);
         await promisify(copyFile)(archive, out, constants.COPYFILE_EXCL);
-        output({ ...report, artifactPath: out });
+        output(await retainReport(ctx, { ...report, artifactPath: out }));
       } finally { await rm(temporary, { recursive: true, force: true }); }
     }));
   root.command("import").description("Import into this instance; source bundle is retained")
@@ -70,11 +91,12 @@ export function registerTeleportCommands(program, options = {}) {
       }
       const absolute = resolve(ctx.cwd, path);
       const bundle = await library.readBundle(absolute, { requireManifest: !(await stat(absolute)).isDirectory() });
-      output(await library.importBundle({
+      const report = await library.importBundle({
         to: adapter, bundle, ctx, write: {
           onConflict: flags.copy ? "copy" : "update",
           includeFiles: flags.includeFiles === true, enableRoutines: flags.enableRoutines === true,
         },
-      }));
+      });
+      output(await retainReport(ctx, report));
     }));
 }

@@ -11,7 +11,7 @@ Plugin discovery/help must not invoke application APIs, spawn OpenTeleport, inst
 ## Runtime contracts
 
 OpenClaw calls the public JavaScript library lazily inside command handlers. It preserves the host's
-state/config environment, uses shell cwd for relative paths, and prints the entire result as JSON.
+state/config environment, uses shell cwd for relative paths, and prints the entire result as JSON. Successful transfers also save an exclusive JSON report under the OpenTeleport home; reportPath identifies it. A report-save failure preserves transfer success and adds a warning, rather than encouraging a retry.
 It does not add a state-ownership lock around child OpenClaw calls. Its development package has a
 local OpenTeleport dependency until a suitable version is published.
 
