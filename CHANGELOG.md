@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-29
+
+Combines the v0.3 session integration and v0.4 native plugin milestones. There was no separate npm 0.3.0 release.
+
+### Added
+
+- Local stdio MCP server (`openteleport mcp`) in the main npm package: preview transfers, review destination locations and capability losses, then apply a confirmed plan. Durable operation receipts support checking outcomes after reconnecting.
+- Claude Code plugin and marketplace entry, plus OpenClaw and Hermes native command plugins in the tagged repository. Native plugins are source installations, not separate npm or pip releases.
+- Structured memory selection through `--no-memory`, MCP, the terminal wizard and native commands, with omissions recorded in transfer reports.
+- Exclusive export mode (`--no-overwrite`); wizard and session exports refuse existing archives.
+
+### Fixed
+
+- Codex copies receive distinct runtime names. Exporting an imported custom agent retains its associated skills.
+- Wizard cancellation leaves the destination untouched; memory exclusion explains the effects of updating an existing agent and offers a separate copy.
+
+### Limits
+
+- Memory selection is not anonymization. Transfer previews are not exact file diffs, writes are not transactional, and there is no automatic rollback.
+- OpenBot, Grok Bot and Letta still require the manual completion step reported by their adapters. Real-application validation remains incomplete; see `docs/STATUS.md`.
+
 ## [0.2.0] - 2026-10-29
 
 The first published release. It carries everything listed under 0.1.0 below, which was never published on its own.
@@ -114,5 +135,6 @@ First release.
 - There is no SSH transport. To move an agent to another machine, export it, copy the file and
   import it there.
 
+[0.4.0]: https://github.com/Open-Teleport/openteleport/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/Open-Teleport/openteleport/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0

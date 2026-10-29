@@ -7,19 +7,17 @@ and scoring notes outside that folder so they do not become part of the transfer
 
 ## Select the build being evaluated
 
-This guide targets the development integrations, not the published npm 0.2.0 artifact. Record the
-checkout commit (`git rev-parse HEAD`) as well as the package version: an integration checkout may
-still report 0.2.0 while containing features absent from the published archive.
+Evaluate the pinned 0.4.0 release and record the package version. For source plugins, also record
+checkout commit (`git rev-parse HEAD`).
 
 | Build | Available pilot interface |
 | --- | --- |
-| Published `openteleport@0.2.0` | Explicit CLI commands and the original terminal wizard. No MCP, native plugins, memory-exclusion switch or export `--no-overwrite` option. |
-| v0.3 checkout, PR #6 | MCP preview/apply, Claude Code plugin, memory selection and the revised terminal wizard. Build and run this checkout explicitly. |
-| v0.4 checkout, PR #7 | The v0.3 features plus native OpenClaw and Hermes plugins. Follow their development installation instructions. |
+| `openteleport@0.2.0` baseline | Original CLI and terminal wizard; no MCP or memory exclusion. |
+| `openteleport@0.4.0` | CLI, revised wizard, memory selection, exclusive export and MCP preview/apply. |
+| Repository tag `v0.4.0` | The same core plus Claude Code, OpenClaw and Hermes source plugins. Follow their installation instructions. |
 
-The reviewer fixture is supplied by this checkout under `examples/`; it is not included in the npm
-package. Do not replace the commands below with unversioned `npx openteleport` and assume the same
-features are being tested. Record a published-0.2.0 baseline separately from a development run.
+The reviewer fixture lives in `examples/` in the repository and is not included in the npm package.
+Use pinned versions to keep pilot results reproducible. Record the 0.2.0 baseline separately.
 A participant's need for installation help remains part of the result, even if the transfer succeeds.
 
 ## Include all three audiences
