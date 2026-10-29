@@ -172,3 +172,14 @@ CI runs this check on Linux, macOS and Windows. It verifies the root npm package
 still need their separate installation checks and a published dependency version before distribution.
 
 For a synthetic reviewer, repeatable tasks and a private scoring form, see [Agent transfer pilot](pilot.md).
+
+## Release version alignment
+
+After changing the root package.json version, run npm run sync:plugin-versions and review the diff.
+This synchronizes the root lockfile, Claude plugin and marketplace, plus OpenClaw package/lockfile and
+Hermes manifest when present. It does not choose a version, stage files, publish anything, remove the
+OpenClaw private flag or replace its development dependency. Commit the reviewed metadata alongside
+the release change. CI runs npm run check:plugin-versions without modifying files.
+
+When a separate release PR changes the root version before this branch merges, rerun synchronization
+after incorporating that release. A clean Git merge alone does not prove that plugin versions agree.
