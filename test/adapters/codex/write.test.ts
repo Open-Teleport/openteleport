@@ -305,7 +305,7 @@ describe("write a new agent", () => {
     await writeCodexAgent(ctx, ada(), UPDATE);
 
     expect((await readFile(join(codex, "config.toml"))).equals(before)).toBe(true);
-    expect((await readdir(codex)).sort()).toEqual(["agents", "config.toml", "openteleport-ids.json"]);
+    expect((await readdir(codex)).sort()).toEqual(["agents", "config.toml", "openteleport-ids.json", "openteleport-skills"]);
     expect(await exists(join(codex, "memories"))).toBe(false);
     expect(await exists(join(codex, "skills"))).toBe(false);
   });
@@ -327,7 +327,7 @@ describe("write a new agent", () => {
     expect(result.items.skipped).toEqual([]);
     expect(result.items.warnings).toEqual([
       "Codex skills are shared by every tool reading ~/.agents/skills",
-      "Use the agent in Codex as @ada (custom agents need `agents.enabled`, on by default)",
+      'Use the Codex agent named "Ada" (file: ada.toml)',
     ]);
   });
 
@@ -338,7 +338,7 @@ describe("write a new agent", () => {
 
     expect(result.items.approximated).toEqual([]);
     expect(result.items.warnings).toEqual([
-      "Use the agent in Codex as @ada (custom agents need `agents.enabled`, on by default)",
+      'Use the Codex agent named "Ada" (file: ada.toml)',
     ]);
     expect(await exists(join(home, ".agents"))).toBe(false);
     expect((await readAgentFile("ada")).developer_instructions).toBe("Be brief.");
@@ -626,11 +626,11 @@ describe("an agent file that is already there", () => {
     expect(result.targetAgentId).toBe("ada-2");
     expect(result.artifactPath).toBe(agentPath("ada-2"));
     expect(await readFile(agentPath("ada"), "utf8")).toBe(foreign);
-    expect((await readAgentFile("ada-2")).name).toBe("Ada");
+    expect((await readAgentFile("ada-2")).name).toBe("Ada-2");
     expect(JSON.parse(await readFile(idsPath(), "utf8"))).toEqual({ "ada-2": ADA_ID });
     expect(result.items.warnings).toContain("agent 'ada' already exists; written as 'ada-2'");
     expect(result.items.warnings).toContain(
-      "Use the agent in Codex as @ada-2 (custom agents need `agents.enabled`, on by default)",
+      'Use the Codex agent named "Ada-2" (file: ada-2.toml)',
     );
   });
 

@@ -363,7 +363,7 @@ describe("read an agent file", () => {
       models: [{ model: "gpt-5.5-mini" }],
     });
     expect(bundle.manifest["x-codex"]).toEqual({ nickname_candidates: ["Atlas", "Delta"] });
-    expect(warnings).toEqual([]);
+    expect(warnings).toEqual(["skills for agent 'reviewer' not exported: no valid OpenTeleport skill associations; shared skills are not included automatically"]);
   });
 
   it("splits a developer_instructions in the persona layout", async () => {
@@ -410,6 +410,7 @@ describe("read an agent file", () => {
     });
     expect(warnings).toEqual([
       "agent file settings not exported: model_verbosity, features, skills.include_instructions",
+      "skills for agent 'tuned' not exported: no valid OpenTeleport skill associations; shared skills are not included automatically",
     ]);
   });
 
