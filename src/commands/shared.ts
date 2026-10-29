@@ -28,6 +28,8 @@ export type CommonOptions = {
 export type WriteFlags = {
   enableRoutines?: boolean;
   includeFiles?: boolean;
+  /** Commander maps --no-memory to memory=false. */
+  memory?: boolean;
   copy?: boolean;
   replace?: boolean;
   yes?: boolean;

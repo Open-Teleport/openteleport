@@ -1,3 +1,5 @@
+import { selectMemory } from "./selection.js";
+
 // The engine only knows the adapter interface; it is type-only, so core loads no adapter code.
 import type { Adapter, AdapterCapabilities, Ctx, WriteOpts } from "../adapters/types.js";
 import { writeBundle } from "./bundle.js";
@@ -243,8 +245,8 @@ const filesIf = (bundle: Bundle, includeFiles: boolean): Bundle =>
 
 /**
  * What the report says about the files a Bundle carries: that they may hold personal data, so
- * the promise that a bundle is safe to send holds only without them, and how many were too
- * large for the secret scan to read.
+ * omitting files is not a guarantee of safe sharing. Also report files too large for the
+ * secret scan to read.
  */
 function filesWarnings(bundle: Bundle): string[] {
   const warnings = bundle.files.length > 0 ? [PERSONAL_DATA_WARNING] : [];
@@ -269,13 +271,15 @@ async function deliver(opts: {
   to: Adapter;
   bundle: Bundle;
   ctx: Ctx;
+  includeMemory?: boolean;
   write: WriteOpts;
   source: MoveReport["source"];
   readWarnings: string[];
 }): Promise<MoveReport> {
   const { to, ctx, write } = opts;
-  // Files that stay behind are not scanned: a credential in one must not block the move.
-  const carried = filesIf(opts.bundle, write.includeFiles);
+  // Excluded content is not scanned: a credential in it must not block the selected transfer.
+  const selection = selectMemory(opts.bundle, opts.includeMemory, write.onConflict);
+  const carried = filesIf(selection.bundle, write.includeFiles);
   assertNoSecrets(carried);
   const { bundle, skipped } = diffCapabilities(carried, to.capabilities, to.displayName);
   const result = await to.write(targetSide(ctx), bundle, write);
@@ -290,8 +294,8 @@ async function deliver(opts: {
     // What the target handed back as skipped did not arrive, so it is not listed as moved.
     moved: movedItems(bundle, result.items.skipped),
     approximated: [...result.items.approximated],
-    skipped: [...skipped, ...result.items.skipped],
-    warnings: [...opts.readWarnings, ...filesWarnings(bundle), ...result.items.warnings],
+    skipped: [...selection.excluded, ...skipped, ...result.items.skipped],
+    warnings: [...opts.readWarnings, ...selection.warnings, ...filesWarnings(bundle), ...result.items.warnings],
   };
 }
 
@@ -305,6 +309,7 @@ export async function move(opts: {
   to: Adapter;
   agent: string;
   ctx: Ctx;
+  includeMemory?: boolean;
   write: WriteOpts;
 }): Promise<MoveReport> {
   const { from, agent, ctx } = opts;
@@ -315,6 +320,7 @@ export async function move(opts: {
     bundle,
     ctx,
     write: opts.write,
+    includeMemory: opts.includeMemory,
     source: { app: from.name, agent },
     readWarnings: read.warnings,
   });
@@ -331,10 +337,12 @@ export async function exportBundle(opts: {
   ctx: Ctx;
   out?: string;
   includeFiles: boolean;
+  includeMemory?: boolean;
 }): Promise<{ bundle: Bundle; report: MoveReport }> {
   const { from, agent, ctx } = opts;
   const read = await from.read(sourceSide(ctx), agent);
-  const bundle = filesIf(await withId(from, agent, ctx, read.bundle), opts.includeFiles);
+  const selection = selectMemory(await withId(from, agent, ctx, read.bundle), opts.includeMemory);
+  const bundle = filesIf(selection.bundle, opts.includeFiles);
   assertNoSecrets(bundle);
   if (opts.out !== undefined) await writeBundle(bundle, opts.out);
   return {
@@ -344,8 +352,8 @@ export async function exportBundle(opts: {
       outcome: "exported",
       moved: movedItems(bundle),
       approximated: [],
-      skipped: [],
-      warnings: [...read.warnings, ...filesWarnings(bundle)],
+      skipped: selection.excluded,
+      warnings: [...read.warnings, ...selection.warnings, ...filesWarnings(bundle)],
     },
   };
 }
@@ -359,6 +367,7 @@ export async function importBundle(opts: {
   to: Adapter;
   bundle: Bundle;
   ctx: Ctx;
+  includeMemory?: boolean;
   write: WriteOpts;
 }): Promise<MoveReport> {
   const { name } = opts.bundle.manifest;
@@ -368,6 +377,7 @@ export async function importBundle(opts: {
     bundle,
     ctx: opts.ctx,
     write: opts.write,
+    includeMemory: opts.includeMemory,
     source: { app: BUNDLE_SOURCE, agent: name },
     readWarnings: [],
   });

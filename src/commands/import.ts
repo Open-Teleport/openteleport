@@ -36,7 +36,7 @@ export async function importCommand(source: string, opts: ImportOptions): Promis
   const bundle = await readInput(path, isDirectory);
   if (onConflict === "replace") await confirmReplace(opts, bundle.manifest.name, to);
   const report = await withReplaceHint(onConflict, () =>
-    importBundle({ to, bundle, ctx, write: writeOptsOf(opts, onConflict) }),
+    importBundle({ to, bundle, ctx, includeMemory: opts.memory !== false, write: writeOptsOf(opts, onConflict) }),
   );
   printReport(report, opts, await saveReport(report, ctx.home, bundle.manifest.name));
 }

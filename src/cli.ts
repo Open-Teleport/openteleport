@@ -50,6 +50,7 @@ const BASIC_FLAGS: readonly Row[] = [
   ["--agent <id|name>", "which agent (a terminal asks if you leave it out)"],
   ["--out <file.jetpack>", "where export writes the file"],
   ["--include-files", "carry the agent's files/ too"],
+  ["--no-memory", "omit structured facts and notes (not anonymization)"],
   ["--json", "print the result as JSON on stdout"],
 ];
 
@@ -105,6 +106,7 @@ function buildProgram(showAll: boolean): Command {
       .addOption(
         advanced("--enable-routines", "keep imported routines enabled (by default they are disabled)"),
       )
+      .option("--no-memory", "omit facts and notes; updates may remove existing imported memory")
       .option("--include-files", "carry the agent's files/ too")
       .addOption(advanced("--copy", "write a copy next to an agent of the same name"))
       .addOption(advanced("--replace", "overwrite an agent of the same name"))
@@ -139,7 +141,8 @@ function buildProgram(showAll: boolean): Command {
     .option("--from <adapter>", "the app to export from (default: the agent folder you are in)")
     .option("--agent <id|name>", "the agent to export")
     .option("--out <file.jetpack>", "where to write the file (default: <name>.jetpack)")
-    .option("--include-files", "carry the agent's files/ too");
+    .option("--no-memory", "omit facts and notes; updates may remove existing imported memory")
+      .option("--include-files", "carry the agent's files/ too");
   withOutput(withDirs(exporting)).action(act((opts: ExportOptions) => exportCommand(opts)));
 
   const importing = program

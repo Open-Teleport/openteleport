@@ -61,7 +61,8 @@ This is not anonymization. Instructions, persona, skills, routines, attachments 
 still contain personal information. Review those separately before sharing. When updating an existing
 agent, omitted memory may remove previously imported destination memory, depending on the adapter;
 use copy to retain the existing agent. This option selects incoming content, not destination fields to
-leave untouched. The ordinary CLI and native plugin commands do not yet expose this switch.
+leave untouched. The CLI exposes the same selection as --no-memory on export, import and move (including --keep).
+Native plugin support is described in their setup documentation.
 
 ## Destination location disclosure
 

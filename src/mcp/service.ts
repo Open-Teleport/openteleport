@@ -1,3 +1,4 @@
+import { selectMemory } from "../core/selection.js";
 import { scanDisclosure } from "./scan.js";
 import { destinationScope } from "./destination.js";
 import { fitsPreviewBudget } from "./budget.js";
@@ -127,18 +128,10 @@ export class TransferSession {
       if (!input.path) throw new UsageError("An import needs a bundle path.");
       bundle = await this.read(input.path);
     }
-    const excluded: Item[] = [];
-    const selectionWarnings: string[] = [];
-    if (input.includeMemory === false) {
-      if (bundle.facts.length) excluded.push({ field: "memory.facts", detail: `${bundle.facts.length} facts excluded by includeMemory=false` });
-      if (bundle.notes.length) excluded.push({ field: "memory.notes", detail: `${bundle.notes.length} notes excluded by includeMemory=false` });
-      selectionWarnings.push("Only structured facts and notes are excluded. Instructions, persona, skills, routines, files and metadata may still contain personal information; this is not anonymization.");
-      if (to && input.onConflict !== "copy") selectionWarnings.push("Updating without memory may remove previously imported destination memory, depending on the adapter. Use copy to keep the existing agent.");
-    }
+    const selection = selectMemory(bundle, input.includeMemory, to ? input.onConflict ?? "update" : undefined);
+    const { excluded, warnings: selectionWarnings } = selection;
     // Select before scanning and cloning; never mutate the source or reread it during apply.
-    bundle = { ...bundle, files: input.includeFiles ? bundle.files : [],
-      facts: input.includeMemory === false ? [] : bundle.facts,
-      notes: input.includeMemory === false ? [] : bundle.notes };
+    bundle = { ...selection.bundle, files: input.includeFiles ? bundle.files : [] };
 
     if (!fitsPreviewBudget(bundle, MAX_PLAN_BYTES)) {
       throw new UsageError("Bundle exceeds the session preview size or complexity limit; use the CLI.");
