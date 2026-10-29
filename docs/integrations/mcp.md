@@ -62,7 +62,7 @@ still contain personal information. Review those separately before sharing. When
 agent, omitted memory may remove previously imported destination memory, depending on the adapter;
 use copy to retain the existing agent. This option selects incoming content, not destination fields to
 leave untouched. The CLI exposes the same selection as --no-memory on export, import and move (including --keep).
-Native plugin support is described in their setup documentation.
+The interactive wizard also asks whether to include facts and notes. When omitting memory for an application transfer, it asks whether to create a separate copy or update the previously imported agent, and explains the memory consequences before confirmation. Native plugin support is described in their setup documentation.
 
 ## Destination location disclosure
 

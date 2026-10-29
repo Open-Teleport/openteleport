@@ -1,4 +1,4 @@
-// The wizard asks four things (source, agent, target, go-ahead) and then calls the same `move` or
+// The wizard asks for source, agent, target, memory and go-ahead, then calls the same `move` or
 // `export` the commands run. A fake prompter answers from a queue and records what it was asked;
 // `move` and `export` are stand-ins, since what they do is covered by their own tests.
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -133,6 +133,10 @@ const SOURCE_QUESTION = "Where does the agent live now?";
 const ALPHA = "In-memory alpha";
 const BETA = "In-memory beta";
 const JETPACK = "Save as a .jetpack file";
+const INCLUDE = "Include facts and notes";
+const EXCLUDE = "Leave out facts and notes";
+const COPY = "Create a separate copy";
+const UPDATE = "Update the previously imported agent";
 
 let alpha: Adapter;
 let beta: Adapter;
@@ -260,7 +264,7 @@ describe("runWizard", () => {
 
   describe("the summary", () => {
     it("says what will happen, in one go, before asking", async () => {
-      const { prompter, calls } = fakePrompter([ALPHA, BETA, CANCELLED]);
+      const { prompter, calls } = fakePrompter([ALPHA, BETA, INCLUDE, CANCELLED]);
       await runWizard(prompter, {}, depsFor([alpha, beta]));
 
       expect(texts(calls, "note").at(-1)).toBe(
@@ -277,7 +281,7 @@ describe("runWizard", () => {
         ...createMemoryAdapter({ name: "beta", outcome: "handoff" }),
         displayName: "OpenBot",
       };
-      const { prompter, calls } = fakePrompter([ALPHA, "OpenBot", CANCELLED]);
+      const { prompter, calls } = fakePrompter([ALPHA, "OpenBot", INCLUDE, CANCELLED]);
       await runWizard(prompter, {}, depsFor([alpha, handoff]));
 
       const summary = texts(calls, "note").at(-1);
@@ -288,7 +292,7 @@ describe("runWizard", () => {
     });
 
     it("says where a .jetpack file will go, and not that routines arrive disabled", async () => {
-      const { prompter, calls } = fakePrompter([ALPHA, JETPACK, CANCELLED]);
+      const { prompter, calls } = fakePrompter([ALPHA, JETPACK, INCLUDE, CANCELLED]);
       await runWizard(prompter, {}, depsFor([alpha, beta]));
       expect(texts(calls, "note").at(-1)).toBe("Save Ada from In-memory alpha as ada.jetpack in this folder.");
     });
@@ -296,7 +300,7 @@ describe("runWizard", () => {
 
   describe("doing it", () => {
     it("moves with the same function the move command runs, by default options", async () => {
-      const { prompter, calls } = fakePrompter([ALPHA, BETA, true]);
+      const { prompter, calls } = fakePrompter([ALPHA, BETA, INCLUDE, true]);
       const deps = depsFor([alpha, beta]);
       await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
 
@@ -308,7 +312,7 @@ describe("runWizard", () => {
     });
 
     it("passes the options it was given on, and never asks to replace", async () => {
-      const { prompter } = fakePrompter([ALPHA, BETA, true]);
+      const { prompter } = fakePrompter([ALPHA, BETA, INCLUDE, true]);
       const deps = depsFor([alpha, beta]);
       await runWizard(prompter, { quiet: true, sourceDir: "/somewhere" }, deps);
 
@@ -320,14 +324,14 @@ describe("runWizard", () => {
 
     it("points at the report for the step that is left after a hand-over", async () => {
       const handoff = createMemoryAdapter({ name: "beta", outcome: "handoff" });
-      const { prompter, calls } = fakePrompter([ALPHA, BETA, true]);
+      const { prompter, calls } = fakePrompter([ALPHA, BETA, INCLUDE, true]);
       await runWizard(prompter, {}, depsFor([alpha, handoff]));
       expect(texts(calls, "outro")).toEqual(["Done. The report names the step that is left."]);
     });
 
     it("exports to <slug>.jetpack when the .jetpack file is picked", async () => {
       const lovelace = app("alpha", { ada: "Ada Lovelace" });
-      const { prompter } = fakePrompter([ALPHA, JETPACK, true]);
+      const { prompter } = fakePrompter([ALPHA, JETPACK, INCLUDE, true]);
       const deps = depsFor([lovelace, beta]);
       await expect(runWizard(prompter, { quiet: true }, deps)).resolves.toBe("done");
 
@@ -343,7 +347,7 @@ describe("runWizard", () => {
 
     it("uses the agent that was picked, not the first one", async () => {
       const builders = app("alpha", { ada: "Ada", bob: "Bob" });
-      const { prompter } = fakePrompter([ALPHA, "Bob", BETA, true]);
+      const { prompter } = fakePrompter([ALPHA, "Bob", BETA, INCLUDE, true]);
       const deps = depsFor([builders, beta]);
       await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
 
@@ -356,7 +360,7 @@ describe("runWizard", () => {
       const gamma = app("gamma", {});
       const listAlpha = vi.spyOn(alpha, "list");
       const listZed = vi.spyOn(zed, "list");
-      const { prompter, calls } = fakePrompter([BETA, "In-memory gamma", true]);
+      const { prompter, calls } = fakePrompter([BETA, "In-memory gamma", INCLUDE, true]);
       const deps = depsFor([alpha, zed, gamma]);
       await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
 
@@ -368,7 +372,7 @@ describe("runWizard", () => {
 
     it("exports the agent that was picked when there are several", async () => {
       const builders = app("alpha", { ada: "Ada", bob: "Bob Builder" });
-      const { prompter } = fakePrompter([ALPHA, "Bob Builder", JETPACK, true]);
+      const { prompter } = fakePrompter([ALPHA, "Bob Builder", JETPACK, INCLUDE, true]);
       const deps = depsFor([builders, beta]);
       await expect(runWizard(prompter, {}, deps)).resolves.toBe("done");
 
@@ -380,7 +384,7 @@ describe("runWizard", () => {
     });
 
     it("lets a failure of move through", async () => {
-      const { prompter } = fakePrompter([ALPHA, BETA, true]);
+      const { prompter } = fakePrompter([ALPHA, BETA, INCLUDE, true]);
       const deps = depsFor([alpha, beta]);
       deps.move.mockRejectedValue(new Error("Found 1 possible secret"));
       await expect(runWizard(prompter, {}, deps)).rejects.toThrow("Found 1 possible secret");
@@ -388,7 +392,7 @@ describe("runWizard", () => {
     });
 
     it("lets a failure of export through", async () => {
-      const { prompter } = fakePrompter([ALPHA, JETPACK, true]);
+      const { prompter } = fakePrompter([ALPHA, JETPACK, INCLUDE, true]);
       const deps = depsFor([alpha, beta]);
       deps.exportTo.mockRejectedValue(new Error("Found 2 possible secrets"));
       await expect(runWizard(prompter, {}, deps)).rejects.toThrow("Found 2 possible secrets");
@@ -399,14 +403,16 @@ describe("runWizard", () => {
   describe("cancelling", () => {
     const two = (): Adapter => app("alpha", { ada: "Ada", bob: "Bob" });
 
-    // The four questions, each answered up to the one that is cancelled.
+    // Every question, including the optional destination mode, can be cancelled before writes.
     it.each([
       ["source", [CANCELLED]],
       ["agent", [ALPHA, CANCELLED]],
       ["target", [ALPHA, "Ada", CANCELLED]],
-      ["go-ahead", [ALPHA, "Ada", BETA, CANCELLED]],
-      ["go-ahead, answered no", [ALPHA, "Ada", BETA, false]],
-      ["go-ahead for a file, answered no", [ALPHA, "Ada", JETPACK, false]],
+      ["memory", [ALPHA, "Ada", BETA, CANCELLED]],
+      ["destination mode", [ALPHA, "Ada", BETA, EXCLUDE, CANCELLED]],
+      ["go-ahead", [ALPHA, "Ada", BETA, INCLUDE, CANCELLED]],
+      ["go-ahead, answered no", [ALPHA, "Ada", BETA, INCLUDE, false]],
+      ["go-ahead for a file, answered no", [ALPHA, "Ada", JETPACK, INCLUDE, false]],
     ] as const)("at the %s question does nothing and says so", async (_question, answers) => {
       const { prompter, calls } = fakePrompter([...answers]);
       const deps = depsFor([two(), beta]);
@@ -415,6 +421,36 @@ describe("runWizard", () => {
       expect(deps.move).not.toHaveBeenCalled();
       expect(deps.exportTo).not.toHaveBeenCalled();
       expect(texts(calls, "outro")).toEqual(["Cancelled."]);
+    });
+  });
+
+  describe("memory selection", () => {
+    it("exports without memory only after showing the selection and approval", async () => {
+      const { prompter, calls } = fakePrompter([ALPHA, JETPACK, EXCLUDE, true]);
+      const deps = depsFor([alpha, beta]);
+      await runWizard(prompter, {}, deps);
+      expect(deps.exportTo).toHaveBeenCalledWith({ from: "alpha", agent: "ada", out: "ada.jetpack", memory: false });
+      expect(texts(calls, "note").join(" ")).toContain("other content may still contain personal information");
+      const selection = calls.findIndex(call => call.kind === "note" && call.text.includes("will be left out"));
+      expect(selection).toBeGreaterThan(-1);
+      expect(selection).toBeLessThan(calls.findIndex(call => call.kind === "confirm"));
+    });
+
+    it.each([[COPY, true], [UPDATE, false]] as const)("moves without memory using the selected mode: %s", async (mode, copy) => {
+      const { prompter, calls } = fakePrompter([ALPHA, BETA, EXCLUDE, mode, true]);
+      const deps = depsFor([alpha, beta]);
+      await runWizard(prompter, {}, deps);
+      expect(deps.move).toHaveBeenCalledWith({ from: "alpha", to: "beta", agent: "ada", memory: false, copy });
+      const notes = texts(calls, "note").join(" ");
+      expect(notes).toContain(copy ? "existing agent is kept" : "may remove previously imported destination memory");
+    });
+
+    it("does not transfer excluded memory when final approval is declined", async () => {
+      const { prompter } = fakePrompter([ALPHA, BETA, EXCLUDE, COPY, false]);
+      const deps = depsFor([alpha, beta]);
+      expect(await runWizard(prompter, {}, deps)).toBe("cancelled");
+      expect(deps.move).not.toHaveBeenCalled();
+      expect(deps.exportTo).not.toHaveBeenCalled();
     });
   });
 
