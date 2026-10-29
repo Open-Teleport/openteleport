@@ -19,7 +19,7 @@ This documentation-only report is based on `main` (`f1ad906e6001157497a46c907a59
 
 The synthetic homes contained no copied authentication. Child processes received required OS environment variables and isolated home paths. Hermes imports used `-B` / `PYTHONDONTWRITEBYTECODE=1`. Codex warned that temporary homes cannot receive PATH helper aliases, but discovery probes exited successfully. No LLM was called, no custom subagent was spawned, no gateway/scheduler was started, and no import targeted the user's real application directories.
 
-## Assumption versus observation
+## Initial assumption versus observation
 
 | Assumption | What is actually present / what happened | Adapter and consequence |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ The synthetic homes contained no copied authentication. Child processes received
 
 ## Findings for the post-review wave
 
-1. **Codex identity:** make the hint refer to the actual `name` field, and separately verify the supported invocation syntax before retaining `@...`. Test a name that slugifies differently. Also investigate copies: a second filename retaining the same `name` may not create a distinct runtime role; that case was not tested.
+1. **Codex identity:** make the hint refer to the actual `name` field, and separately verify the supported invocation syntax before retaining `@...`. Test a name that slugifies differently. The follow-up below confirms that copies with the same name collide at runtime; a distinct filename is insufficient.
 2. **Hermes offset-free one-off time:** align `instantOf` with system-local interpretation, or refuse/report ambiguous inputs. Add a case where the machine and configured zones differ. This is a demonstrated semantic difference, not a failure of the basic cron layout.
 3. **Codex duplicate skills:** decide whether to preserve both copies under distinct export names or retain an explicitly lossy policy. Do not describe the existing policy as Codex's own precedence.
 4. **Hermes default home:** distinguish the installer's selected directory from the runtime's fallback with no override. An existing Windows directory alone does not prove a newly launched Hermes process will use it.
@@ -94,6 +94,68 @@ The one-off repeat object was `{"times":1,"completed":0}`; recurring jobs used `
 
 With the same environment, compare `hermes_time.now()`, `cron.jobs.parse_schedule(...)` and `cron.jobs._ensure_aware(datetime.fromisoformat(...))`: the clock is UTC, while the offset-free scheduled instant is interpreted in system-local time.
 
+## Follow-up: importing through OpenTeleport itself
+
+Date: 2026-10-29. These additional checks use committed snapshot `4a433e7bda8dc5c6170b2f460d01a31d6377ba59`, exported into temporary directories. No code from the concurrently edited working tree was executed. Temporary builds used esbuild with the already installed dependencies; this was not a published npm-package test.
+
+### Codex: archive to application to archive
+
+The actual CLI was built from that snapshot and run with isolated `CODEX_HOME`, `OPENTELEPORT_HOME`, `HOME` and `USERPROFILE`. A synthetic `.jetpack` held an agent named `Probe Agent`, one skill, persona, instructions, one fact, a note, a file and one routine. Every CLI invocation below exited with code 0.
+
+| Step | Result |
+| --- | --- |
+| First import with `--include-files` | Wrote `agents/probe-agent.toml`. Installed Codex exposed role `Probe Agent` and the imported skill. Persona and fact text were present in `developer_instructions`. The report explicitly skipped routines, notes and files. |
+| Re-import with the same ID and changed instructions | Updated the same TOML file; there was still only one custom-agent file. |
+| Import with `--copy` and a different synthetic description | Wrote `probe-agent-2.toml`, but both files had `name = "Probe Agent"`. OpenTeleport listed two agent files; installed Codex exposed one role with the copied description. The original description disappeared from the generated role list although its file remained. |
+| Export custom agent `probe-agent` back to `.jetpack` | Preserved ID, name, persona and updated instruction text. The fact survived as a `# Facts` section of instructions, rather than in structured `facts`. **The skill was absent, with no warning or skipped item.** |
+| Control: export `--agent default` from the same home | Included the one skill. It was still on disk; the custom-agent export omitted it. |
+| Global-file sentinels | Synthetic global `config.toml` and `AGENTS.md` stayed byte-for-byte unchanged. |
+
+**Confirmed finding: copy identity collision.** The earlier suspicion is now reproduced through a real OpenTeleport import and installed Codex discovery. File-level conflict handling is insufficient: two different files retain the same runtime identity. In this run the copy occupied the role and the original was no longer separately selectable in the generated role list. Do not rely on which file wins. Assign a distinct supported runtime name for copies/name conflicts, and ensure the result/hint refers to that identity.
+
+**Confirmed finding: skill omitted on custom-agent re-export.** The import reports one moved skill and Codex discovers it, but exporting that custom agent produces `skills: []` with empty warnings and skipped arrays. `readCustom` initializes an empty skill list while only `readGlobal` calls `readAllSkills`. This is a reproducible loss of skill portability on the second transfer, not deletion from the installed application. Resolve the policy explicitly: preserve the associated/inherited skills or clearly report their omission. Avoid silently exporting every unrelated user skill without deciding the intended ownership model.
+
+Minimal sequence, after preparing the isolated environment and synthetic archive:
+
+```text
+node <temporary-build>/cli.js import --to codex input.jetpack --include-files --json
+codex debug prompt-input "Synthetic validation only"
+
+# Change instructions while retaining manifest.id:
+node <temporary-build>/cli.js import --to codex input.jetpack --json
+
+# Change title/description while retaining name and id:
+node <temporary-build>/cli.js import --to codex input.jetpack --copy --json
+codex debug prompt-input "Synthetic validation only"
+node <temporary-build>/cli.js list --from codex --json
+
+node <temporary-build>/cli.js export --from codex --agent probe-agent --out exported.jetpack --json
+node <temporary-build>/cli.js export --from codex --agent default --out global-export.jetpack --json
+```
+
+Read the two archives using `readBundle`; the custom-agent archive has zero skills, the global archive has one. Distinct synthetic descriptions let the role-list comparison distinguish the original from the copy without invoking either agent.
+
+### Hermes: engine import and native read-back
+
+These checks used the actual `importBundle` / `exportBundle` engine APIs with `hermesAdapter`, not the CLI. All context paths and child-process homes pointed to temporary directories. `ctx.exec` deliberately threw if called. Installed Hermes independently read the adapter-generated files with `MemoryStore.load_from_disk`, `tools.skills_tool._find_all_skills`, `cron.jobs.load_jobs` and `hermes_cli.profiles.list_profiles`.
+
+| Step | Result |
+| --- | --- |
+| First import | Profile `hermes-probe`; native readers recovered two facts, one skill and three routines (cron, interval, once). |
+| Routine state | All three had `enabled: false`, `state: "paused"`, `next_run_at: null`. No job was executed. |
+| Same-ID update | Reused the profile, replaced its imported facts and removed a withdrawn routine; remaining items were not duplicated. |
+| Copy | Created `hermes-probe-2`; native profile discovery saw both profiles, each with the skill, and no running gateway. |
+| Export and `.jetpack` read-back | Preserved ID, name, persona, instructions, both current facts, the skill and both remaining routines. Exported routines remained disabled. |
+| Unsupported note | Explicitly reported as `memory.notes` skipped on import. |
+| Independent native entries | A further update retained a fact and paused job created by Hermes's own API, plus a separate synthetic skill. Only the previous import's owned entries were replaced. |
+
+The tested Hermes import/update/copy/export and native-read scenarios passed. This confirms recognition of named profiles and basic portability for the supported fields. It does not test provider connectivity, agent execution, gateway operation, or scheduled execution.
+
+### Priorities from the follow-up
+
+Before treating Codex round-trip portability as verified, address the **runtime-name collision on copies** and **unreported skill omission on custom-agent exports**, then repeat the exact scenarios above on the fixed snapshot. Keep the previously identified timezone and default-home differences scoped to their demonstrated cases. Hermes's successful native read-back does not invalidate those separate edge-case findings.
+
+
 ## Sources and remaining limits
 
 - Installed Codex: version/help output and isolated `debug prompt-input` probes.
@@ -102,4 +164,4 @@ With the same environment, compare `hermes_time.now()`, `cron.jobs.parse_schedul
 - [Official skill discovery documentation](https://learn.chatgpt.com/docs/build-skills): user/repository roots and same-name discovery, retrieved 2026-10-29.
 - Adapter comparison at the snapshot above: `src/adapters/codex/read.ts:readAllSkills`, `src/adapters/codex/write.ts`, `src/adapters/hermes/paths.ts:hermesHome`, `src/adapters/hermes/cron.ts:instantOf`.
 
-These native Windows checks apply to the installed versions. Codex generated memory filenames, actual agent invocation, named Hermes profiles, scheduler execution, and Letta MemFS/crons remain unverified. This is not a full OpenTeleport round trip: runtime probes exercised application discovery/storage; adapter comparison was static. No source, tests, README, CHANGELOG or pre-existing branch contents were edited.
+These native Windows checks apply to the installed versions. The follow-up exercises Codex CLI archive/import/export and Hermes engine import/export with native read-back. Codex generated memory filenames, actual agent invocation, provider connectivity, scheduler execution, and Letta MemFS/crons remain unverified. No source, tests, README, CHANGELOG or pre-existing branch contents were edited; only this report changes.
