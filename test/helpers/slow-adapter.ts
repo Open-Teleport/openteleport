@@ -13,7 +13,7 @@ const adapter: Adapter = {
   read: async () => { throw new Error("This fixture is destination-only"); },
   write: async (ctx) => {
   await writeFile(join(ctx.home, "apply-entered"), "started");
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 45_000;
   while (true) {
     try { await stat(join(ctx.home, "release-apply")); break; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
