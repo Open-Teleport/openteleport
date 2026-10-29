@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 let home: string;
 let client: Client;
 let transport: StdioClientTransport;
-async function connect() {
+async function connect(adapterPath = "test/helpers/memory-adapter.ts") {
   client = new Client({ name: "isolated-test", version: "1.0.0" });
   transport = new StdioClientTransport({
     command: process.execPath, args: [resolve("dist/cli.js"), "mcp"], cwd: home,
@@ -15,7 +15,7 @@ async function connect() {
       PATH: "", HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
       OPENTELEPORT_HOME: home, CODEX_HOME: join(home, ".codex"), HERMES_HOME: join(home, ".hermes"),
       OPENCLAW_STATE_DIR: join(home, ".openclaw"), OPENCLAW_CONFIG_PATH: join(home, ".openclaw/openclaw.json"),
-      OPENTELEPORT_EXTRA_ADAPTER: resolve("test/helpers/memory-adapter.ts"),
+      OPENTELEPORT_EXTRA_ADAPTER: resolve(adapterPath),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     }, stderr: "pipe",
   });
@@ -160,3 +160,36 @@ it("discloses binary exclusions before approving a selected attachment", async (
   expect((selected.structuredContent as { warnings: string[] }).warnings.some(warning => warning.includes("not scanned"))).toBe(true);
   expect(await readdir(home)).not.toContain("included.jetpack");
 });
+
+it("retains completion after client cancellation without replaying or claiming a rollback", async () => {
+  await client.close(); await transport.close();
+  await connect("test/helpers/slow-adapter.ts");
+  const source = join(home, "source");
+  await mkdir(source);
+  await writeFile(join(source, "AGENTS.md"), "Synthetic instructions");
+  const plan = await call("move", { from: "folder", agent: ".", sourceDir: source, to: "slow" });
+  const { planId, operationId } = plan.structuredContent as { planId: string; operationId: string };
+  const controller = new AbortController();
+  const applying = client.callTool({ name: "openteleport_apply", arguments: { planId, confirmed: true } },
+    { signal: controller.signal }).then(result => ({ result }), error => ({ error }));
+  try {
+    await vi.waitFor(async () => expect(await readFile(join(home, "apply-entered"), "utf8")).toBe("started"), { timeout: 5000 });
+    controller.abort();
+    expect(await applying).toHaveProperty("error");
+    expect((await call("cancel", { planId })).structuredContent).toMatchObject({ cancelled: false, state: "in_progress" });
+    expect((await call("operation_status", { operationId })).structuredContent)
+      .toMatchObject({ state: "started", execution: "in_progress" });
+    await writeFile(join(home, "release-apply"), "release");
+    await vi.waitFor(async () => {
+      expect((await call("operation_status", { operationId })).structuredContent)
+        .toMatchObject({ state: "completed", result: { outcome: "done" } });
+    }, { timeout: 5000 });
+    expect((await call("apply", { planId, confirmed: true })).isError).toBe(true);
+    expect(await readFile(join(home, "writes.log"), "utf8")).toBe("one write\n");
+    expect((await call("cancel", { planId })).structuredContent).toMatchObject({ cancelled: false, state: "not_pending" });
+  } finally {
+    controller.abort();
+    await writeFile(join(home, "release-apply"), "release");
+    await applying;
+  }
+}, 15_000);

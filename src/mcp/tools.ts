@@ -57,7 +57,7 @@ export function registerTools(server: McpServer, session: TransferSession) {
     import: "PREVIEW ONLY. Prepare a bundle import with capability losses. Show the plan before openteleport_apply.",
     move: "PREVIEW ONLY. Prepare a transfer; source is retained. Show the plan before openteleport_apply.",
     apply: "WRITE OPERATION. Apply a reviewed plan once, only after user confirmation. Host approval is required; confirmed is not authentication. A failure may leave partial changes.",
-    cancel: "Discard a pending plan without changing application files.",
+    cancel: "Discard a pending plan before apply. This cannot stop an already-started transfer; inspect the returned state and use operation_status after a lost response.",
   };
   for (const name of Object.keys(schemas) as (keyof typeof schemas)[]) {
     server.registerTool("openteleport_" + name, {

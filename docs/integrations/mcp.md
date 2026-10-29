@@ -146,6 +146,12 @@ the engine outcome and saved report path. Handoff still means a manual step rema
 A not_applied receipt means the destination writer was not called. A needs_review receipt means a
 destination write was attempted, not that every field was changed. Inspect before retrying.
 
+Cancelling a pending plan discards it before apply. cancel returns cancelled, in_progress or not_pending;
+in_progress explicitly means the already-started apply was not stopped. A client timeout, stop button,
+or MCP request cancellation does not roll back an operation. The server continues an already-started
+write while its process remains alive and records the outcome. Query operation_status rather than
+replaying the plan. Killing the server process can still leave an incomplete receipt and partial files.
+
 A leftover started receipt is inconclusive. It does not prove that a process is still running, that the
 destination is untouched, or that the operation failed. A connected session reports in_progress only for
 its own currently active operation. Another session reports unknown and requires inspection.
