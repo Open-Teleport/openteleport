@@ -5,6 +5,23 @@ and whether OpenTeleport saves effort compared with configuring the destination 
 The reviewer in `examples/pilot-reviewer/` uses fictional Project Cedar data. Keep evaluation prompts
 and scoring notes outside that folder so they do not become part of the transferred agent.
 
+## Select the build being evaluated
+
+This guide targets the development integrations, not the published npm 0.2.0 artifact. Record the
+checkout commit (`git rev-parse HEAD`) as well as the package version: an integration checkout may
+still report 0.2.0 while containing features absent from the published archive.
+
+| Build | Available pilot interface |
+| --- | --- |
+| Published `openteleport@0.2.0` | Explicit CLI commands and the original terminal wizard. No MCP, native plugins, memory-exclusion switch or export `--no-overwrite` option. |
+| v0.3 checkout, PR #6 | MCP preview/apply, Claude Code plugin, memory selection and the revised terminal wizard. Build and run this checkout explicitly. |
+| v0.4 checkout, PR #7 | The v0.3 features plus native OpenClaw and Hermes plugins. Follow their development installation instructions. |
+
+The reviewer fixture is supplied by this checkout under `examples/`; it is not included in the npm
+package. Do not replace the commands below with unversioned `npx openteleport` and assume the same
+features are being tested. Record a published-0.2.0 baseline separately from a development run.
+A participant's need for installation help remains part of the result, even if the transfer succeeds.
+
 ## Include all three audiences
 
 The first public release serves technical users, people moving a personal assistant, and teams
@@ -54,7 +71,7 @@ Import into a disposable, explicitly selected application profile using MCP prev
 documented native plugin. Use copy mode. Review shared write locations before applying: setting a
 target directory alone does not isolate shared skills or user memory. For filesystem-only checks,
 import into a fresh folder instead of an application. See [MCP setup](mcp.md) and
-[native plugin setup](native-plugins.md) for the supported entry points.
+[native plugin setup in PR #7](https://github.com/Open-Teleport/openteleport/pull/7) for the supported entry points.
 
 Run the agent in its source application before moving it to a second application. Record which agent
 was selected and how you selected it. Copy the same prompts below into fresh sessions in both apps;
