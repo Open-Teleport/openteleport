@@ -26,8 +26,7 @@ Use synthetic data for the team scenario. MCP includes structured memory by defa
 excludes structured facts and notes, with omissions shown in the preview and report. Credential scanning
 is not anonymization: instructions, skills, memory and other fields may contain personal information.
 Evaluate whether participants understand the selection and its limits, including that an update may
-remove previously imported destination memory. Use copy for the pilot. The CLI and native plugin
-commands do not yet expose memory selection.
+remove previously imported destination memory. Use copy for the pilot. The CLI exposes the same selection with --no-memory. Check the native plugin setup for its support.
 
 Recruit across all three audiences and include at least two participants per audience when expanding
 to ten participants. Report completion, assistance, repair time and repeat use separately for each

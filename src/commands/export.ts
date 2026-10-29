@@ -23,6 +23,8 @@ export type ExportOptions = CommonOptions & {
   agent?: string;
   out?: string;
   includeFiles?: boolean;
+  /** Commander maps --no-memory to memory=false. */
+  memory?: boolean;
 };
 
 /**
@@ -58,6 +60,7 @@ export async function exportCommand(opts: ExportOptions): Promise<void> {
     agent: agent.id,
     ctx,
     includeFiles: opts.includeFiles === true,
+    includeMemory: opts.memory !== false,
   });
   // Written here rather than by `exportBundle`, so that the folder of `--out` is only created
   // once the agent is known to be exportable.
