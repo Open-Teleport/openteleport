@@ -46,6 +46,22 @@ save a Markdown copy under OPENTELEPORT_HOME/.openteleport/reports (home by defa
 The secret scanner is heuristic. Personal memory is not automatically anonymized. Previews summarize
 capability losses; additional adapter approximations and skips are reported after application.
 
+## Destination location disclosure
+
+Previews include destination.writeScope: locations, their purpose, whether they are shared, and
+unresolved paths. These reuse the built-in writers' path helpers and respect destination overrides.
+Show these locations before requesting approval. An explicit targetDir is not a filesystem boundary:
+Codex skills still use the user's shared .agents/skills directory, and Claude Code project memory and
+identity metadata use its user configuration directory. Locations are potential write areas, not a list
+of files guaranteed to change. A container identifies a parent directory; a candidate may change when
+the writer resolves a conflict. The export archive path is fixed and existing files are refused.
+
+OpenClaw's workspace is explicitly unresolved because existing configuration can place it outside the
+state directory. Additional adapters without disclosure are marked unavailable. Conflict decisions and
+file-level changes remain unresolved until apply; this is not a complete diff, permission boundary or
+reservation. OpenTeleport's own identity cache, reports and operation receipts additionally live under
+its home directory, as described above and below. No destination writer runs to produce this disclosure.
+
 ## Client configuration
 
 Use the absolute Node executable path if your client does not inherit PATH. Install/build once; the

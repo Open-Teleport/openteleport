@@ -1,3 +1,4 @@
+import { destinationScope } from "./destination.js";
 import { fitsPreviewBudget } from "./budget.js";
 import { ApplyFailedError, readReceipt, writeReceipt, type Receipt } from "./receipts.js";
 import { randomUUID } from "node:crypto";
@@ -140,6 +141,11 @@ export class TransferSession {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
     const skipped = to ? diffCapabilities(bundle, to.capabilities, to.displayName).skipped : [];
+    const writeScope = to ? await destinationScope(to.name, ctx, bundle) : {
+      coverage: "locations-only" as const,
+      locations: [{ path: out!, kind: "file" as const, shared: false, purpose: "New jetpack archive; existing files are refused" }],
+      unresolved: [],
+    };
     const expires = this.now() + TTL;
     if (this.closed) throw new UsageError("Session closed while preparing the preview.");
     const planId = randomUUID();
@@ -155,7 +161,7 @@ export class TransferSession {
       source: { app: from?.name ?? "jetpack", agent: agent ?? bundle.manifest.name,
         path: input.path ? resolve(ctx.cwd, input.path) : ctx.sourceDir ?? null },
       destination: { app: to?.name ?? "jetpack", path: out ?? ctx.targetDir ?? null,
-        usesApplicationDefault: !out && !ctx.targetDir, cwd: ctx.cwd },
+        usesApplicationDefault: !out && !ctx.targetDir, cwd: ctx.cwd, writeScope },
       contents: summary(bundle), skipped,
       options: { onConflict: input.onConflict ?? "update", includeFiles: input.includeFiles === true,
         enableRoutines: input.enableRoutines === true },
