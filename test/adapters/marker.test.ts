@@ -269,6 +269,13 @@ describe("readIds", () => {
     expect(await readIds(idsFile())).toEqual({});
   });
 
+  it("records none when a file is on the way to it (ENOTDIR), as for a missing one", async () => {
+    // Windows says ENOENT for this, so the error is injected: the path is the same on every OS.
+    injected.readFile = failure("ENOTDIR");
+
+    expect(await readIds(join(root, "not-a-folder", "ids.json"))).toEqual({});
+  });
+
   it.each([
     ["is not JSON", "{ not json"],
     ["is an array", JSON.stringify([ID])],

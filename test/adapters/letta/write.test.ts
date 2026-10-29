@@ -566,6 +566,25 @@ describe("writeLettaAgent: a folder that is already there", () => {
     expect(await readdir(cwd)).toEqual(["ada-letta-memory"]);
   });
 
+  it("reports a folder where a generated file goes as skipped, instead of failing, and writes the rest", async () => {
+    await writeLettaAgent(ctx, adaBundle(), ENABLE);
+    // The user has rearranged the folder: a folder now sits where the README goes.
+    await rm(join(ADA_DIR(), "README.md"));
+    await mkdir(join(ADA_DIR(), "README.md"));
+    await writeFile(join(ADA_DIR(), "README.md", "keep.txt"), "mine");
+
+    const result = await writeLettaAgent(ctx, adaBundle(), ENABLE);
+
+    expect(result.items.skipped).toEqual([
+      { field: "file:README.md", detail: `${join(ADA_DIR(), "README.md")} is a folder; not written` },
+    ]);
+    expect(await text(join(ADA_DIR(), "README.md", "keep.txt"))).toBe("mine");
+    // Everything else was written as usual.
+    expect(await text(join(ADA_DIR(), "letta-commands.sh"))).toContain("letta agents create");
+    expect(await text(join(ADA_DIR(), "memory", "human.md"))).toContain("Prefers short answers");
+    expect(result.outcome).toBe("handoff");
+  });
+
   it("writes another agent of the same name next to a folder with no marker, and says so", async () => {
     await mkdir(ADA_DIR());
     await writeFile(join(ADA_DIR(), "theirs.txt"), "theirs");

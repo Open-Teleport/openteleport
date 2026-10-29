@@ -11,6 +11,7 @@ import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
 import { oneLine, slugify } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
 import { MARKER_FILE, writeMarker } from "../marker.js";
+import { lstatIfAny } from "../fs.js";
 import { claimFolder } from "../names.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type Shell, cronAddCommand, shellQuote } from "./crons.js";
@@ -245,14 +246,21 @@ Good to know:
 // -- Writing ----------------------------------------------------------------------------------
 
 /**
- * Creates `path` with `data`, making its folder first. Whatever is at `path` is removed first
- * (a link is removed, not followed), and the file is created with `wx`, which fails rather than
- * write through anything that appeared since.
+ * Creates `path` with `data`, making its folder first, and says whether it did. Whatever is at
+ * `path` is removed first (a link is removed, not followed), and the file is created with `wx`,
+ * which fails rather than write through anything that appeared since. A folder at `path` (the
+ * user has rearranged a folder this adapter owns) is not removed: nothing is written then.
  */
-async function createFile(path: string, data: string | Uint8Array, mode?: number): Promise<void> {
+async function createFile(
+  path: string,
+  data: string | Uint8Array,
+  mode?: number,
+): Promise<boolean> {
   await mkdir(dirname(path), { recursive: true });
+  if ((await lstatIfAny(path))?.isDirectory()) return false;
   await rm(path, { force: true });
   await writeFile(path, data, { flag: "wx", ...(mode === undefined ? {} : { mode }) });
+  return true;
 }
 
 /** The reasons a schedule is not carried over exactly, one `approximated` item per routine. */
@@ -349,16 +357,20 @@ export async function writeLettaAgent(
   await mkdir(dir, { recursive: true });
   // The marker first: a write that stops half way can then be repeated over its own folder.
   await writeMarker(dir, { id: manifest.id, movedAt: new Date().toISOString() });
-  for (const { path, bytes } of memory) {
-    await createFile(join(dir, MEMORY_DIR, ...path.split("/")), bytes);
-  }
+  /** Creates `rel` (below `dir`, with `/`); a folder in its place is reported as skipped. */
+  const place = async (rel: string, data: string | Uint8Array, mode?: number): Promise<void> => {
+    const path = join(dir, ...rel.split("/"));
+    if (await createFile(path, data, mode)) return;
+    items.skipped.push({ field: `file:${rel}`, detail: `${path} is a folder; not written` });
+  };
+  for (const { path, bytes } of memory) await place(`${MEMORY_DIR}/${path}`, bytes);
   for (const [index, routine] of bundle.routines.entries()) {
-    await createFile(join(dir, ROUTINES_DIR, `${slugs[index]}.txt`), routine.instruction);
+    await place(`${ROUTINES_DIR}/${slugs[index]}.txt`, routine.instruction);
   }
-  await createFile(join(dir, SH_FILE), sh, 0o755);
+  await place(SH_FILE, sh, 0o755);
   // Windows PowerShell 5.1 reads a script without a byte order mark in the system code page.
-  await createFile(join(dir, PS1_FILE), `${BYTE_ORDER_MARK}${ps1}`);
-  await createFile(join(dir, README_FILE), renderReadme(bundle));
+  await place(PS1_FILE, `${BYTE_ORDER_MARK}${ps1}`);
+  await place(README_FILE, renderReadme(bundle));
 
   return {
     outcome: "handoff",

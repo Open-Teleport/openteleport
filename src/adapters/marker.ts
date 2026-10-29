@@ -75,16 +75,17 @@ export async function writeMarker(dir: string, marker: Marker): Promise<void> {
 export type AgentIds = Record<string, string>;
 
 /**
- * The ids recorded in `path`. A missing file records none, and so does one that is not a JSON
- * object: it is replaced on the next write, which costs only an update that becomes a copy. Any
- * other read error is thrown before anything is written.
+ * The ids recorded in `path`. A missing file records none (so does a path with a file on the way
+ * to it, as `isNotFound` counts it), and so does one that is not a JSON object: it is replaced
+ * on the next write, which costs only an update that becomes a copy. Any other read error is
+ * thrown before anything is written.
  */
 export async function readIds(path: string): Promise<AgentIds> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if (isNotFound(error)) return {};
     throw error;
   }
   let json: unknown;
