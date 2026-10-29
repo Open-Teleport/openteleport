@@ -1,0 +1,124 @@
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Command } from "commander";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import * as library from "../../src/index.js";
+import type { Ctx } from "../../src/adapters/types.js";
+import { createMemoryAdapter } from "../helpers/memory-adapter.js";
+// JavaScript plugin entry is deliberately independent of the host at discovery time.
+import plugin from "../../plugins/openclaw/index.mjs";
+import { registerTeleportCommands } from "../../plugins/openclaw/commands.mjs";
+let home: string;
+beforeEach(async () => { home = await mkdtemp(join(tmpdir(), "openteleport-plugin-")); });
+afterEach(async () => { await rm(home, { recursive: true, force: true }); });
+function harness() {
+  const adapter = createMemoryAdapter({ name: "openclaw", agents: { reviewer: {
+    manifest: { schemaVersion: "0.1", id: "", name: "Reviewer", models: [], capabilities: [] },
+    instructions: "Review changes", facts: [], notes: [], routines: [], skills: [], files: [], unknownPaths: [],
+  } } });
+  const ctx: Ctx = { home, cwd: home, env: { OPENCLAW_CONFIG_PATH: "separate-config" },
+    exec: vi.fn() as unknown as Ctx["exec"], logger: vi.fn() };
+  const output = vi.fn();
+  const load = vi.fn(async () => ({ library: { ...library, getAdapter: () => adapter }, ctx }));
+  const program = new Command().exitOverride();
+  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+  registerTeleportCommands(program, { load, output, failure: (error: Error) => { throw error; } });
+  return { program, load, output, adapter, ctx };
+}
+it("only registers metadata during discovery and refuses a root collision", () => {
+  const registerCli = vi.fn();
+  plugin.register({ registerCli });
+  expect(registerCli).toHaveBeenCalledTimes(1);
+  expect(registerCli.mock.calls[0][1].descriptors[0].name).toBe("teleport");
+  const { program, load } = harness();
+  expect(load).not.toHaveBeenCalled();
+  expect(() => registerTeleportCommands(program)).toThrow("already exists");
+});
+it("help does not load adapters or execute an operation", async () => {
+  const { program, load } = harness();
+  await expect(program.parseAsync(["teleport", "--help"], { from: "user" })).rejects.toMatchObject({ code: "commander.helpDisplayed" });
+  expect(load).not.toHaveBeenCalled();
+});
+it("exports/imports through the engine and preserves context and flags", async () => {
+  const h = harness();
+  await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "reviewer.jetpack"], { from: "user" });
+  expect(h.output.mock.calls[0][0].outcome).toBe("exported");
+  const exported = h.output.mock.calls[0][0];
+  expect(exported.reportSaved).toBe(true);
+  expect(JSON.parse(await readFile(exported.reportPath, "utf8"))).toMatchObject({
+    outcome: "exported", artifactPath: join(home, "reviewer.jetpack"),
+  });
+  expect(await readFile(exported.reportPath, "utf8")).not.toContain("Review changes");
+
+  const imported = harness();
+  const write = imported.adapter.write;
+  imported.adapter.write = async (ctx, bundle, opts) => {
+    expect(ctx.env.OPENCLAW_CONFIG_PATH).toBe("separate-config");
+    expect(ctx.sourceDir).toBeUndefined();
+    expect(ctx.targetDir).toBeUndefined();
+    return write(ctx, bundle, opts);
+  };
+  await imported.program.parseAsync(["teleport", "import", "reviewer.jetpack", "--copy"], { from: "user" });
+  expect(imported.output.mock.calls[0][0].outcome).toBe("done");
+  const received = imported.output.mock.calls[0][0];
+  expect(received.reportSaved).toBe(true);
+  expect(received.reportPath).not.toBe(exported.reportPath);
+  expect(JSON.parse(await readFile(received.reportPath, "utf8"))).toMatchObject({ outcome: "done" });
+  expect((await readdir(join(home, ".openteleport", "reports"))).length).toBe(2);
+
+  expect(imported.adapter.written[0].opts).toEqual({ onConflict: "copy", includeFiles: false, enableRoutines: false });
+});
+it("refuses archive overwrite and replace, and exposes handoff", async () => {
+  const h = harness();
+  await writeFile(join(home, "reviewer.jetpack"), "sentinel");
+  await expect(h.program.parseAsync(["teleport", "export", "reviewer", "--out", "reviewer.jetpack"], { from: "user" })).rejects.toThrow();
+  expect(await readFile(join(home, "reviewer.jetpack"), "utf8")).toBe("sentinel");
+  await expect(h.program.parseAsync(["teleport", "import", "reviewer.jetpack", "--replace"], { from: "user" })).rejects.toMatchObject({ code: "commander.unknownOption" });
+  const source = harness();
+  await source.program.parseAsync(["teleport", "export", "reviewer", "--out", "valid.jetpack"], { from: "user" });
+  const target = harness();
+  target.adapter.write = async () => ({ outcome: "handoff", nextStep: "Review output",
+    items: { approximated: [], skipped: [], warnings: ["Check destination"] } });
+  await target.program.parseAsync(["teleport", "import", "valid.jetpack"], { from: "user" });
+  expect(target.output.mock.calls[0][0]).toMatchObject({ outcome: "handoff", nextStep: "Review output", warnings: ["Check destination"] });
+});
+
+it("preserves transfer success when report storage is unavailable", async () => {
+  await mkdir(join(home, ".openteleport"));
+  const blocked = join(home, ".openteleport", "reports");
+  await writeFile(blocked, "keep this file");
+  const h = harness();
+  await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "reviewer.jetpack"], { from: "user" });
+  const result = h.output.mock.calls[0][0];
+  expect(result).toMatchObject({ outcome: "exported", reportSaved: false });
+  expect(result.reportPath).toBeUndefined();
+  expect(result.warnings).toContain("Transfer completed, but its report could not be saved; retain this JSON result.");
+  expect((await library.readBundle(join(home, "reviewer.jetpack"))).instructions).toBe("Review changes");
+  expect(await readFile(blocked, "utf8")).toBe("keep this file");
+});
+
+it("selects memory for native export and import and retains omission reports", async () => {
+  const h = harness();
+  const read = h.adapter.read;
+  h.adapter.read = async (ctx, id) => {
+    const result = await read(ctx, id);
+    result.bundle.facts = ["Private preference"];
+    result.bundle.notes = [{ name: "private", text: "Private note" }];
+    return result;
+  };
+  await h.program.parseAsync(["teleport", "export", "reviewer", "--out", "selected.jetpack", "--no-memory"], { from: "user" });
+  const selected = await library.readBundle(join(home, "selected.jetpack"));
+  expect(selected.facts).toEqual([]); expect(selected.notes).toEqual([]);
+  expect(h.output.mock.calls[0][0].skipped.map(item => item.field)).toEqual(["memory.facts", "memory.notes"]);
+  const original = (await h.adapter.read(h.ctx, "reviewer")).bundle;
+  original.manifest.id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  await library.writeBundle(original, join(home, "original.jetpack"));
+  const target = harness();
+  await target.program.parseAsync(["teleport", "import", "original.jetpack", "--no-memory", "--copy"], { from: "user" });
+  expect(target.adapter.written[0].bundle.facts).toEqual([]);
+  expect(target.adapter.written[0].bundle.notes).toEqual([]);
+  const report = target.output.mock.calls[0][0];
+  expect(JSON.parse(await readFile(report.reportPath, "utf8")).skipped).toHaveLength(2);
+  expect((await library.readBundle(join(home, "original.jetpack"))).facts).toEqual(["Private preference"]);
+});

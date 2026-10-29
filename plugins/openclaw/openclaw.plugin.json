@@ -1,0 +1,17 @@
+{
+  "id": "openteleport",
+  "name": "OpenTeleport",
+  "description": "Import and export portable agent profiles",
+  "cliCommands": [
+    {
+      "name": "teleport",
+      "description": "Import and export agents with OpenTeleport",
+      "hasSubcommands": true
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
