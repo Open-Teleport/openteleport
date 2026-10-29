@@ -122,3 +122,26 @@ it("returns structured recovery information when the destination writer fails", 
   expect((await call("operation_status", { operationId: planId })).structuredContent)
     .toMatchObject({ state: "needs_review" });
 });
+
+it("omits scanner previews and redacts credential-bearing paths in validation and preview failures", async () => {
+  const token = "ghp_abcdefghijklmnopqrstuvwxyz";
+  const unsafe = join(home, "credential-path");
+  const skill = join(unsafe, "skills", token);
+  await mkdir(skill, { recursive: true });
+  await writeFile(join(unsafe, "AGENTS.md"), "Synthetic test agent");
+  await writeFile(join(skill, "SKILL.md"), "Credential: " + token);
+  for (const result of [
+    await call("validate", { path: unsafe }),
+    await call("export", { from: "folder", agent: ".", sourceDir: unsafe, out: join(home, "blocked.jetpack") }),
+  ]) {
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ findings: [
+      { path: "skills/[redacted]/SKILL.md", line: 1, kind: "github-token" },
+    ] });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain("ghp_ab");
+    expect(serialized).not.toContain('"preview"');
+  }
+  expect(await readdir(home)).not.toContain("blocked.jetpack");
+});
