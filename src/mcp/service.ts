@@ -1,3 +1,4 @@
+import { fitsPreviewBudget } from "./budget.js";
 import { ApplyFailedError, readReceipt, writeReceipt, type Receipt } from "./receipts.js";
 import { randomUUID } from "node:crypto";
 import { copyFile, constants } from "node:fs";
@@ -123,10 +124,11 @@ export class TransferSession {
       bundle = await this.read(input.path);
     }
     // Freeze the reviewed source in memory; apply never rereads a changed source.
-    bundle = structuredClone({ ...bundle, files: input.includeFiles ? bundle.files : [] });
-    if (Buffer.byteLength(JSON.stringify(bundle)) > MAX_PLAN_BYTES) {
-      throw new UsageError("Bundle exceeds the 32 MiB session preview limit; use the CLI.");
+    bundle = { ...bundle, files: input.includeFiles ? bundle.files : [] };
+    if (!fitsPreviewBudget(bundle, MAX_PLAN_BYTES)) {
+      throw new UsageError("Bundle exceeds the session preview size or complexity limit; use the CLI.");
     }
+    bundle = structuredClone(bundle);
     const findings = scanSecrets(bundle);
     if (findings.length) throw new SecretsFoundError(findings);
     const identity = from?.cacheIdentity && agent

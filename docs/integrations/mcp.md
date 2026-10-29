@@ -27,8 +27,11 @@ openteleport_apply. The boolean and opaque plan ID are not authentication: a mod
 Only trusted local clients should launch the server; it has the launching user's filesystem permissions.
 Do not expose this stdio process as an unauthenticated remote service.
 
-Plans last ten minutes, are limited to eight per session and 32 MiB of serialized content each, and are
-lost on server restart. Pending reads reserve a slot before accessing the source. Expiry timers release
+Plans last ten minutes, are limited to eight per session, and are lost on server restart.
+Each snapshot has a 32 MiB accounting budget: binary backing buffers (including unused portions of subarrays), UTF-8 text/keys and a conservative charge
+per metadata value. This is not an exact JavaScript heap limit or an archive-size limit. Validation stops
+before cloning on budget overflow, more than 100,000 values or nesting deeper than 64 levels.
+Binary data is measured directly without expanding it into JSON. Pending reads reserve a slot before accessing the source. Expiry timers release
 snapshots even while idle; closing the transport clears retained plans. An already-started write continues
 and must be inspected if its client disconnects. Apply consumes a plan before execution, including on failure; writes are serialized within one server session.
 A source edited after preview does not change the reviewed snapshot. The destination is not reserved:

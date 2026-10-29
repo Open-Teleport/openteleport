@@ -321,3 +321,26 @@ it("retains the manual handoff step in the receipt after reconnecting", async ()
     state: "completed", result: { outcome: "handoff", nextStep: "Import the package in Settings" },
   });
 });
+
+it("accepts binary attachments by actual size and rejects oversized snapshots before cloning", async () => {
+  const { source, target } = adapters();
+  const data = bundle();
+  data.files = [{ path: "example.bin", bytes: new Uint8Array(4 * 1024 * 1024) }];
+  source.read = async () => ({ bundle: data, warnings: [] });
+  const session = new TransferSession(ctx);
+  const plan = await session.plan({ ...request, includeFiles: true });
+  expect(plan.contents.counts.files).toBe(1);
+  session.cancel(plan.planId);
+  data.files[0].bytes = new Uint8Array(33 * 1024 * 1024);
+  const clone = vi.spyOn(globalThis, "structuredClone");
+  try {
+    await expect(session.plan({ ...request, includeFiles: true })).rejects.toThrow("preview size or complexity limit");
+    expect(clone).not.toHaveBeenCalled();
+  } finally { clone.mockRestore(); }
+  // Excluded files do not use the snapshot budget; the rejected request released its slot.
+  const withoutFiles = await session.plan(request);
+  expect(withoutFiles.contents.counts.files).toBe(0);
+  expect(target.written).toHaveLength(0);
+  expect(await readdir(home)).toEqual([]);
+  session.dispose();
+});
