@@ -22,9 +22,22 @@ export class FrontmatterError extends Error {
   }
 }
 
-/** Whether the text opens with a frontmatter block, an empty one included. */
-export function hasFrontmatter(text: string): boolean {
-  return FRONTMATTER.test(normalized(text));
+/**
+ * The fields of the YAML between the fences. An empty block has none. Throws a `FrontmatterError`
+ * when the block is not YAML or not a mapping of keys to values.
+ */
+export function parseFrontmatterBlock(block: string): Record<string, unknown> {
+  let data: unknown;
+  try {
+    data = parse(block);
+  } catch (error) {
+    throw new FrontmatterError("yaml", (error as Error).message, { cause: error });
+  }
+  data ??= {};
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new FrontmatterError("shape", "expected key: value pairs");
+  }
+  return data as Record<string, unknown>;
 }
 
 /**
@@ -38,18 +51,8 @@ export function splitFrontmatter(text: string): { data: Record<string, unknown>;
   const source = normalized(text);
   const match = FRONTMATTER.exec(source);
   if (match === null) return { data: {}, body: source };
-  let data: unknown;
-  try {
-    data = parse(match[1] ?? "");
-  } catch (error) {
-    throw new FrontmatterError("yaml", (error as Error).message, { cause: error });
-  }
-  data ??= {};
-  if (typeof data !== "object" || Array.isArray(data)) {
-    throw new FrontmatterError("shape", "expected key: value pairs");
-  }
   return {
-    data: data as Record<string, unknown>,
+    data: parseFrontmatterBlock(match[1] ?? ""),
     body: source.slice(match[0].length).replace(/^\n+/, ""),
   };
 }

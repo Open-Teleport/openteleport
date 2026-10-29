@@ -1658,7 +1658,12 @@ describe("writeOpenBotImportZip", () => {
             skillOf("not-yaml", [], "---\nname: [unclosed\ndescription: d\n---\n"),
             skillOf("not-a-map", [], "---\n- one\n- two\n---\n"),
             { name: "binary", files: [{ path: "SKILL.md", bytes: new Uint8Array([0xff, 0xfe]) }] },
+            // OpenBot's own rule for where the block is, not the generic frontmatter one:
+            skillOf("spaced-fence", [], "---\nname: spaced\ndescription: d\n--- \n# x\n"),
+            skillOf("cr-only", [], "---\rname: cr-only\rdescription: d\r---\r# x\r"),
+            skillOf("empty-block", [], "---\n---\n# x\n"),
             skillOf("crlf", [], "---\r\nname: crlf\r\ndescription: Works.\r\n---\r\n# x\r\n"),
+            skillOf("form-feed", [], "---\f\nname: ff\ndescription: Works.\n---\n# x\n"),
             skillOf("limits", [], `---\nname: ${"n".repeat(80)}\ndescription: ${"d".repeat(1024)}\n---\n`),
           ],
         }),
@@ -1666,6 +1671,7 @@ describe("writeOpenBotImportZip", () => {
 
       expect(written.agents[0]?.skills).toEqual([
         "agents/ada/skills/crlf",
+        "agents/ada/skills/form-feed",
         "agents/ada/skills/limits",
       ]);
       expect(written.items.skipped).toEqual([
@@ -1677,6 +1683,15 @@ describe("writeOpenBotImportZip", () => {
         { field: "skill:not-yaml", detail: "the frontmatter of its SKILL.md is not valid YAML" },
         { field: "skill:not-a-map", detail: `the frontmatter of its SKILL.md ${needs}` },
         { field: "skill:binary", detail: "its SKILL.md is not valid UTF-8" },
+        {
+          field: "skill:spaced-fence",
+          detail: "its SKILL.md has no frontmatter, which OpenBot needs",
+        },
+        { field: "skill:cr-only", detail: "its SKILL.md has no frontmatter, which OpenBot needs" },
+        {
+          field: "skill:empty-block",
+          detail: "its SKILL.md has no frontmatter, which OpenBot needs",
+        },
       ]);
     });
   });

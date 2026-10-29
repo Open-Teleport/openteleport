@@ -14,7 +14,7 @@ import { stat } from "node:fs/promises";
 import { zipSync } from "fflate";
 import { isSafeName } from "../adapters/fs.js";
 import type { WriteResult } from "../adapters/types.js";
-import { FrontmatterError, hasFrontmatter, splitFrontmatter } from "../core/frontmatter.js";
+import { FrontmatterError, parseFrontmatterBlock } from "../core/frontmatter.js";
 import {
   MAX_ARCHIVE_BYTES,
   MAX_AVATAR_BYTES,
@@ -760,6 +760,11 @@ function descriptionOf(text: string): string {
   return (end > 0 ? head.slice(0, end) : head).trimEnd();
 }
 
+// The frontmatter OpenBot looks for at the top of a SKILL.md. This is OpenBot's own rule for where
+// the block is, not the generic one of `core/frontmatter`: a file that OpenBot reads differently
+// must not be written as if it had the frontmatter.
+const FRONTMATTER = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u;
+
 /**
  * OpenBot reads the name and the description of a skill from the frontmatter of its SKILL.md, and
  * refuses the whole agent when a skill has none, so a skill without them is left out instead.
@@ -771,10 +776,11 @@ function frontmatterProblem(main: FileEntry): string | undefined {
   } catch {
     return `its ${SKILL_FILE} is not valid UTF-8`;
   }
-  if (!hasFrontmatter(text)) return `its ${SKILL_FILE} has no frontmatter, which OpenBot needs`;
+  const match = FRONTMATTER.exec(text);
+  if (match === null) return `its ${SKILL_FILE} has no frontmatter, which OpenBot needs`;
   let metadata: Json = {};
   try {
-    metadata = splitFrontmatter(text).data;
+    metadata = parseFrontmatterBlock(match[1] ?? "");
   } catch (error) {
     // YAML that is no mapping has no name, which is said below.
     if (!(error instanceof FrontmatterError && error.kind === "shape")) {

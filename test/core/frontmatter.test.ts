@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FrontmatterError, hasFrontmatter, splitFrontmatter } from "../../src/core/frontmatter.js";
+import { FrontmatterError, parseFrontmatterBlock, splitFrontmatter } from "../../src/core/frontmatter.js";
 
 const BOM = String.fromCharCode(0xfeff);
 
@@ -79,16 +79,30 @@ describe("splitFrontmatter", () => {
   });
 });
 
-describe("hasFrontmatter", () => {
-  it("is true for a file that opens with a frontmatter block, an empty one included", () => {
-    expect(hasFrontmatter("---\nname: a\n---\nBody\n")).toBe(true);
-    expect(hasFrontmatter(`${BOM}---\r\nname: a\r\n---\r\n`)).toBe(true);
-    expect(hasFrontmatter("---\n---\n")).toBe(true);
+describe("parseFrontmatterBlock", () => {
+  it("reads the fields of a block, CRLF line endings included", () => {
+    expect(parseFrontmatterBlock("name: Reviewer\r\ndescription: Reviews PRs")).toEqual({
+      name: "Reviewer",
+      description: "Reviews PRs",
+    });
   });
 
-  it("is false when the file does not open with one, or the block is never closed", () => {
-    expect(hasFrontmatter("# Plain\n\nNo frontmatter.\n")).toBe(false);
-    expect(hasFrontmatter("Intro\n---\nname: x\n---\n")).toBe(false);
-    expect(hasFrontmatter("---\nname: x\n")).toBe(false);
+  it("reads an empty block, or one that is only a comment, as no fields", () => {
+    expect(parseFrontmatterBlock("")).toEqual({});
+    expect(parseFrontmatterBlock("# nothing here")).toEqual({});
+  });
+
+  it("throws a yaml error for a block that is not YAML", () => {
+    expect(() => parseFrontmatterBlock("name: [unclosed")).toThrow(
+      expect.objectContaining({ name: "FrontmatterError", kind: "yaml" }),
+    );
+  });
+
+  it("throws a shape error for YAML that is not a mapping", () => {
+    for (const block of ["- a\n- b", "just text", "42"]) {
+      expect(() => parseFrontmatterBlock(block)).toThrow(
+        expect.objectContaining({ name: "FrontmatterError", kind: "shape" }),
+      );
+    }
   });
 });
