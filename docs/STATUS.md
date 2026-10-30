@@ -52,6 +52,8 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
+Each item below has an issue labelled help wanted: OpenBot #16, Grok Bot #17, Letta #18, Hermes cron #19, Codex roles #20, the Bash demo #22. Issues #21 (the OpenClaw path without a Gateway), #23 (four small fixes) and #24 (the slow MCP test) were settled by PRs #26 to #30.
+
 - The Bash demo end to end (the PowerShell demo passed on 2026-10-30), and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
 - **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
