@@ -313,7 +313,7 @@ export async function move(opts: {
   write: WriteOpts;
 }): Promise<MoveReport> {
   const { from, agent, ctx } = opts;
-  const read = await from.read(sourceSide(ctx), agent);
+  const read = await from.read({ ...sourceSide(ctx), readIncludeFiles: opts.write.includeFiles }, agent);
   const bundle = await withId(from, agent, ctx, read.bundle);
   return deliver({
     to: opts.to,
@@ -340,7 +340,7 @@ export async function exportBundle(opts: {
   includeMemory?: boolean;
 }): Promise<{ bundle: Bundle; report: MoveReport }> {
   const { from, agent, ctx } = opts;
-  const read = await from.read(sourceSide(ctx), agent);
+  const read = await from.read({ ...sourceSide(ctx), readIncludeFiles: opts.includeFiles }, agent);
   const selection = selectMemory(await withId(from, agent, ctx, read.bundle), opts.includeMemory);
   const bundle = filesIf(selection.bundle, opts.includeFiles);
   assertNoSecrets(bundle);

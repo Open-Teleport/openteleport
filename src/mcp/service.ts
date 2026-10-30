@@ -78,9 +78,9 @@ export class TransferSession {
     return getAdapter(input.from).list(this.context(input));
   }
 
-  async read(path: string) {
+  async read(path: string, includeFiles = true) {
     const absolute = resolve(this.ctx.cwd, path);
-    return readBundle(absolute, { requireManifest: !(await stat(absolute)).isDirectory() });
+    return readBundle(absolute, { requireManifest: !(await stat(absolute)).isDirectory(), includeFiles });
   }
 
   private discard(planId: string): boolean {
@@ -123,10 +123,10 @@ export class TransferSession {
     let warnings: string[] = [];
     if (from) {
       agent = (await resolveAgent(from, sideOf(ctx, "source"), input.agent, false)).id;
-      ({ bundle, warnings } = await from.read({ ...ctx, targetDir: undefined }, agent));
+      ({ bundle, warnings } = await from.read({ ...ctx, targetDir: undefined, readIncludeFiles: input.includeFiles === true }, agent));
     } else {
       if (!input.path) throw new UsageError("An import needs a bundle path.");
-      bundle = await this.read(input.path);
+      bundle = await this.read(input.path, input.includeFiles === true);
     }
     const selection = selectMemory(bundle, input.includeMemory, to ? input.onConflict ?? "update" : undefined);
     const { excluded, warnings: selectionWarnings } = selection;
@@ -141,7 +141,7 @@ export class TransferSession {
     const findings = scanSecrets(bundle);
     if (findings.length) throw new SecretsFoundError(findings);
     const identity = from?.cacheIdentity && agent
-      ? await from.cacheIdentity({ ...ctx, targetDir: undefined }, agent) : agent;
+      ? await from.cacheIdentity({ ...ctx, targetDir: undefined, readIncludeFiles: input.includeFiles === true }, agent) : agent;
     const out = input.operation === "export"
       ? resolve(ctx.cwd, input.out ?? fileSlug(bundle.manifest.name) + ".jetpack") : undefined;
     if (out) {
