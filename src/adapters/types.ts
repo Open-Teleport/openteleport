@@ -46,6 +46,8 @@ export type WriteResult = {
  * from `home`, never from the process, so tests can point it at a temporary directory.
  */
 export type Ctx = {
+  /** Optional read selection; false lets folder sources skip attachments before reading. */
+  readIncludeFiles?: boolean;
   /** Where to read from instead of the app's default location. */
   sourceDir?: string;
   /** Where to write to instead of the app's default location. */
