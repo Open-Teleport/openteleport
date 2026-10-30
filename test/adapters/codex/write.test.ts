@@ -850,23 +850,14 @@ describe("rewriting its own agent file", () => {
     expect(written.sandbox_mode).toBe("workspace-write");
   });
 
-  it("writes a file that is not TOML over whole, and says so", async () => {
+  it("refuses invalid TOML without changing the existing agent or identity metadata", async () => {
     await writeCodexAgent(ctx, ada(), UPDATE);
-    await writeFile(agentPath("ada"), 'name = "Ada\nsandbox_mode =\n');
-
-    const { items } = await writeCodexAgent(ctx, changed(), UPDATE);
-
-    expect(Object.keys(await readAgentFile("ada"))).toEqual([
-      "name",
-      "description",
-      "developer_instructions",
-      "model",
-      "model_reasoning_effort",
-    ]);
-    expect(items.warnings).toContainEqual(
-      expect.stringMatching(/^agents\/ada\.toml: .*; rewritten without its old settings$/),
-    );
-    expect(items.warnings).not.toContain("agents/ada.toml rewritten; comments may be lost");
+    const broken = 'name = "Ada\nsandbox_mode =\n';
+    await writeFile(agentPath("ada"), broken);
+    const before = await readFile(idsPath(), "utf8");
+    await expect(writeCodexAgent(ctx, changed(), UPDATE)).rejects.toThrow("refusing to overwrite invalid TOML");
+    expect(await readFile(agentPath("ada"), "utf8")).toBe(broken);
+    expect(await readFile(idsPath(), "utf8")).toBe(before);
   });
 
   it("says nothing of the kind for a file it writes for the first time", async () => {
