@@ -44,7 +44,7 @@ const CAPABILITIES: readonly Capability[] = [
 const CAPABILITIES_WARNING = "capabilities are assumed; OpenClaw does not declare them per agent";
 
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
-const MEMORY_PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE } from "../../core/memory.js";
 const USER_NOTE = "USER";
 
 const MAX_NAME_CHARS = 80;

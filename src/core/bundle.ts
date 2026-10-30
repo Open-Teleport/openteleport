@@ -34,7 +34,7 @@ const SKILL_FILE = "SKILL.md";
 const FILES_PREFIX = "files/";
 
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
-const MEMORY_PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE } from "./memory.js";
 
 const NOTE_PATTERN = /^memory\/([^/]+)\.md$/;
 const ROUTINE_PATTERN = /^routines\/[^/]+\.json$/;

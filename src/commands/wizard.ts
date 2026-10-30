@@ -10,6 +10,7 @@ import { moveCommand } from "./move.js";
 import {
   type CommonOptions,
   UsageError,
+  NotDetectedError,
   buildCtx,
   fileSlug,
   hasTerminal,
@@ -145,7 +146,7 @@ export async function runWizard(
       ({ adapter, hint }) => `${adapter.displayName}${hint === undefined ? "" : `: ${oneLine(hint)}`}`,
     );
     if (reasons.length > 0) prompter.note(reasons.join("\n"));
-    return stop(prompter, "No supported app was found, so there is nothing to move.");
+    throw new NotDetectedError("No supported app was found, so there is nothing to move.");
   }
 
   // Apps that are there come first, so that the question starts on one that can be picked.
@@ -163,7 +164,7 @@ export async function runWizard(
   if (source === CANCELLED) return stop(prompter, "Cancelled.");
 
   const [first, ...others] = await source.list(sideOf(ctx, "source"));
-  if (first === undefined) return stop(prompter, `${source.displayName} has no agents.`);
+  if (first === undefined) throw new NotDetectedError(`${source.displayName} has no agents.`);
   let agent: AgentRef = first;
   if (others.length === 0) {
     prompter.note(`Agent: ${oneLine(agent.name)}`);
