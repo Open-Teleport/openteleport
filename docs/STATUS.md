@@ -52,7 +52,7 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-- The demo scripts end to end, and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
+- The Bash demo end to end (the PowerShell demo passed on 2026-10-30), and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
 - **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
   - **Hermes** (the rest of it): what `hermes cron list` shows for an imported job, that `hermes cron resume <id>` starts one, and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
