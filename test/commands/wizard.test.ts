@@ -200,11 +200,11 @@ describe("runWizard", () => {
     it("ends without a question when no adapter is found, naming what each one lacks", async () => {
       const { prompter, calls } = fakePrompter([]);
       const deps = depsFor([missing("one", "Install One"), missing("two")]);
-      await expect(runWizard(prompter, {}, deps)).resolves.toBe("cancelled");
+      await expect(runWizard(prompter, {}, deps)).rejects.toMatchObject({ name: "NotDetectedError" });
 
       expect(selects(calls)).toEqual([]);
       expect(texts(calls, "note")).toEqual(["In-memory one: Install One\nIn-memory two"]);
-      expect(texts(calls, "outro")).toEqual(["No supported app was found, so there is nothing to move."]);
+      expect(texts(calls, "outro")).toEqual([]);
       expect(deps.move).not.toHaveBeenCalled();
     });
   });
@@ -235,9 +235,9 @@ describe("runWizard", () => {
       const empty = app("alpha", {});
       const { prompter, calls } = fakePrompter([ALPHA]);
       const deps = depsFor([empty, beta]);
-      await expect(runWizard(prompter, {}, deps)).resolves.toBe("cancelled");
+      await expect(runWizard(prompter, {}, deps)).rejects.toMatchObject({ name: "NotDetectedError" });
 
-      expect(texts(calls, "outro")).toEqual(["In-memory alpha has no agents."]);
+      expect(texts(calls, "outro")).toEqual([]);
       expect(selects(calls)).toHaveLength(1);
       expect(deps.move).not.toHaveBeenCalled();
     });

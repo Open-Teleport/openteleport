@@ -24,7 +24,7 @@ const MAX_TITLE_CHARS = 120;
 const USER_PREFIX = "user:";
 const MEMORY_FILE = "MEMORY.md";
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
-const PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE as PROSE_NOTE } from "../../core/memory.js";
 /** The note that carries the `MEMORY.md` bullets too long to be facts. */
 const LONG_NOTE = "MEMORY-long";
 

@@ -30,7 +30,7 @@ import {
 
 const MAX_ID_CHARS = 32;
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
-const MEMORY_PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE } from "../../core/memory.js";
 /** The note that is the workspace's `USER.md`. */
 const USER_NOTE = "USER";
 const DEFAULT_EMOJI = "🤖";
