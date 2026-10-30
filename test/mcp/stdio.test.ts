@@ -24,11 +24,11 @@ async function connect(adapterPath = "test/helpers/memory-adapter.ts") {
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "openteleport-mcp-stdio-"));
   await connect();
-});
+}, 60_000);
 afterEach(async () => {
   await client?.close(); await transport?.close();
   await rm(home, { recursive: true, force: true });
-});
+}, 60_000);
 const call = (name: string, args: Record<string, unknown> = {}) =>
   client.callTool({ name: "openteleport_" + name, arguments: args });
 it("advertises strict schemas and the write boundary", async () => {
@@ -175,11 +175,11 @@ it("retains completion after client cancellation without replaying or claiming a
   const { planId, operationId } = plan.structuredContent as { planId: string; operationId: string };
   const controller = new AbortController();
   const applying = client.callTool({ name: "openteleport_apply", arguments: { planId, confirmed: true } },
-    { signal: controller.signal }).then(result => ({ result }), error => ({ error }));
+    { signal: controller.signal, timeout: 90_000 }).then(result => ({ result }), error => ({ error }));
   // The filesystem gate determines ordering, not elapsed time. Allow loaded Windows runners
   // to schedule both processes and finalize the receipt; retain all exactly-once assertions.
   try {
-    await vi.waitFor(async () => expect(await readFile(join(home, "apply-entered"), "utf8")).toBe("started"), { timeout: 20_000, interval: 100 });
+    await vi.waitFor(async () => expect(await readFile(join(home, "apply-entered"), "utf8")).toBe("started"), { timeout: 60_000, interval: 200 });
     controller.abort();
     expect(await applying).toHaveProperty("error");
     expect((await call("cancel", { planId })).structuredContent).toMatchObject({ cancelled: false, state: "in_progress" });
@@ -189,7 +189,7 @@ it("retains completion after client cancellation without replaying or claiming a
     await vi.waitFor(async () => {
       expect((await call("operation_status", { operationId })).structuredContent)
         .toMatchObject({ state: "completed", result: { outcome: "done" } });
-    }, { timeout: 20_000, interval: 100 });
+    }, { timeout: 60_000, interval: 200 });
     expect((await call("apply", { planId, confirmed: true })).isError).toBe(true);
     expect(await readFile(join(home, "writes.log"), "utf8")).toBe("one write\n");
     expect((await call("cancel", { planId })).structuredContent).toMatchObject({ cancelled: false, state: "not_pending" });
@@ -198,7 +198,7 @@ it("retains completion after client cancellation without replaying or claiming a
     await writeFile(join(home, "release-apply"), "release");
     await applying;
   }
-}, 60_000);
+}, 180_000);
 
 it("selects memory through the public export schema without changing the source", async () => {
   const out = join(home, "configuration.jetpack");
