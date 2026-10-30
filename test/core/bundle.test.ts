@@ -1508,3 +1508,17 @@ it("allows only one concurrent exclusive archive writer", async () => {
   expect(rejected.reason).toMatchObject({ code: "EEXIST" });
   expect((await readBundle(target)).manifest.name).toBe(sampleBundle().manifest.name);
 });
+
+ it("skips oversized directory attachments only when explicitly excluded", async () => {
+    const folder = join(tmp, "oversized-excluded");
+    await mkdir(join(folder, "files"), { recursive: true });
+    await writeFile(join(folder, "AGENTS.md"), "Keep instructions.");
+    const file = join(folder, "files", "large.bin");
+    await writeFile(file, "");
+    await truncate(file, MAX_FILES_BYTES + 1);
+    const selected = await readBundle(folder, { requireManifest: false, includeFiles: false });
+    expect(selected.instructions).toBe("Keep instructions.");
+    expect(selected.files).toEqual([]);
+    await expect(readBundle(folder, { requireManifest: false, includeFiles: true })).rejects.toThrow(/files\//);
+    await expect(readBundle(folder, { requireManifest: false })).rejects.toThrow(/files\//);
+  });

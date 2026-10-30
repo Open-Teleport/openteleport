@@ -312,7 +312,7 @@ export const folderAdapter: Adapter = {
 
     let bundle: Bundle;
     try {
-      bundle = await readBundle(folder, { requireManifest: false });
+      bundle = await readBundle(folder, { requireManifest: false, includeFiles: ctx.readIncludeFiles });
     } catch (error) {
       throw new Error(`Cannot read ${folder}: ${(error as Error).message}`, { cause: error });
     }

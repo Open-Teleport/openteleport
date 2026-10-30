@@ -192,9 +192,9 @@ export async function saveReport(
  * an agent folder, which may do without, as the folder adapter reads one. The error names the
  * path.
  */
-export async function readInput(path: string, isDirectory: boolean): Promise<Bundle> {
+export async function readInput(path: string, isDirectory: boolean, includeFiles = true): Promise<Bundle> {
   try {
-    return await readBundle(path, { requireManifest: !isDirectory });
+    return await readBundle(path, { requireManifest: !isDirectory, includeFiles });
   } catch (error) {
     const message = messageOf(error);
     if (message.includes(path)) throw error;
