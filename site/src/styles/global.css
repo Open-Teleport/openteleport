@@ -1,9 +1,9 @@
 /* Design tokens. Light = paper, monochrome. Dark = void, with one ember accent. */
 :root {
-  --bg: #f5f5f3;
+  --bg: #ffffff;
   --fg: #121212;
   --fg-2: #5a5a58;
-  --fg-3: #a4a4a0;
+  --fg-3: #70706c;
   --line: #dcdcd8;
   --panel: #ebebe8;
   --accent: #121212;
@@ -12,8 +12,8 @@
   --term-out: #5a5a58;
   --term-frame: #b4b4b0;
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-head: var(--font-display, "Cormorant Garamond"), Georgia, "Times New Roman", serif;
-  --font-code: var(--font-mono, "JetBrains Mono"), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-head: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-code: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -125,10 +125,10 @@ code {
 }
 .display {
   font-family: var(--font-head);
-  font-weight: 300;
-  text-transform: uppercase;
-  letter-spacing: 0.035em;
-  line-height: 0.98;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: -0.045em;
+  line-height: 1.06;
   text-wrap: balance;
   margin: 0;
 }

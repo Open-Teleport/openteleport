@@ -197,9 +197,9 @@ In PowerShell: `$env:OPENTELEPORT_EXTRA_ADAPTER = "./my-app.js"; npx opentelepor
 
 Apache-2.0.
 
-## From inside Claude Code and MCP clients (0.4.0)
+## From inside Claude Code and MCP clients
 
-The local stdio server and Claude Code plugin support reviewed agent transfers from a session. Available in the `openteleport@0.4.0` npm package. See [setup, tools, and the preview/apply workflow](docs/integrations/mcp.md).
+The local stdio server and Claude Code plugin support reviewed agent transfers from a session. Introduced in 0.4.0 and included in the current 0.4.1 npm release. See [setup, tools, and the preview/apply workflow](docs/integrations/mcp.md).
 
 ## Native OpenClaw and Hermes commands (0.4.0 source plugins)
 

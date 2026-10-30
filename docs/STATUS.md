@@ -89,7 +89,15 @@ A fresh-cache check outside the repository ran `npx openteleport@0.2.0 --version
 
 Users with Node.js 24+ can start with `npx openteleport`. [OpenTeleport 0.4.1](https://www.npmjs.com/package/openteleport/v/0.4.1) was published on 2026-10-30 by [Release workflow 40978652536](https://github.com/Open-Teleport/openteleport/actions/runs/40978652536) from the `v0.4.1` tag on `235c8bf`. It is the first version with the OpenClaw fixes from PR #12: the roster in both forms, five-minute command limits, and the verification table in `docs/demo.md` filled in. A fresh-cache `npx openteleport@0.4.1 --version` outside the repository printed `0.4.1`, and `npx openteleport@0.4.1 adapters` found OpenClaw 2026.10.8, Claude Code 2.1.273, Hermes and Codex on the machine. The 0.4.0 release combines the merged session and native plugin milestones. Use `npx openteleport@0.4.0` for its CLI and MCP server; install source plugins from the `v0.4.0` repository tag. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
 
+From the next tag on, the Release workflow authenticates to npm with Trusted Publishing (OpenID Connect from GitHub Actions, configured on npmjs.com for `Open-Teleport/openteleport` and `release.yml`); the `NPM_TOKEN` secret is no longer used and can be deleted once the first release through it has succeeded.
+
 ## How decisions are recorded
+
+### Landing and release consistency check (2026-10-30)
+
+The public npm registry's `latest` metadata was checked directly: 0.4.1, gitHead `235c8bffb73d396bfcc32ae636ed832f82e19dc2`, matching the local `v0.4.1` tag. The current repository HEAD also includes the subsequent publication-status documentation. No new package publication is needed for landing/brand changes; npm does not include `site/`.
+
+The landing's previous A/B merge omitted A's portal flight and retained B's terminal scatter. The local revision adds a portal transition in both themes, defaults to a clean light theme, adds MCP/native-plugin information, and updates SEO. The website build has its own version (0.1.0), independent of the CLI version. Brand proposals 04–07 await selection. These local changes are not evidence of a live deployment. This focused check does not revalidate the real-app limitations listed above.
 
 - `docs/design.md` is the design authority for v0.1; the v0.2 spec in `docs/superpowers/specs/` is the authority where it differs. Changes to behaviour that contradict them get a note there.
 - `docs/superpowers/plans/` holds the implementation plans; `docs/superpowers/research/` the research behind them.

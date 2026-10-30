@@ -1,36 +1,58 @@
 ---
-import { Font } from "astro:assets";
 import "../styles/global.css";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import pkg from "../../../package.json";
 
 interface Props {
   title?: string;
   description?: string;
 }
 const {
-  title = "OpenTeleport",
-  description = "Move your AI agent between apps in one command. Open source, Apache-2.0.",
+  title = "OpenTeleport — Move AI agents between apps",
+  description = "Move AI agents, instructions, skills and memory between Claude Code, OpenClaw, Hermes, Codex and more. Open-source CLI with transfer reports and local MCP tools.",
 } = Astro.props;
+const canonical = new URL(Astro.url.pathname, "https://openteleport.dev").href;
+const software = {
+  "@context": "https://schema.org", "@type": "SoftwareApplication",
+  name: "OpenTeleport", url: "https://openteleport.dev/", description,
+  applicationCategory: "DeveloperApplication", operatingSystem: "Windows, macOS, Linux",
+  softwareVersion: pkg.version, license: "https://www.apache.org/licenses/LICENSE-2.0",
+  downloadUrl: "https://www.npmjs.com/package/openteleport",
+  codeRepository: "https://github.com/Open-Teleport/openteleport",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f5f5f3" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#06050b" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="canonical" href="https://openteleport.dev/" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="canonical" href={canonical} />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content="https://openteleport.dev/" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:site_name" content="OpenTeleport" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://openteleport.dev/brand/social-og-light.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="OpenTeleport. Move your AI agent between apps in one command." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://openteleport.dev/brand/social-og-light.png" />
+    <script type="application/ld+json" set:html={JSON.stringify(software).replace(/</g, "\\u003c")} />
     <script is:inline>
       // Apply a saved theme before the first paint; otherwise the system setting decides.
       (function () {
@@ -40,8 +62,6 @@ const {
         } catch (e) {}
       })();
     </script>
-    <Font cssVariable="--font-display" preload />
-    <Font cssVariable="--font-mono" preload />
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>

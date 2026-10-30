@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pl"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>OpenTeleport — branding</title>
+<style>body{margin:0;background:#06050b;color:#ede7db;font:18px/1.6 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:48px 24px}h1{font-size:52px;letter-spacing:-2px}h2{margin-top:48px;font-size:28px}a{color:#e4b46e}img{max-width:100%;height:auto}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:12px;border-bottom:1px solid #343038}code{color:#e4b46e}small{color:#aaa}</style>
+<main><h1>OpenTeleport</h1><p>Your agent. Anywhere.</p><p>Otwarty portal i strzałka oznaczają przenoszenie agenta między aplikacjami. Czerń, kość słoniowa i bursztyn łączą techniczny charakter narzędzia z motywem podróży.</p><img src="brand-preview.png" alt="Przegląd identyfikacji OpenTeleport">
+<h2>Pliki i zastosowania</h2><table><tr><th>Materiał</th><th>Pliki</th></tr>
+<tr><td>Logo poziome / pionowe</td><td>logo-horizontal-* / logo-stacked-* (SVG i PNG)</td></tr>
+<tr><td>Sam symbol</td><td>mark-* (SVG i PNG)</td></tr><tr><td>Avatary 1024 × 1024</td><td>avatar-dark / avatar-light / avatar-amber (SVG i PNG)</td></tr>
+<tr><td>Favicon i ikony</td><td>../favicon.svg, ../favicon.ico; icon-16/32/48/180/192/512.png</td></tr>
+<tr><td>X — 1500 × 500</td><td><a href="banner-x.png">banner-x.png</a> — odsunięty tekst zostawia miejsce na avatar</td></tr>
+<tr><td>LinkedIn — 1584 × 396</td><td><a href="banner-linkedin.png">banner-linkedin.png</a></td></tr>
+<tr><td>GitHub — 1280 × 640</td><td><a href="banner-github.png">banner-github.png</a></td></tr>
+<tr><td>Podgląd linku — 1200 × 630</td><td><a href="social-og.png">social-og.png</a></td></tr>
+<tr><td>Baner prezentacyjny — 1920 × 1080</td><td><a href="banner-community.png">banner-community.png</a></td></tr>
+<tr><td>Tła</td><td>background-portal.png, background-grid.svg / .png, wallpaper-desktop.jpg (1920 × 1080), wallpaper-mobile.jpg (1080 × 1920)</td></tr></table>
+<h2>Warianty logo</h2><p><code>dark</code> — jasny napis i bursztynowy symbol na ciemnym tle. <code>light</code> — czarne na jasnym tle. <code>white</code> i <code>black</code> — jednobarwne na przezroczystym tle. <code>color</code> — jasny napis i bursztynowy symbol na przezroczystym tle.</p>
+<h2>Kolory i typografia</h2><p>Void #06050B · Ivory #EDE7DB · Amber #E4B46E · Paper #F5F5F3.</p><p>Logo: Segoe UI Semibold, awaryjnie Arial. Nagłówki strony: Cormorant Garamond. Polecenia i etykiety: JetBrains Mono. Tekst: systemowy sans-serif. Pliki SVG zachowują edytowalny tekst; do identycznego wyglądu na innych komputerach używaj dostarczonych PNG lub zamień tekst na krzywe w edytorze wektorowym.</p>
+<h2>Zasady</h2><p>Zachowuj wolne miejsce wokół symbolu równe przynajmniej 1/4 jego szerokości. Minimalna szerokość logo z napisem: 160 px; poniżej używaj samego symbolu. Favicon ma uproszczony format dopasowany do małych rozmiarów. Nie rozciągaj logo i nie dodawaj cieni. Przezroczyste jasne logo umieszczaj na ciemnym tle. Przycinając banery, sprawdź widoczność napisu i obszar zajęty przez avatar w docelowym serwisie.</p>
+<h2>Źródła i odtwarzanie</h2><p>Logo i kompozycje: scripts/build-brand.mjs. Odtworzenie: node scripts/build-brand.mjs; bibliotekę sharp można wskazać przez OPENTELEPORT_BRAND_SHARP. Tło wygenerowane wbudowanym narzędziem imagegen. Prompty zapisano w generation-prompt.txt.</p></main></html>
