@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-10-30
 
 ### Fixed
 
@@ -16,6 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - OpenClaw: a command may take 5 minutes instead of 90 seconds (`--version` 30 seconds instead of 10), and the probe for the job command family gets the full time too. On a loaded Windows machine `agents add` through the Gateway exceeded 90 seconds, and a probe cut short would have left `automations` for an OpenClaw that has `cron`.
+- README and the landing page say which adapters are checked on real installs (`openclaw`, `hermes`; `codex` for discovery) and which are experimental (`openbot`, `grok-bot`, `letta`).
 
 ## [0.4.0] - 2026-10-29
 
