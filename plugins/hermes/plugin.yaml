@@ -1,5 +1,5 @@
 manifest_version: 1
 name: openteleport
-version: "0.4.1"
+version: "0.4.2"
 description: Import and export portable agent profiles with the local OpenTeleport CLI
 kind: standalone

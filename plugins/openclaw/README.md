@@ -1,6 +1,6 @@
 # OpenClaw plugin (v0.4 source)
 
-This private source package (repository tag v0.4.0) registers openclaw teleport list/export/import.
+This private source package (repository tag v0.4.2) registers openclaw teleport list/export/import.
 It uses the public OpenTeleport library. The package is not published.
 
 Build OpenTeleport at the repository root, then install this plugin's local dependencies:

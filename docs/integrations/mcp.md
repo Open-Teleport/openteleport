@@ -1,12 +1,12 @@
-# Session integration (0.4.0)
+# Session integration (0.4.2)
 
 Requires Node >=24. Install a fixed local runtime once:
 
-    npm install --prefix /absolute/path/to/runtime --ignore-scripts openteleport@0.4.0
+    npm install --prefix /absolute/path/to/runtime --ignore-scripts openteleport@0.4.2
 
 Its CLI is /absolute/path/to/runtime/node_modules/openteleport/dist/cli.js.
 Use that absolute path in your client or OPENTELEPORT_CLI configuration.
-Alternatively, check out the v0.4.0 tag and build with npm ci and npm run build.
+Alternatively, check out the v0.4.2 tag and build with npm ci and npm run build.
 The examples below use a built repository path; substitute your installed CLI path when using npm.
 
 Run the server with:
@@ -145,7 +145,7 @@ present in the Claude Code process environment, not only in a terminal opened af
 If the host starts an older Node from PATH, configure its MCP command with the absolute path of a
 supported Node executable. The launcher uses that same executable for the child CLI. Paths containing
 spaces are passed as arguments without a shell. A readable file is only a startup check; it does not
-prove that the configured build implements MCP. Use the 0.4.0 installed CLI or the built CLI from the v0.4.0 checkout.
+prove that the configured build implements MCP. Use the 0.4.2 installed CLI or the built CLI from the v0.4.2 checkout.
 
 ## Scope decisions
 
