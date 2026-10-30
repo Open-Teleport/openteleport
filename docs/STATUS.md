@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-10-29. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
+Last updated: 2026-10-30. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
 
 ## What is done
 
@@ -67,6 +67,7 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 - The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
 - Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
 - A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
+- The MCP stdio test "retains completion after client cancellation" can exceed its timeout when the whole suite runs on a loaded machine; alone it passes in about a second.
 
 ## What comes next
 
@@ -86,7 +87,7 @@ The `v0.2.0` tag points to commit `ee4371a52a40cd6f85533344067601c45dc53cac`. [R
 
 A fresh-cache check outside the repository ran `npx openteleport@0.2.0 --version`, exported a synthetic folder agent, imported the resulting archive into a fresh folder, and verified that the instructions were preserved. This checks the published CLI path; it does not establish real-application behavior for every adapter.
 
-Users with Node.js 24+ can start with `npx openteleport`. The 0.4.0 release combines the merged session and native plugin milestones. Use `npx openteleport@0.4.0` for its CLI and MCP server; install source plugins from the `v0.4.0` repository tag. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
+Users with Node.js 24+ can start with `npx openteleport`. 0.4.1 (2026-10-30) is the first version with the OpenClaw fixes from PR #12: the roster in both forms, five-minute command limits, and the verification table in `docs/demo.md` filled in. The 0.4.0 release combines the merged session and native plugin milestones. Use `npx openteleport@0.4.0` for its CLI and MCP server; install source plugins from the `v0.4.0` repository tag. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
 
 ## How decisions are recorded
 
