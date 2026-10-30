@@ -61,13 +61,9 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
 
-## Known small issues (good first fixes)
+## Fixes prepared for 0.4.2
 
-- A folder whose `files/` exceeds 100 MiB cannot be read even without `--include-files`.
-- The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
-- Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
-- A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
-- The MCP stdio test "retains completion after client cancellation" can exceed its timeout when the whole suite runs on a loaded machine; alone it passes in about a second.
+PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attachments (including CLI move), wizard missing-source exit codes, shared memory note naming and cancellation-test deadlines. The combined build passed 2,738 tests (12 skipped) and fresh-install package verification. Real-install follow-up results belong in `docs/demo.md`; unit and package tests do not replace them.
 
 ## What comes next
 

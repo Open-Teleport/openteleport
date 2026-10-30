@@ -1,6 +1,6 @@
 {
   "name": "openteleport",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Preview and transfer portable agents between applications.",
   "author": {
     "name": "OpenTeleport"
