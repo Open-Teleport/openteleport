@@ -40,7 +40,9 @@ const KEEP = process.env.OPENTELEPORT_E2E_KEEP === "1";
 // Every `openclaw` command starts a large Node program, and a job command may wait for the
 // Gateway's own timeout before it fails.
 const COMMAND_TIMEOUT_MS = 5 * 60_000;
-const TEST_TIMEOUT_MS = 15 * 60_000;
+// One transfer invokes several individually bounded OpenClaw commands.
+const TRANSFER_TIMEOUT_MS = 15 * 60_000;
+const TEST_TIMEOUT_MS = 20 * 60_000;
 const GATEWAY_WAIT_MS = 2 * 60_000;
 
 const here = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
@@ -158,7 +160,7 @@ async function openteleport(args: readonly string[]): Promise<Run> {
     extendEnv: false,
     reject: false,
     stdin: "ignore",
-    timeout: COMMAND_TIMEOUT_MS,
+    timeout: TRANSFER_TIMEOUT_MS,
   });
   return settle(result);
 }
