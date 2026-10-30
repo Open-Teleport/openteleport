@@ -43,7 +43,7 @@ Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). Th
 - **Hermes** (0.13.0): import, same-id update, copy and export through the engine, with Hermes's own code reading the result back. It recovered the facts, the skill, the three routines (all paused, none run) and both profiles, and `skills/.bundled_manifest` has `name:hash` lines. Two edge cases came out of it, both fixed on this branch and not yet rechecked on an install:
   - A one-off time without an offset (`once.run_at`, as a hand-written job has it) is read by Hermes in the machine's time zone, not the profile's. The adapter now reads it the same way and warns about the assumption; cron expressions keep the profile's zone.
   - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
-- **OpenClaw** (2026.5.28 and 2026.10.8, Windows): the end-to-end round trip passed on 2026.10.8 with the Gateway running: a Claude Code project into OpenClaw, back out into a folder, exported as the bundle that left, and two routines landed disabled with a two-line instruction whole. The first run, on 2026.5.28, found two wrong assumptions, fixed since: that version keeps the roster in `agents.list` (an array) and rejects `agents.entries`, which newer versions use, and its `agents list --json` names the workspace `location`. The adapter now reads both forms and sets model and runtime at the path the install keeps the agent under. Not reached in a passing run: the path without a Gateway, and the demo scripts.
+- **OpenClaw** (2026.5.28 and 2026.10.8, Windows): the end-to-end round trip passed on 2026.10.8 with the Gateway running: a Claude Code project into OpenClaw, back out into a folder, exported as the bundle that left, and two routines landed disabled with a two-line instruction whole. The first run, on 2026.5.28, found two wrong assumptions, fixed since: that version keeps the roster in `agents.list` (an array) and rejects `agents.entries`, which newer versions use, and its `agents list --json` names the workspace `location`. The adapter now reads both forms and sets model and runtime at the path the install keeps the agent under. The no-Gateway path also passed 6/6 on 2026-10-30; routine creation was explicitly skipped with a Gateway-start warning. The demo-script check is recorded separately.
 - **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the fixes and remaining verification below.
 
 ## Codex fixes
@@ -52,9 +52,9 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-Each item below has an issue labelled help wanted: OpenBot #16, Grok Bot #17, Letta #18, Hermes cron #19, Codex roles #20, the OpenClaw path without a Gateway #21, the demo scripts #22, the four small known issues #23, the slow MCP test #24.
+Each item below has an issue labelled help wanted: OpenBot #16, Grok Bot #17, Letta #18, Hermes cron #19, Codex roles #20, the Bash demo #22. Issues #21 (the OpenClaw path without a Gateway), #23 (four small fixes) and #24 (the slow MCP test) were settled by PRs #26 to #30.
 
-- The OpenClaw round trip without a Gateway (the report's `openclaw gateway start` path), the demo scripts end to end, and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
+- The Bash demo end to end (the PowerShell demo passed on 2026-10-30), and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
 - **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
   - **Hermes** (the rest of it): what `hermes cron list` shows for an imported job, that `hermes cron resume <id>` starts one, and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
@@ -63,13 +63,9 @@ Each item below has an issue labelled help wanted: OpenBot #16, Grok Bot #17, Le
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
 
-## Known small issues (good first fixes)
+## Fixes prepared for 0.4.2
 
-- A folder whose `files/` exceeds 100 MiB cannot be read even without `--include-files`.
-- The literal `MEMORY-prose` (the name of the note that holds a `MEMORY.md`'s prose) is still defined five times: `src/adapters/claude-code/read.ts`, `src/adapters/openclaw/read.ts`, `src/adapters/openclaw/write.ts`, `src/core/bundle.ts` and `src/core/secrets.ts`.
-- Codex: an existing agent file that is not valid TOML is overwritten whole by an update, with a warning.
-- A wizard run with no app found, or no agents, exits 0, where the same case in command mode exits 3.
-- The MCP stdio test "retains completion after client cancellation" can exceed its timeout when the whole suite runs on a loaded machine; alone it passes in about a second.
+PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attachments (including CLI move), wizard missing-source exit codes, shared memory note naming and cancellation-test deadlines. The combined build passed 2,738 tests (12 skipped) and fresh-install package verification. Real-install follow-up results belong in `docs/demo.md`; unit and package tests do not replace them.
 
 ## What comes next
 

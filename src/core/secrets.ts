@@ -65,7 +65,7 @@ const PREVIEW_CHARS = 6;
 const BINARY_SNIFF_BYTES = 8 * 1024;
 
 // The note that carries the lines of `MEMORY.md` that are not facts; see `bundle.ts`.
-const MEMORY_PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE } from "./memory.js";
 
 const LINE_BREAK = /\r\n|\r|\n/;
 

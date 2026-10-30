@@ -34,7 +34,7 @@ const SKILL_FILE = "SKILL.md";
 const FILES_PREFIX = "files/";
 
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
-const MEMORY_PROSE_NOTE = "MEMORY-prose";
+import { MEMORY_PROSE_NOTE } from "./memory.js";
 
 const NOTE_PATTERN = /^memory\/([^/]+)\.md$/;
 const ROUTINE_PATTERN = /^routines\/[^/]+\.json$/;
@@ -45,6 +45,8 @@ const encoder = new TextEncoder();
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 export type ReadBundleOptions = {
+  /** Skip directory files/ entirely when false. Archive validation remains unchanged. */
+  includeFiles?: boolean;
   /** Fail when `jetpack.json` is missing (default `true`). Otherwise a manifest is synthesized. */
   requireManifest?: boolean;
 };
@@ -485,7 +487,7 @@ type DirentLike = { name: string; isDirectory(): boolean; isFile(): boolean };
  * forbidden name, a name that starts with a dot and a link are named once there and never
  * descended into, so a `.git` or a `node_modules` is not walked.
  */
-async function listDirectory(root: string): Promise<{ layout: DiskFile[]; outside: string[] }> {
+async function listDirectory(root: string, includeFiles = true): Promise<{ layout: DiskFile[]; outside: string[] }> {
   const layout: DiskFile[] = [];
   const outside: string[] = [];
 
@@ -514,6 +516,7 @@ async function listDirectory(root: string): Promise<{ layout: DiskFile[]; outsid
   }
 
   for (const dirent of await readdir(root, { withFileTypes: true })) {
+    if (!includeFiles && dirent.name === "files") continue;
     const visit = isLayoutName(dirent.name) ? visitLayout : visitOutside;
     await visit(join(root, dirent.name), dirent.name, dirent);
   }
@@ -530,8 +533,9 @@ const unreadBytes = (): Uint8Array => new Uint8Array(0);
  */
 async function readDirectoryEntries(
   root: string,
+  includeFiles = true,
 ): Promise<{ entries: FileEntry[]; outside: string[] }> {
-  const { layout, outside } = await listDirectory(root);
+  const { layout, outside } = await listDirectory(root, includeFiles);
   const known = (path: string): boolean => classify(path).kind !== "unknown";
   validateListing(layout.map(({ path, size }) => ({ path, size: known(path) ? size : 0 })));
   const entries: FileEntry[] = [];
@@ -569,7 +573,7 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
     });
   if (!info.isDirectory()) return toBundle(await readZipEntries(source, info.size, ZIP_POLICY));
 
-  const { entries, outside } = await readDirectoryEntries(source);
+  const { entries, outside } = await readDirectoryEntries(source, opts.includeFiles);
   const bundle = toBundle(entries);
   bundle.unknownPaths = [...bundle.unknownPaths, ...outside].sort(byCodeUnit);
   return bundle;

@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-10-30
+
+### Fixed
+
+- Codex refuses to overwrite malformed existing agent TOML before writing destination files. Repair the file or use `--copy`.
+- Folder transfers skip excluded attachments before reading them, so a `files/` directory larger than 100 MiB no longer blocks CLI move/export/import or MCP previews without attachments. Explicit attachment reads and archive validation retain their limits.
+- The terminal wizard returns exit code 3 for missing applications or agents; intentional cancellation still succeeds.
+
+### Maintenance
+
+- Verified the OpenClaw 2026.10.8 round trip without a Gateway: six checks passed, with routines explicitly skipped and user configuration preserved. E2e transfer deadlines now allow multiple individually bounded host commands.
+
+- Share the reserved `MEMORY-prose` note name across readers, writers and credential scanning.
+- Align MCP cancellation test deadlines for loaded runners while retaining filesystem synchronization, exactly-once checks and rejection of replay. Product cancellation behavior is unchanged.
+
 ## [0.4.1] - 2026-10-30
 
 ### Fixed
@@ -151,3 +166,5 @@ First release.
 [0.4.0]: https://github.com/Open-Teleport/openteleport/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/Open-Teleport/openteleport/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0
+
+[0.4.2]: https://github.com/Open-Teleport/openteleport/compare/v0.4.1...v0.4.2
