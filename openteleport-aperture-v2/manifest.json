@@ -1,0 +1,482 @@
+[
+  {
+    "category": "favicon",
+    "file": "favicon/apple-touch-icon.png",
+    "width": 180,
+    "height": 180,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "favicon",
+    "file": "favicon/favicon-16.png",
+    "width": 16,
+    "height": 16,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "favicon",
+    "file": "favicon/favicon-32.png",
+    "width": 32,
+    "height": 32,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "favicon",
+    "file": "favicon/favicon-48.png",
+    "width": 48,
+    "height": 48,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "favicon",
+    "file": "favicon/favicon-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "favicon",
+    "file": "favicon/favicon.svg",
+    "width": 64,
+    "height": 64,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-1024.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-128.png",
+    "width": 128,
+    "height": 128,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-192.png",
+    "width": 192,
+    "height": 192,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-256.png",
+    "width": 256,
+    "height": 256,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-512.png",
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon-64.png",
+    "width": 64,
+    "height": 64,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "icons",
+    "file": "icons/app-icon.svg",
+    "width": 512,
+    "height": 512,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-charcoal.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-charcoal.svg",
+    "width": 1024,
+    "height": 1024,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-grey.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-grey.svg",
+    "width": 1024,
+    "height": 1024,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-white.png",
+    "width": 1024,
+    "height": 1024,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "avatars",
+    "file": "avatars/avatar-white.svg",
+    "width": 1024,
+    "height": 1024,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-black-transparent.png",
+    "width": 960,
+    "height": 160,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-black-transparent.svg",
+    "width": 960,
+    "height": 160,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-on-charcoal.png",
+    "width": 960,
+    "height": 160,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-on-charcoal.svg",
+    "width": 960,
+    "height": 160,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-on-white.png",
+    "width": 960,
+    "height": 160,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-on-white.svg",
+    "width": 960,
+    "height": 160,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-white-transparent.png",
+    "width": 960,
+    "height": 160,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-horizontal-white-transparent.svg",
+    "width": 960,
+    "height": 160,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-black-transparent.png",
+    "width": 640,
+    "height": 480,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-black-transparent.svg",
+    "width": 640,
+    "height": 480,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-on-charcoal.png",
+    "width": 640,
+    "height": 480,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-on-charcoal.svg",
+    "width": 640,
+    "height": 480,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-on-white.png",
+    "width": 640,
+    "height": 480,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-on-white.svg",
+    "width": 640,
+    "height": 480,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-white-transparent.png",
+    "width": 640,
+    "height": 480,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/logo-stacked-white-transparent.svg",
+    "width": 640,
+    "height": 480,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-black-transparent.png",
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-black-transparent.svg",
+    "width": 512,
+    "height": 512,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-on-charcoal.png",
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-on-charcoal.svg",
+    "width": 512,
+    "height": 512,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-on-white.png",
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-on-white.svg",
+    "width": 512,
+    "height": 512,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-white-transparent.png",
+    "width": 512,
+    "height": 512,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/symbol-white-transparent.svg",
+    "width": 512,
+    "height": 512,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-black-transparent.png",
+    "width": 840,
+    "height": 140,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-black-transparent.svg",
+    "width": 840,
+    "height": 140,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-on-charcoal.png",
+    "width": 840,
+    "height": 140,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-on-charcoal.svg",
+    "width": 840,
+    "height": 140,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-on-white.png",
+    "width": 840,
+    "height": 140,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-on-white.svg",
+    "width": 840,
+    "height": 140,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-white-transparent.png",
+    "width": 840,
+    "height": 140,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "logos",
+    "file": "logos/wordmark-white-transparent.svg",
+    "width": 840,
+    "height": 140,
+    "format": "svg",
+    "alpha": true
+  },
+  {
+    "category": "backgrounds",
+    "file": "backgrounds/background-desktop.jpg",
+    "width": 1920,
+    "height": 1080,
+    "format": "jpeg",
+    "alpha": false
+  },
+  {
+    "category": "backgrounds",
+    "file": "backgrounds/background-mobile.jpg",
+    "width": 1080,
+    "height": 1920,
+    "format": "jpeg",
+    "alpha": false
+  },
+  {
+    "category": "backgrounds",
+    "file": "backgrounds/background-square.jpg",
+    "width": 1080,
+    "height": 1080,
+    "format": "jpeg",
+    "alpha": false
+  },
+  {
+    "category": "backgrounds",
+    "file": "backgrounds/background-wide.jpg",
+    "width": 2400,
+    "height": 800,
+    "format": "jpeg",
+    "alpha": false
+  },
+  {
+    "category": "banners",
+    "file": "banners/banner-github.png",
+    "width": 1280,
+    "height": 640,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "banners",
+    "file": "banners/banner-linkedin.png",
+    "width": 1584,
+    "height": 396,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "banners",
+    "file": "banners/banner-open-graph.png",
+    "width": 1200,
+    "height": 630,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "banners",
+    "file": "banners/banner-social-post.png",
+    "width": 1080,
+    "height": 1080,
+    "format": "png",
+    "alpha": true
+  },
+  {
+    "category": "banners",
+    "file": "banners/banner-x.png",
+    "width": 1500,
+    "height": 500,
+    "format": "png",
+    "alpha": true
+  }
+]

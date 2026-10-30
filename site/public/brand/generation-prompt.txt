@@ -1,0 +1,4 @@
+Tool: built-in image_gen.imagegen (no CLI fallback).
+Asset: background-portal.png
+
+Use case: stylized-concept. Create a premium cinematic brand background for OpenTeleport, a tool that moves AI agents between apps. Wide landscape 16:9 composition. Deep near-black violet #06050b void, one elegant monumental open circular portal made of fine warm amber #e4b46e light at the right third, ivory luminous small particle passing through the opening toward right, restrained subtle orbital traces, physical brushed dark metal, cinematic studio photograph / high-end science fiction art, fine subtle grain, deep shadows, refined editorial atmosphere, large empty dark negative space over entire left half for later typography. No text, no lettering, no logos, no collage, no watermarks, no neon purple or blue.

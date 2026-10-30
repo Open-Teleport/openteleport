@@ -5,6 +5,7 @@
 
 <div class="scene" id="scene">
   <div class="stage">
+    <div class="portal" aria-hidden="true"></div>
     <canvas
       id="term"
       width="800"
@@ -23,7 +24,7 @@
     <ul class="rows">
       <li><span>move</span><span>one app to another, in one step</span></li>
       <li><span>export</span><span>any app to a .jetpack file</span></li>
-      <li><span>import</span><span>a .jetpack file into any app</span></li>
+      <li><span>import</span><span>a .jetpack file into a supported app</span></li>
     </ul>
     <p class="status">claude-code → openclaw · reviewer · 0 secrets found · source not modified</p>
   </section>
@@ -35,9 +36,9 @@
       <p><code>move</code> does both steps at once. Apart, they let an agent be sent, archived or checked before it lands.</p>
     </div>
     <ol class="steps">
-      <li><b>Export from any app</b><span>The agent is read where the app keeps it. The source is only read, never changed.</span></li>
+      <li><b>Export from a supported app</b><span>The agent is read where the app keeps it. The source is only read, never changed.</span></li>
       <li><b>One .jetpack file</b><span>A zip that unzips to a working agent folder, on the file names tools already share.</span></li>
-      <li><b>Import into any app</b><span>Written where the target keeps its agents, with the report of what moved.</span></li>
+      <li><b>Import into a supported app</b><span>Written where the target keeps its agents, or prepared for a handoff, with the report of what moved.</span></li>
     </ol>
     <p class="status">reviewer.jetpack · 18 KB · move-report.md next to it</p>
   </section>
@@ -71,6 +72,7 @@
     column-gap: 56px;
   }
   .stage {
+    overflow: hidden;
     grid-column: 1;
     grid-row: 1 / span 3;
     align-self: start;
@@ -86,6 +88,15 @@
     position: absolute;
     inset: 10% 0;
     background: radial-gradient(ellipse at 50% 50%, var(--glow), transparent 62%);
+    pointer-events: none;
+  }
+  .portal {
+    position: absolute;
+    width: min(65%, 330px);
+    aspect-ratio: .78;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    opacity: 0;
     pointer-events: none;
   }
   canvas {
@@ -202,6 +213,14 @@
   const hudN = document.getElementById("hud-n") as HTMLElement;
   const hudP = document.getElementById("hud-p") as HTMLElement;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const portal = scene.querySelector(".portal") as HTMLElement;
+  function portalFrame(progress: number) {
+    const strength = reduce ? 0 : Math.sin(Math.PI * progress);
+    portal.style.opacity = String(strength * .65);
+    portal.style.transform = `perspective(600px) rotateY(${(1 - progress) * 35}deg) scale(${.95 + progress * 2.2})`;
+    cv.style.opacity = String(1 - strength * .55);
+    cv.style.transform = `scale(${1 - strength * .04})`;
+  }
 
   const COLS = 52;
   const ROWS = 19;
@@ -411,6 +430,7 @@
   function render() {
     raf = 0;
     const st = state();
+    portalFrame(st.p);
     if (st.p <= 0) draw(screens[st.from], screens[st.from], kinds[st.from], kinds[st.from], 1);
     else draw(screens[st.from], screens[st.to], kinds[st.from], kinds[st.to], st.p);
   }
