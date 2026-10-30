@@ -249,14 +249,14 @@ export function sideOf(ctx: Ctx, side: "source" | "target"): Ctx {
   return targetDir === undefined ? rest : { ...rest, targetDir };
 }
 
-/** `adapter` with every call made in `ctx`, whatever context its caller passes. */
+/** Bind filesystem context while preserving the caller's read-content selection. */
 export function boundTo(adapter: Adapter, ctx: Ctx): Adapter {
   const { cacheIdentity } = adapter;
   return {
     ...adapter,
     detect: () => adapter.detect(ctx),
     list: () => adapter.list(ctx),
-    read: (_ctx, agent) => adapter.read(ctx, agent),
+    read: (readCtx, agent) => adapter.read({ ...ctx, readIncludeFiles: readCtx.readIncludeFiles }, agent),
     write: (_ctx, bundle, opts) => adapter.write(ctx, bundle, opts),
     ...(cacheIdentity === undefined
       ? {}

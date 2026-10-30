@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readBundle } from "../../src/core/bundle.js";
@@ -155,4 +155,17 @@ describe("move", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toMatch(/--to/);
   });
+});
+
+it("moves instructions from a folder with oversized excluded attachments", async () => {
+  const source = join(box.cwd, "large-source");
+  await mkdir(join(source, "files"), { recursive: true });
+  await writeFile(join(source, "AGENTS.md"), "Synthetic instructions.");
+  const large = join(source, "files", "large.bin");
+  await writeFile(large, "");
+  await truncate(large, 101 * 1024 * 1024);
+  const result = await run(box, ["move", "--from", "folder", "--source-dir", source,
+    "--agent", ".", "--to", "folder", "--target-dir", "without-files"]);
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(await readFile(join(box.cwd, "without-files", "AGENTS.md"), "utf8")).toBe("Synthetic instructions.");
 });
