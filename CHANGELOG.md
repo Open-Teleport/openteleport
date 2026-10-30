@@ -15,6 +15,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Maintenance
 
+- Verified the OpenClaw 2026.10.8 round trip without a Gateway: six checks passed, with routines explicitly skipped and user configuration preserved. E2e transfer deadlines now allow multiple individually bounded host commands.
+
 - Share the reserved `MEMORY-prose` note name across readers, writers and credential scanning.
 - Align MCP cancellation test deadlines for loaded runners while retaining filesystem synchronization, exactly-once checks and rejection of replay. Product cancellation behavior is unchanged.
 
