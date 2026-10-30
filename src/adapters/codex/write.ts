@@ -238,7 +238,7 @@ function nicknamesOf(value: unknown, items: Items): string[] | undefined {
  * The settings of the agent file at `path` that the Bundle has no place for (`features`,
  * `sandbox_mode`, `model_verbosity`...), so that rewriting the file keeps them. Nothing is kept
  * when there is no regular file to overwrite. The parser drops comments, so overwriting a file
- * is reported; a file that is not TOML is overwritten whole, and that is reported too.
+ * is reported; unreadable TOML is refused before any destination writes.
  */
 async function keptSettings(
   path: string,
@@ -252,8 +252,7 @@ async function keptSettings(
     items.warnings.push(`${label} rewritten; comments may be lost`);
     return rest;
   } catch (error) {
-    items.warnings.push(`${(error as Error).message}; rewritten without its old settings`);
-    return {};
+    throw new Error(`${(error as Error).message}; refusing to overwrite invalid TOML. Repair the file or use --copy.`);
   }
 }
 
