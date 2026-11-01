@@ -304,7 +304,7 @@ describe("routineToJob", () => {
 
   it("writes a cron job paused, the way `hermes cron create --paused` does", () => {
     const schedule: Routine["schedule"] = { kind: "cron", expression: "0 9 * * 1-5" };
-    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123");
+    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123", "ada");
     const display = describeSchedule(schedule);
     expect(job).toEqual({
       id: "abc123abc123",
@@ -327,7 +327,7 @@ describe("routineToJob", () => {
       enabled: false,
       state: "paused",
       paused_at: "2026-10-28T12:00:00.000+00:00",
-      paused_reason: "imported by OpenTeleport; resume with: hermes cron resume abc123abc123",
+      paused_reason: "imported by OpenTeleport; resume with: hermes -p ada cron resume abc123abc123",
       created_at: "2026-10-28T12:00:00.000+00:00",
       next_run_at: null,
       last_run_at: null,
@@ -346,7 +346,7 @@ describe("routineToJob", () => {
 
   it("writes an interval in minutes", () => {
     const schedule: Routine["schedule"] = { kind: "every", every: "2h" };
-    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123");
+    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123", "ada");
     expect(job.schedule).toEqual({
       kind: "interval",
       minutes: 120,
@@ -358,7 +358,7 @@ describe("routineToJob", () => {
 
   it("writes a one-off with an offset and a repeat count of one", () => {
     const schedule: Routine["schedule"] = { kind: "at", at: "2026-12-01T07:00:00.000Z" };
-    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123");
+    const job = routineToJob(routine(schedule), undefined, now, "abc123abc123", "ada");
     expect(job.schedule).toEqual({
       kind: "once",
       run_at: "2026-12-01T07:00:00+00:00",
@@ -370,7 +370,7 @@ describe("routineToJob", () => {
 
   it("is paused whatever the routine says", () => {
     const schedule: Routine["schedule"] = { kind: "cron", expression: "0 9 * * *" };
-    expect(routineToJob(routine(schedule, { enabled: true }), undefined, now, "a")).toMatchObject({
+    expect(routineToJob(routine(schedule, { enabled: true }), undefined, now, "a", "ada")).toMatchObject({
       enabled: false,
       state: "paused",
     });
@@ -464,7 +464,7 @@ describe("routineToJob", () => {
     });
     const entry = jobToRoutine(original, WARSAW);
     if (entry === null) throw new Error("expected a routine");
-    const job = routineToJob(entry.routine, entry.extra, now, "abc123abc123");
+    const job = routineToJob(entry.routine, entry.extra, now, "abc123abc123", "ada");
     expect(jobToRoutine(job, WARSAW)).toEqual({
       routine: { ...entry.routine, enabled: false },
       extra: entry.extra,
