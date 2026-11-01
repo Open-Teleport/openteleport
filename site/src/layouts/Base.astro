@@ -34,9 +34,11 @@ const software = {
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#06050b" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.ico" sizes="32x32" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" href="/favicon.svg?v=shift-1" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico?v=shift-1" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=shift-1" sizes="180x180" />
+    <link rel="manifest" href="/brand/shift/icons/site.webmanifest" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
     <link rel="canonical" href={canonical} />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
@@ -44,14 +46,17 @@ const software = {
     <meta property="og:url" content={canonical} />
     <meta property="og:site_name" content="OpenTeleport" />
     <meta property="og:locale" content="en_US" />
-    <meta property="og:image" content="https://openteleport.dev/brand/social-og-light.png" />
+    <meta property="og:image" content="https://openteleport.dev/social/openteleport-shift-og-v1.jpg" />
+    <meta property="og:image:secure_url" content="https://openteleport.dev/social/openteleport-shift-og-v1.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="OpenTeleport. Move your AI agent between apps in one command." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://openteleport.dev/brand/social-og-light.png" />
+    <meta name="twitter:image" content="https://openteleport.dev/social/openteleport-shift-x-v1.jpg" />
+    <meta name="twitter:image:alt" content="OpenTeleport: move your AI agent between apps. Shift logo and two white portals." />
     <script type="application/ld+json" set:html={JSON.stringify(software).replace(/</g, "\\u003c")} />
     <script is:inline>
       // Apply a saved theme before the first paint; otherwise the system setting decides.

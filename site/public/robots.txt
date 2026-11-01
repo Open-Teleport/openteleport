@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
-Disallow: /brand/
+Disallow: /brand/concepts/
+Disallow: /brand/logo-options-v3/
 
 Sitemap: https://openteleport.dev/sitemap.xml

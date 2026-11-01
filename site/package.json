@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "check:social": "node ../scripts/check-social-preview.mjs"
   },
   "dependencies": {
     "astro": "^7.4.2"

@@ -20,6 +20,16 @@ The landing now includes MCP and native-plugin setup links. Version text and Sof
 
 Deployment remains through this repository's existing Vercel project. Local edits do not update the public site or publish an npm release.
 
+## Selected branding and social previews
+
+The selected logo is proposal 02, **Shift**. `src/brand/shift.mjs` owns its geometry; the header and `node ../scripts/build-shift-brand.mjs` share it. The export script runs from the repository root as `node scripts/build-shift-brand.mjs`. Final separate assets are in `public/brand/shift/`; prior directions remain as references.
+
+Public link previews use versioned JPEG URLs in `public/social/`: Open Graph is 1200×630, X/Twitter is 1200×600. They are referenced in server-rendered HTML, including type, dimensions and alternative text. The previous blanket `Disallow: /brand/` blocked the old preview image despite HTTP 200 responses; robots.txt now blocks only the proposal galleries and permits production assets. Do not block preview images or put them behind authentication.
+
+After `npm run build`, run `npm run check:social` to check metadata, image dimensions, file size and crawler rules. Production verification must additionally request the home page, robots.txt and both image URLs using `Twitterbot/1.0`. These checks do not prove that X has refreshed an already cached card.
+
+The CI `site` job builds and checks link previews on pull requests and pushes to main. Keep the selected logo, social JPEGs and crawler rules committed together: a standalone CLI deployment of uncommitted files can be replaced by the next Git-triggered deployment. On 2026-11-01 the public site was found serving the older `/brand/social-og-light.png` metadata and blanket `/brand/` crawler block again; the new `/social/` files returned 404.
+
 ## Deploying on Vercel
 
 Create a Vercel project from this repository and set its **Root Directory** to `site/`. Vercel detects Astro: build command `astro build`, output directory `dist`. A static site needs no adapter.
