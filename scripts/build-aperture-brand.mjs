@@ -1,14 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { shiftPath } from '../site/src/brand/shift.mjs';
 const require = createRequire(import.meta.url);
 const sharp = require(process.env.OPENTELEPORT_BRAND_SHARP || 'C:/Users/nadru/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/sharp');
-const root = path.resolve('site/public/brand/aperture-v2');
+const selectedShift = process.env.OPENTELEPORT_BRAND === 'shift';
+const root = path.resolve(`site/public/brand/${selectedShift ? 'shift' : 'aperture-v2'}`);
 for (const dir of ['favicon', 'icons', 'avatars', 'logos', 'backgrounds', 'banners', 'source']) await fs.mkdir(path.join(root, dir), {recursive:true});
 const white = '#ffffff', ink = '#171717', grey = '#e9edf0';
 const svg = (w,h,body) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
 // An open O carries a displaced square. One geometry is used at every size.
-const mark = (color=ink) => `<g fill="none" stroke="${color}" stroke-width="8" stroke-linejoin="round"><path d="M44 19V18C44 12 39 8 32 8H25C17 8 12 14 12 22V42C12 50 17 56 25 56H32C39 56 44 52 44 45"/></g><rect x="39" y="26" width="14" height="12" rx="2" fill="${color}"/>`;
+const mark = (color=ink) => selectedShift ? `<path d="${shiftPath}" fill="${color}"/>` : `<g fill="none" stroke="${color}" stroke-width="8" stroke-linejoin="round"><path d="M44 19V18C44 12 39 8 32 8H25C17 8 12 14 12 22V42C12 50 17 56 25 56H32C39 56 44 52 44 45"/></g><rect x="39" y="26" width="14" height="12" rx="2" fill="${color}"/>`;
 const type = (x,y,size,content,color=ink,extra='') => `<text x="${x}" y="${y}" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="${size}" fill="${color}" ${extra}>${content}</text>`;
 const word = (x,y,size,color=ink) => type(x,y,size,'OpenTeleport',color,'font-weight="600" letter-spacing="-1.8"');
 async function save(name, data) {
@@ -38,10 +40,15 @@ frames.forEach((data,i)=>{const p=6+i*16;header[p]=[16,32,48][i];header[p+1]=[16
 await fs.writeFile(path.join(root,'favicon/favicon.ico'),Buffer.concat([header,...frames]));
 await fs.writeFile(path.join(root,'icons/site.webmanifest'),JSON.stringify({name:'OpenTeleport',short_name:'OpenTeleport',icons:[192,512].map(s=>({src:`app-icon-${s}.png`,sizes:`${s}x${s}`,type:'image/png',purpose:'any'})),theme_color:white,background_color:white,display:'standalone',start_url:'/'},null,2));
 // Each background and each banner is a separate deliverable. No contact sheets.
+if (selectedShift) {
+  for (const file of ['background-desktop.png','background-mobile.png','banner-wide.png','social-square.png','generation-prompts.txt']) {
+    await fs.copyFile(path.resolve('site/public/brand/aperture-v2/source',file),path.join(root,'source',file));
+  }
+}
 for (const [file,w,h,source,position] of [['desktop',1920,1080,'background-desktop','centre'],['mobile',1080,1920,'background-mobile','centre'],['wide',2400,800,'banner-wide','centre'],['square',1080,1080,'social-square','centre']]) {
   await sharp(path.join(root,'source',source+'.png')).resize(w,h,{fit:'cover',position}).jpeg({quality:94,mozjpeg:true}).toFile(path.join(root,'backgrounds',`background-${file}.jpg`));
 }
-for(const [name,w,h,source] of [['x',1500,500,'banner-wide'],['linkedin',1584,396,'banner-wide'],['github',1280,640,'background-desktop'],['open-graph',1200,630,'background-desktop'],['social-post',1080,1080,'social-square']]) {
+for(const [name,w,h,source] of [['x',1500,500,'banner-wide'],['linkedin',1584,396,'banner-wide'],['github',1280,640,'background-desktop'],['open-graph',1200,630,'background-desktop'],['twitter-card',1200,600,'background-desktop'],['social-post',1080,1080,'social-square']]) {
   const square=w===h; const short=h<510; const x=name==='x'?370:Math.round(w*.06);const y=Math.round(h*(square?.09:short?.21:.18));
   const font=short?45:square?64:54;
   const branding = `<g transform="translate(${x} ${y}) scale(.82)">${mark()}</g>${word(x+67,y+39,font)}${type(x,y+(short?108: square?143:150),short?27:square?39:38,'Your agent. Anywhere.',ink,'letter-spacing="-1"')}${square?'':type(x,y+(short?153:203),short?16:19,'Move your AI agent between apps in one command.','#5d6268')}${type(x,h-34,14,'openteleport.dev','#5d6268')}`;
