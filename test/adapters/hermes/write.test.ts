@@ -313,7 +313,7 @@ describe("a new profile", () => {
         state: "paused",
         next_run_at: null,
         deliver: "local",
-        paused_reason: `imported by OpenTeleport; resume with: hermes cron resume ${job.id}`,
+        paused_reason: `imported by OpenTeleport; resume with: hermes -p ada cron resume ${job.id}`,
       });
       expect(job.id).toMatch(/^[0-9a-f]{12}$/);
     }
@@ -352,13 +352,13 @@ describe("a new profile", () => {
     for (const job of jobs) {
       expect(items.approximated).toContainEqual({
         field: `routine:${job.name}`,
-        detail: `Hermes jobs are written paused; resume them with \`hermes cron resume ${job.id}\``,
+        detail: `Hermes jobs are written paused; resume them with \`hermes -p ada cron resume ${job.id}\``,
       });
     }
     // ...and one warning that lists every command.
-    const listing = items.warnings.filter((warning) => warning.includes("hermes cron resume"));
+    const listing = items.warnings.filter((warning) => warning.includes("cron resume"));
     expect(listing).toHaveLength(1);
-    for (const job of jobs) expect(listing[0]).toContain(`hermes cron resume ${job.id}`);
+    for (const job of jobs) expect(listing[0]).toContain(`hermes -p ada cron resume ${job.id}`);
     expect(items.warnings).toEqual([listing[0], RESTART_WARNING, SCANNER_WARNING]);
   });
 

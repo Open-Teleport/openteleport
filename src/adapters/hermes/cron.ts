@@ -282,6 +282,7 @@ export function routineToJob(
   extra: Record<string, unknown> | undefined,
   now: Date,
   id: string,
+  profile: string,
 ): HermesJob {
   const display = describeSchedule(routine.schedule);
   const skills = stringList(extra?.skills) ?? [];
@@ -309,7 +310,7 @@ export function routineToJob(
     enabled: false,
     state: "paused",
     paused_at: stamp,
-    paused_reason: `imported by OpenTeleport; resume with: hermes cron resume ${id}`,
+    paused_reason: `imported by OpenTeleport; resume with: hermes -p ${profile} cron resume ${id}`,
     created_at: stamp,
     next_run_at: null,
     last_run_at: null,

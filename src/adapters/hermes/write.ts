@@ -666,6 +666,7 @@ async function writeRoutines(
   config: HermesConfig | undefined,
   now: Date,
   items: Items,
+  profile: string,
 ): Promise<string[]> {
   if (bundle.routines.length === 0 && recorded.length === 0) return [];
   const skipAll = (why: string): string[] => {
@@ -711,7 +712,10 @@ async function writeRoutines(
     let id = newJobId();
     while (taken.has(id)) id = newJobId();
     taken.add(id);
-    created.push({ routine, job: routineToJob(routine, extraFor(bundle, routine.name), now, id) });
+    created.push({
+      routine,
+      job: routineToJob(routine, extraFor(bundle, routine.name), now, id, profile),
+    });
   }
 
   let failure: string | undefined;
@@ -735,13 +739,16 @@ async function writeRoutines(
     for (const { routine, job } of created) {
       items.approximated.push({
         field: `routine:${routine.name}`,
-        detail: `Hermes jobs are written paused; resume them with \`hermes cron resume ${job.id}\``,
+        detail: `Hermes jobs are written paused; resume them with \`hermes -p ${profile} cron resume ${job.id}\``,
       });
     }
     const commands = created.map(
-      ({ routine, job }) => `hermes cron resume ${job.id} (${routine.name})`,
+      ({ routine, job }) => `hermes -p ${profile} cron resume ${job.id} (${routine.name})`,
     );
-    items.warnings.push(`To run the paused jobs: ${commands.join("; ")}`);
+    items.warnings.push(
+      `To run the paused jobs (\`hermes -p ${profile} cron list --all\` shows them while paused): ` +
+        commands.join("; "),
+    );
   }
   return created.map(({ job }) => job.id);
 }
@@ -788,6 +795,7 @@ async function finishWrite(
     config,
     now,
     items,
+    target.id,
   );
 
   await writeMarker(dir, {
