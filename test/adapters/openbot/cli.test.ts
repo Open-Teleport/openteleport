@@ -106,7 +106,7 @@ describe("import --to openbot", () => {
       source: { app: "jetpack", agent: "Ada" },
       target: { app: "openbot" },
       outcome: "handoff",
-      nextStep: `Open OpenBot, go to Server settings, choose Import and pick ${artifact()}`,
+      nextStep: `Open OpenBot, pick your server (Local), go to Import, choose Grok Bot, then Choose export file and pick ${artifact()}`,
     });
     expect(report.skipped).toContainEqual(expect.objectContaining({ field: "models" }));
     expect(await readdir(box.cwd)).toEqual(["ada-openbot-import.zip"]);
@@ -120,7 +120,7 @@ describe("import --to openbot", () => {
     const first = await run(box, ["import", "--to", "openbot", ADA_DIR]);
     expect(first.exitCode).toBe(0);
     expect(first.stdout).toContain("Outcome: handoff");
-    expect(first.stdout).toContain("Next step: Open OpenBot, go to Server settings");
+    expect(first.stdout).toContain("Next step: Open OpenBot, pick your server (Local), go to Import");
     expect(first.stdout + first.stderr).not.toMatch(STACK_LINE);
 
     const again = await run(box, ["import", "--to", "openbot", ADA_DIR, "--enable-routines"]);

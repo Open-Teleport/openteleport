@@ -67,7 +67,7 @@ describe("detect", () => {
     const found = await detectOpenBot(ctx);
     expect(found).toMatchObject({ found: false, location: userData });
     expect(found.hint).toContain("Install OpenBot, or pass --source-dir <export.zip>");
-    expect(found.hint).toContain("Server settings");
+    expect(found.hint).toContain("Transfer page");
   });
 
   it("finds the database in --source-dir", async () => {

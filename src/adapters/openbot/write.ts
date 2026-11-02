@@ -1,5 +1,6 @@
 // Writes a Bundle for OpenBot as an `openbot-agent-import` archive to hand over. OpenBot takes it
-// under Server settings, Import; its local Team API, the one other way in, is only up while a
+// in the server's Import page under the Grok Bot entry, the one that picks a .zip (checked on
+// 0.58.0; the Hermes Agent entry reads a folder); its local Team API, the one other way in, is only up while a
 // host service runs and asks for a member's sign-in, so it is not used.
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -147,7 +148,7 @@ export async function writeOpenBotAgent(
 
   return {
     outcome: "handoff",
-    nextStep: `Open OpenBot, go to Server settings, choose Import and pick ${path}`,
+    nextStep: `Open OpenBot, pick your server (Local), go to Import, choose Grok Bot, then Choose export file and pick ${path}`,
     artifactPath: path,
     items,
   };

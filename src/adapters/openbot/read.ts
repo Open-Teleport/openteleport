@@ -34,7 +34,7 @@ const IMAGE_EXTENSION = /\.(png|jpe?g|webp)$/i;
 
 const HINT =
   "Install OpenBot, or pass --source-dir <export.zip> " +
-  "(OpenBot: Server settings, Export; Grok Bot: the OpenBot export skill)";
+  "(OpenBot: the server's Transfer page; Grok Bot: the OpenBot export skill)";
 const SKILLS_WARNING =
   "skills are not stored in the OpenBot database and the agent's workspace lists none " +
   "(.openbot/skills-lock.json); a transfer zip from the app carries them";
