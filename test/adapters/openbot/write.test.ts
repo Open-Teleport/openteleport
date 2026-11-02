@@ -108,8 +108,11 @@ describe("writeOpenBotAgent", () => {
     expect(written.manifest.id).toBe(ada.manifest.id);
     expect(written.manifest.name).toBe("Ada");
     expect(written.manifest.title).toBe("Research assistant");
-    expect(written.instructions).toContain("Ada is a calm, curious research assistant.");
+    // The persona and the instructions come back apart: the zip holds them as `mergeInstructions`
+    // lays them out, and the reader splits that layout.
+    expect(written.persona).toContain("Ada is a calm, curious research assistant.");
     expect(written.instructions).toContain("Read the sources before summarising them.");
+    expect(written.instructions).not.toContain("Ada is a calm");
     expect(written.facts).toEqual(ada.facts);
     expect(written.skills.map(({ name }) => name)).toEqual(["web-brief"]);
     expect(written.avatar?.name).toBe("avatar.png");
