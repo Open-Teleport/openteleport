@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-03
+
 ### Fixed
 
 - OpenBot: the persona survives a round trip. The import zip writes it as a `# Persona` section before `# Instructions` (the layout the other adapters use), and both OpenBot readers, the database and the zip, split that layout back instead of returning it folded into the instructions. Checked on OpenBot 0.58.0.
@@ -182,4 +184,5 @@ First release.
 [0.2.0]: https://github.com/Open-Teleport/openteleport/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Open-Teleport/openteleport/releases/tag/v0.1.0
 
+[0.4.3]: https://github.com/Open-Teleport/openteleport/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Open-Teleport/openteleport/compare/v0.4.1...v0.4.2
