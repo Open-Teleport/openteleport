@@ -12,7 +12,7 @@ import {
   isSafeArchivePath,
 } from "../../core/paths.js";
 import type { Bundle, FileEntry, Manifest, Note, Routine } from "../../core/schema.js";
-import { byCodeUnit, oneLine, plural, truncate } from "../../core/text.js";
+import { byCodeUnit, oneLine, plural, splitInstructions, truncate } from "../../core/text.js";
 import { openBotModelPref, readOpenBotZip, toBundleRoutine } from "../../formats/openbot-zip.js";
 import { lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
@@ -377,9 +377,13 @@ async function databaseBundle(
   };
   if (Object.keys(vendor).length > 0) manifest["x-openbot"] = vendor;
 
+  // The description holds the persona too when it has the layout the zip writer uses (and
+  // OpenBot keeps a description as it was given, checked on 0.58.0).
+  const { persona, instructions } = splitInstructions(agent.description ?? "");
   const bundle: Bundle = {
     manifest,
-    instructions: agent.description ?? "",
+    ...(persona === undefined ? {} : { persona }),
+    instructions,
     skills: [],
     routines,
     facts,

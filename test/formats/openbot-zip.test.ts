@@ -1303,12 +1303,14 @@ describe("writeOpenBotImportZip", () => {
       expect(written.agents[0]?.description).toBe("d".repeat(1999));
     });
 
-    it("joins the persona and the instructions with an empty line, and says so", () => {
+    it("joins the persona and the instructions as # Persona and # Instructions sections, and says so", () => {
       const written = write([
         bundleOf({ persona: "Calm and curious.\n", instructions: "Read first.\n" }),
       ]);
 
-      expect(written.agents[0]?.description).toBe("Calm and curious.\n\nRead first.");
+      expect(written.agents[0]?.description).toBe(
+        "# Persona\n\nCalm and curious.\n\n# Instructions\n\nRead first.",
+      );
       expect(written.items.approximated).toEqual([
         {
           field: "persona",
@@ -1324,8 +1326,17 @@ describe("writeOpenBotImportZip", () => {
 
       const long = write([bundleOf({ persona: "Calm.", instructions: "x ".repeat(1500) })]);
       expect(strFromU8(long.files["agents/ada/files/INSTRUCTIONS.md"] as Uint8Array)).toBe(
-        `Calm.\n\n${"x ".repeat(1500).trim()}`,
+        `# Persona\n\nCalm.\n\n# Instructions\n\n${"x ".repeat(1500).trim()}`,
       );
+    });
+
+    it("reads the persona back from a description it wrote", async () => {
+      const written = write([
+        bundleOf({ persona: "Calm and curious.\n", instructions: "Read first.\n" }),
+      ]);
+      const { agents } = await readOpenBotZip(await archiveFile(written.bytes));
+      expect(agents[0]?.bundle.persona).toBe("Calm and curious.");
+      expect(agents[0]?.bundle.instructions).toBe("Read first.");
     });
 
     it("always writes the full instructions, even without the files of the workspace", () => {

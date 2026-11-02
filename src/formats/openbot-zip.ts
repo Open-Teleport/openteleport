@@ -45,7 +45,7 @@ import {
   type Skill,
   ULID_PATTERN,
 } from "../core/schema.js";
-import { plural, slugify } from "../core/text.js";
+import { mergeInstructions, plural, slugify, splitInstructions } from "../core/text.js";
 import { isRecord, nonBlank } from "../core/values.js";
 import { type ZipPolicy, readZipEntries } from "../core/zip.js";
 
@@ -439,8 +439,9 @@ function readAgent(raw: unknown, index: number, reading: Reading): OpenBotZipAge
 
   const instructionsPath = `${prefix}${FULL_INSTRUCTIONS}`;
   const fullInstructions = reading.entries.get(instructionsPath);
-  const instructions =
-    fullInstructions === undefined ? description : decodeText(instructionsPath, fullInstructions);
+  const { persona, instructions } = splitInstructions(
+    fullInstructions === undefined ? description : decodeText(instructionsPath, fullInstructions),
+  );
 
   const { routines, extras } = readRoutines(routineValues, name, reading);
   const { facts, inclusions } = readMemories(memoryValues, name, reading.warnings);
@@ -466,6 +467,7 @@ function readAgent(raw: unknown, index: number, reading: Reading): OpenBotZipAge
 
   const bundle: Bundle = {
     manifest,
+    ...(persona === undefined ? {} : { persona }),
     instructions,
     skills: readSkills(skillPaths, name, reading),
     routines,
@@ -740,14 +742,17 @@ function agentKey(name: string, taken: Set<string>): string {
 }
 
 /**
- * The text of the description: the persona and the instructions with an empty line between, as
- * one text, since OpenBot has no separate persona.
+ * The text of the description: the persona and the instructions as `mergeInstructions` lays them
+ * out (an H1 `# Persona` section, then `# Instructions`), since OpenBot has no separate persona.
+ * That is the layout every adapter without a persona slot writes, and `splitInstructions` reads
+ * it back, so the persona survives a round trip through OpenBot (checked on 0.58.0). A persona
+ * alone is written as it is.
  */
 function instructionText(bundle: Bundle): { text: string; joinedPersona: boolean } {
   const persona = bundle.persona?.trim() ?? "";
   if (persona === "") return { text: bundle.instructions, joinedPersona: false };
   const instructions = bundle.instructions.trim();
-  const text = instructions === "" ? persona : `${persona}\n\n${instructions}`;
+  const text = instructions === "" ? persona : mergeInstructions(persona, instructions).trimEnd();
   return { text, joinedPersona: true };
 }
 
