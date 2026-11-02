@@ -173,7 +173,8 @@ describe("a move from openbot", () => {
       ]),
     );
     expect(report.warnings).toContain(
-      "skills are not readable from the OpenBot database; export from the app (a transfer zip) carries them",
+      "skills are not stored in the OpenBot database and the agent's workspace lists none " +
+          "(.openbot/skills-lock.json); a transfer zip from the app carries them",
     );
 
     const { agents } = await readOpenBotZip(artifact());

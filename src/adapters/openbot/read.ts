@@ -11,10 +11,11 @@ import {
   isForbiddenPath,
   isSafeArchivePath,
 } from "../../core/paths.js";
-import type { Bundle, FileEntry, Manifest, Note, Routine } from "../../core/schema.js";
+import type { Bundle, FileEntry, Manifest, Note, Routine, Skill } from "../../core/schema.js";
 import { byCodeUnit, oneLine, plural, splitInstructions, truncate } from "../../core/text.js";
 import { openBotModelPref, readOpenBotZip, toBundleRoutine } from "../../formats/openbot-zip.js";
 import { lstatIfAny } from "../fs.js";
+import { readSkillFiles } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import {
   type OpenBotDbAgent,
@@ -35,7 +36,10 @@ const HINT =
   "Install OpenBot, or pass --source-dir <export.zip> " +
   "(OpenBot: Server settings, Export; Grok Bot: the OpenBot export skill)";
 const SKILLS_WARNING =
-  "skills are not readable from the OpenBot database; export from the app (a transfer zip) carries them";
+  "skills are not stored in the OpenBot database and the agent's workspace lists none " +
+  "(.openbot/skills-lock.json); a transfer zip from the app carries them";
+/** A skill slug OpenBot writes: a folder name, never a path. */
+const SKILL_SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 
 type Json = Record<string, unknown>;
 
@@ -248,6 +252,55 @@ async function readAvatar(reference: string, warnings: string[]): Promise<Bundle
   }
 }
 
+/**
+ * The agent's own skills. OpenBot keeps them in the workspace under `.agents/skills/<slug>/`,
+ * next to the skills it ships with (`openbot-data`, `openbot-site-hosting`...), and lists only
+ * its own, imported or made in the app, in `.openbot/skills-lock.json` under `skills.<id>.slug`
+ * (checked on OpenBot 0.58.0). The listed slugs are read; the rest come with OpenBot. Without
+ * a workspace or a lock file there is nothing to read, and `SKILLS_WARNING` says so.
+ */
+async function readWorkspaceSkills(
+  workspace: string | undefined,
+  warnings: string[],
+): Promise<Skill[]> {
+  const none = (): Skill[] => {
+    warnings.push(SKILLS_WARNING);
+    return [];
+  };
+  if (workspace === undefined || !isAbsolute(workspace)) return none();
+  const lockFile = join(workspace, ".openbot", "skills-lock.json");
+  let lock: unknown;
+  try {
+    lock = JSON.parse(await readFile(lockFile, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return none();
+    warnings.push(`${lockFile} could not be read (${(error as Error).message}); no skills were read`);
+    return [];
+  }
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  const listed = asRecord(asRecord(lock)?.skills);
+  if (listed === undefined) return none();
+  const slugs = new Set<string>();
+  for (const entry of Object.values(listed)) {
+    const slug = asRecord(entry)?.slug;
+    if (typeof slug === "string" && SKILL_SLUG.test(slug)) slugs.add(slug);
+  }
+  if (slugs.size === 0) return none();
+  const skills: Skill[] = [];
+  for (const slug of [...slugs].sort(byCodeUnit)) {
+    const dir = join(workspace, ".agents", "skills", slug);
+    if ((await lstatIfAny(join(dir, "SKILL.md")))?.isFile() !== true) {
+      warnings.push(`skill '${slug}' is listed in skills-lock.json but ${dir} has no SKILL.md; left out`);
+      continue;
+    }
+    skills.push({ name: slug, files: await readSkillFiles(dir, slug, warnings) });
+  }
+  return skills;
+}
+
 /** Raised by the walk of a workspace that holds more than a bundle may carry. */
 class OverLimit extends Error {}
 
@@ -342,7 +395,7 @@ async function databaseBundle(
         `(${KNOWN_SCHEMA_VERSION}); check the result`,
     );
   }
-  warnings.push(SKILLS_WARNING);
+  const skills = await readWorkspaceSkills(agent.workspacePath, warnings);
 
   const { facts, notes } = splitMemories(agent.memories, warnings);
   const { routines, extras } = readRoutines(agent.routines, warnings);
@@ -384,7 +437,7 @@ async function databaseBundle(
     manifest,
     ...(persona === undefined ? {} : { persona }),
     instructions,
-    skills: [],
+    skills,
     routines,
     facts,
     notes,

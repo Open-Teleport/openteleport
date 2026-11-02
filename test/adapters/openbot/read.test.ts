@@ -202,7 +202,8 @@ describe("read from the database", () => {
 
     expect(warnings).toEqual(
       expect.arrayContaining([
-        "skills are not readable from the OpenBot database; export from the app (a transfer zip) carries them",
+        "skills are not stored in the OpenBot database and the agent's workspace lists none " +
+          "(.openbot/skills-lock.json); a transfer zip from the app carries them",
         "1 memory is over 500 characters and is kept as a note: memory-3",
       ]),
     );
@@ -341,6 +342,54 @@ describe("the workspace and the avatar of a database agent", () => {
     );
     expect(warnings.find((warning) => warning.includes("were left out"))).toContain(".env");
     expect(warnings.find((warning) => warning.includes("were left out"))).toContain("node_modules");
+  });
+
+  it("reads the agent's own skills from the workspace, as skills-lock.json lists them", async () => {
+    const workspace = join(root, "workspace");
+    await mkdir(join(workspace, ".openbot"), { recursive: true });
+    await mkdir(join(workspace, ".agents", "skills", "web-brief", "scripts"), { recursive: true });
+    await mkdir(join(workspace, ".agents", "skills", "openbot-data"), { recursive: true });
+    await writeFile(
+      join(workspace, ".openbot", "skills-lock.json"),
+      JSON.stringify({
+        version: 1,
+        skills: { "local-skill-1": { slug: "web-brief", name: "web-brief", version: 2 } },
+      }),
+    );
+    await writeFile(
+      join(workspace, ".agents", "skills", "web-brief", "SKILL.md"),
+      "---\nname: web-brief\ndescription: Briefs.\n---\nRead, then brief.\n",
+    );
+    await writeFile(join(workspace, ".agents", "skills", "web-brief", "scripts", "run.sh"), "echo\n");
+    await writeFile(
+      join(workspace, ".agents", "skills", "openbot-data", "SKILL.md"),
+      "---\nname: openbot-data\ndescription: Ships with OpenBot.\n---\n",
+    );
+    await database([setWorkspace("ada", workspace)]);
+
+    const { bundle, warnings } = await readOpenBotAgent(ctx, "ada");
+
+    // Only the listed skill: openbot-data ships with OpenBot and is not in the lock file.
+    expect(bundle.skills.map(({ name }) => name)).toEqual(["web-brief"]);
+    expect(bundle.skills[0]?.files.map(({ path }) => path)).toEqual(["SKILL.md", "scripts/run.sh"]);
+    expect(warnings.some((warning) => warning.startsWith("skills are not stored"))).toBe(false);
+  });
+
+  it("says when a listed skill has no SKILL.md, and keeps the others", async () => {
+    const workspace = join(root, "workspace");
+    await mkdir(join(workspace, ".openbot"), { recursive: true });
+    await mkdir(join(workspace, ".agents", "skills", "notes"), { recursive: true });
+    await writeFile(
+      join(workspace, ".openbot", "skills-lock.json"),
+      JSON.stringify({ skills: { a: { slug: "notes" }, b: { slug: "gone" }, c: { slug: "../x" } } }),
+    );
+    await writeFile(join(workspace, ".agents", "skills", "notes", "SKILL.md"), "---\nname: notes\n---\n");
+    await database([setWorkspace("ada", workspace)]);
+
+    const { bundle, warnings } = await readOpenBotAgent(ctx, "ada");
+
+    expect(bundle.skills.map(({ name }) => name)).toEqual(["notes"]);
+    expect(warnings).toContainEqual(expect.stringMatching(/^skill 'gone' is listed in skills-lock.json but .* has no SKILL.md; left out$/));
   });
 
   it("says when the workspace is not there", async () => {
