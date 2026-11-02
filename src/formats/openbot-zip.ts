@@ -1,7 +1,7 @@
 // Reading and writing the zip archives that carry agents in and out of OpenBot.
 //
 // Two formats are read. An agent import (`openbot-import.json`, `openbot-agent-import` v1) is what
-// the Grok Bot export skill makes and what OpenBot takes under Server settings, Import. An
+// the Grok Bot export skill makes and what OpenBot takes in its Import page (the Grok Bot entry). An
 // instance transfer (`openbot-transfer.json`, `openbot-instance-transfer` v1) is what OpenBot
 // writes to move itself to another computer. Only the first is written: it is the one a person
 // can hand to OpenBot, and the one Grok Bot can make.

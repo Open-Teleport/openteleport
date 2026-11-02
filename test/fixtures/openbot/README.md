@@ -7,8 +7,8 @@ OpenBot or Grok Bot.
 
 ## import-v1/
 
-An `openbot-agent-import` v1 archive, the format the Grok Bot export skill writes and OpenBot's
-Server settings, Import reads.
+An `openbot-agent-import` v1 archive, the format the Grok Bot export skill writes and
+the Import page of the server reads (the Grok Bot entry picks the zip).
 
 - Sources: Appendix A of `docs/superpowers/plans/2026-10-27-openteleport-v0.1.md` (OpenBot
   notes); G12 `resources/agent-import/grok-bot/SKILL.md` (the layout, the field rules and the

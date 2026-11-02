@@ -12,7 +12,7 @@ import { writeOpenBotAgent } from "./write.js";
  * from a copy of its database (`openbot.db`, with `node:sqlite`, loaded only when needed), or
  * from an export archive that `--source-dir` names: an agent import, which the Grok Bot export
  * skill makes too, or an instance transfer. Writing never reaches the app: it makes an
- * `openbot-agent-import` archive for the user to import (Server settings, Import), so the
+ * `openbot-agent-import` archive for the user to import (the server's Import page), so the
  * app need not be installed on the target side (`createsOnWrite`) and the move ends in a
  * handoff. The format has no field for a model or for notes.
  */

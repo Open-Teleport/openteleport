@@ -99,7 +99,7 @@ describe("writeOpenBotAgent", () => {
     expect(result.outcome).toBe("handoff");
     expect(result.artifactPath).toBe(file);
     expect(result.nextStep).toBe(
-      `Open OpenBot, go to Server settings, choose Import and pick ${file}`,
+      `Open OpenBot, pick your server (Local), go to Import, choose Grok Bot, then Choose export file and pick ${file}`,
     );
     expect(result.targetAgentId).toBeUndefined();
     expect(await readdir(cwd)).toEqual(["ada-openbot-import.zip"]);

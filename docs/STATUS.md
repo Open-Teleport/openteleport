@@ -20,7 +20,7 @@ The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; t
 - **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code, not recorded from an install. Hermes and Codex have since been checked on real installs (see "What is verified").
   - `hermes`: profiles (the Hermes home and `profiles/*`), `SOUL.md`, skills, memory entries, `cron/jobs.json` (written paused). Result: `done`.
   - `codex`: the global setup and the custom agents in `agents/*.toml`; a write makes a custom agent file and puts its skills in `~/.agents/skills`. Result: `done`.
-  - `openbot`: reads a copy of `openbot.db` or an export zip; writes an `openbot-agent-import` zip. Result: `handoff` (import the zip in Server settings).
+  - `openbot`: reads a copy of `openbot.db` (with the agent's skills from its workspace) or an export zip; writes an `openbot-agent-import` zip. Result: `handoff` (import the zip on the server's Import page, Grok Bot entry).
   - `grok-bot`: reads the zip the OpenBot export skill makes; writes a paste pack. Result: `handoff` (the five steps in the pack's README).
   - `letta`: reads `~/.letta` (local backend and Cloud agents' local memory); writes a MemFS folder and a `letta-commands.sh`/`.ps1` script. Result: `handoff` (run the script).
 - **The OpenBot zip format** as one module (`src/formats/openbot-zip.ts`) shared by `openbot` and `grok-bot`, with the schedule shapes of OpenBot mapped in `src/core/schedule.ts`.
@@ -44,6 +44,7 @@ Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). Th
   - A one-off time without an offset (`once.run_at`, as a hand-written job has it) is read by Hermes in the machine's time zone, not the profile's. The adapter now reads it the same way and warns about the assumption; cron expressions keep the profile's zone.
   - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
 - **OpenClaw** (2026.5.28 and 2026.10.8, Windows): the end-to-end round trip passed on 2026.10.8 with the Gateway running: a Claude Code project into OpenClaw, back out into a folder, exported as the bundle that left, and two routines landed disabled with a two-line instruction whole. The first run, on 2026.5.28, found two wrong assumptions, fixed since: that version keeps the roster in `agents.list` (an array) and rejects `agents.entries`, which newer versions use, and its `agents list --json` names the workspace `location`. The adapter now reads both forms and sets model and runtime at the path the install keeps the agent under. The no-Gateway path also passed 6/6 on 2026-10-30; routine creation was explicitly skipped with a Gateway-start warning. The demo-script check is recorded separately.
+- **OpenBot** (0.58.0, Windows, 2026-11-02): both ways. The import zip went in through the server's Import page (Grok Bot entry) with the skill, the routine, the facts and the avatar; a Hermes profile folder that OpenTeleport wrote went in through the Hermes Agent entry; and `export --from openbot` on a copy of the database returned the instructions, the routine (schedule kept), the facts and, with this branch, the skill from the workspace. The database is at migration 49 and the warning about a newer schema fired. Two fixes came out of it: the persona layout and the workspace skills (PR #35).
 - **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the fixes and remaining verification below.
 
 ## Codex fixes
@@ -52,14 +53,13 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-Each item below has an issue labelled help wanted: OpenBot #16, Grok Bot #17, Letta #18, Hermes cron #19, Codex roles #20, the Bash demo #22. Issues #21 (the OpenClaw path without a Gateway), #23 (four small fixes) and #24 (the slow MCP test) were settled by PRs #26 to #30.
+Each item below has an issue labelled help wanted: Grok Bot #17, Letta #18, Codex roles #20. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35.
 
 - The Bash demo end to end (the PowerShell demo passed on 2026-10-30), and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
 - **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
   - **Hermes** (the rest of it): the scheduler running a resumed job (`hermes cron list --all` and `hermes cron resume` were checked on 2026-11-01, see `docs/demo.md`), and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
   - **Codex** (the rest of it): the `@<name>` syntax and `agents.enabled`, and the file names Codex gives its generated memory (`memories/` was empty).
-  - **OpenBot**: the schema of `openbot.db` (the adapter knows migration 47; a newer one gets a warning, a missing table or column an error), and that Server settings accepts the import zip it writes, including the `x-openteleport` key in its manifest.
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
 
