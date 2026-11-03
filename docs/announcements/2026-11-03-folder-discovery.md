@@ -1,6 +1,6 @@
 # X draft — folder skill discovery
 
-Status: prepared, not posted. This is a preview of the folder update in PR #40. npm 0.4.3 does not include it. The post can be used before the planned 0.4.4 release; replace the release sentence after publication is verified.
+Status: ready, not posted. [0.4.4 is published](https://www.npmjs.com/package/openteleport/v/0.4.4) and verified as npm latest; the production website serves 0.4.4. Publication and fresh-install checks are recorded in [STATUS](../STATUS.md#release).
 
 ## Post
 
@@ -8,7 +8,7 @@ Your skills shouldn't disappear when you switch tools.
 
 We checked skill discovery in Cursor, Gemini CLI and Cline's skills CLI—and fixed the folder layout.
 
-Plain files. Open source. Coming in 0.4.4.
+New in OpenTeleport 0.4.4. Plain files. Open source.
 
 https://openteleport.dev
 
