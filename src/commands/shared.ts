@@ -53,6 +53,17 @@ export class NotDetectedError extends Error {
   }
 }
 
+/** A failure the remote side of an ssh move reported with `--json`; it keeps that exit code. */
+export class RemoteError extends Error {
+  readonly exitCode: number;
+
+  constructor(host: string, code: number, message: string) {
+    super(`${host}: ${message}`);
+    this.name = "RemoteError";
+    this.exitCode = code;
+  }
+}
+
 /**
  * 0 is success (a hand-over included), 1 a bundle that is invalid or holds secrets and any
  * unexpected failure, 2 a bad flag, argument or adapter name, 3 an app that is not there.
@@ -60,6 +71,7 @@ export class NotDetectedError extends Error {
 export function exitCodeOf(error: unknown): number {
   if (error instanceof UsageError || error instanceof UnknownAdapterError) return 2;
   if (error instanceof NotDetectedError) return 3;
+  if (error instanceof RemoteError) return error.exitCode;
   return 1;
 }
 
