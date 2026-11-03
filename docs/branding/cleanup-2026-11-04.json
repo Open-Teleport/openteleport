@@ -1,0 +1,16 @@
+{
+  "productionFilesHashed": 81,
+  "productionBrandReferences": [
+    "/brand/shift/icons/site.webmanifest"
+  ],
+  "candidateFiles": 156,
+  "candidateBytes": 28043854,
+  "faviconSocialAndShiftExcluded": true,
+  "productionFilesByteIdenticalAfterCleanup": true,
+  "isolatedGeneratorOutputDifferences": 0,
+  "siteBuildPassed": true,
+  "socialPreviewCheckPassed": true,
+  "legacyBranchesArchived": 3,
+  "obsoleteLocalBranchesRemoved": 8,
+  "oldCleanSiteWorktreeRemoved": true
+}

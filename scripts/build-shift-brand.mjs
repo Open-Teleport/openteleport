@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import {createRequire} from 'node:module';
-process.env.OPENTELEPORT_BRAND = 'shift';
-await import('./build-aperture-brand.mjs');
+await import('./build-brand-assets.mjs');
 const require = createRequire(import.meta.url);
 const sharp = require(process.env.OPENTELEPORT_BRAND_SHARP || 'C:/Users/nadru/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/sharp');
 const root='site/public/brand/shift';

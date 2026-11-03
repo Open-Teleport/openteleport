@@ -125,7 +125,7 @@ The Release workflow authenticates to npm with Trusted Publishing (OpenID Connec
 
 Historical snapshot (superseded by the release information above): on 2026-10-30 the public npm registry's `latest` metadata was checked directly: 0.4.1, gitHead `235c8bffb73d396bfcc32ae636ed832f82e19dc2`, matching the local `v0.4.1` tag. The current repository HEAD also includes the subsequent publication-status documentation. No new package publication is needed for landing/brand changes; npm does not include `site/`.
 
-The landing's previous A/B merge omitted A's portal flight and retained B's terminal scatter. The local revision adds a portal transition in both themes, defaults to a clean light theme, adds MCP/native-plugin information, and updates SEO. The website build has its own version (0.1.0), independent of the CLI version. Brand proposals 04–07 await selection. These local changes are not evidence of a live deployment. This focused check does not revalidate the real-app limitations listed above.
+The landing's previous A/B merge omitted A's portal flight and retained B's terminal scatter. The local revision adds a portal transition in both themes, defaults to a clean light theme, adds MCP/native-plugin information, and updates SEO. The website build has its own version (0.1.0), independent of the CLI version. Historical proposals have since been superseded by the selected Shift identity; the 2026-11-04 cleanup archives them outside the public site. This paragraph describes the historical local review, not a fresh deployment check. This focused check does not revalidate the real-app limitations listed above.
 
 - `docs/design.md` is the design authority for v0.1; the v0.2 spec in `docs/superpowers/specs/` is the authority where it differs. Changes to behaviour that contradict them get a note there.
 - `docs/superpowers/plans/` holds the implementation plans; `docs/superpowers/research/` the research behind them.
@@ -134,3 +134,7 @@ The landing's previous A/B merge omitted A's portal flight and retained B's term
 ## Where to ask
 
 Open an issue with one of the templates. For a new adapter, start with the "Adapter request" template so the storage layout is agreed before code.
+
+## Landing and repository cleanup (2026-11-04)
+
+The production landing and selected Shift identity are retained. Historical concepts and superseded exports are archived under `docs/branding/archive/`; production output and the regenerated Shift kit were checked byte for byte. See the [brand decision](branding/README.md), [references](branding/references-2026-11-04.md) and [cleanup evidence](branding/cleanup-2026-11-04.json). Eight obsolete local branches and the clean initial site worktree were removed after verifying a complete, recoverable Git bundle for the three unmerged legacy branches. Main was fast-forwarded with explicit owner approval; unrelated untracked drafts/assets were preserved. No runtime package change or npm release is required.
