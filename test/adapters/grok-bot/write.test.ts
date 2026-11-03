@@ -274,7 +274,7 @@ describe("renderPastePack: the README", () => {
 
   it("offers the memory import in step 5 as optional", () => {
     expect(readme()).toContain(
-      "5. Optional: in Settings > General > Import, choose Add to Memory and give it `2-memory.txt`.",
+      "5. Optional, only if these facts should be shared across your Bots: open Settings > General > Import, paste the contents of `2-memory.txt` into the import text box, then choose Add to Memory.",
     );
   });
 
@@ -526,7 +526,7 @@ describe("writeGrokBot: the report", () => {
     const { items } = await writeGrokBot(ctx, adaBundle(), ENABLE);
     expect(items.warnings).toEqual([
       "Grok Bot keeps one set of skills for the whole account, so saving these skills affects every Bot you have",
-      "Grok Bot does not document the format of its memory import; 2-memory.txt is plain text, one fact per line, and may not be accepted",
+      "Grok Bot's Add to Memory sends pasted text to a Bot and requests shared user memory across Bots; review what it saves. This is not a direct file import",
     ]);
   });
 

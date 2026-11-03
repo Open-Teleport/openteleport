@@ -69,7 +69,7 @@ Open verification issues include Grok Bot #17, Letta #18 and Codex roles #20 (la
 - **Remaining adapter checks.** Initial fixtures were rebuilt from documentation and source code. The real-install checks above cover only the recorded scenarios; a verifier should still check:
   - **Hermes** (the rest of it): the scheduler running a resumed job (`hermes cron list --all` and `hermes cron resume` were checked on 2026-11-01, see `docs/demo.md`), and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
   - **Codex** (the rest of it): UI-specific invocation (do not assume `@<name>` is special syntax) and generated memory filenames (`memories/` was still empty). Named-role spawning, `agents.enabled`, the actual child model and shared-user-skill execution were verified on 2026-11-03.
-  - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
+  - **Grok Bot**: a genuine export ZIP and live memory persistence remain unverified. Inspection of installed 0.78.1 confirms Add to Memory takes pasted text and asks a Bot to save shared user memory, rather than importing a file directly. [Report and UI-test blocker](superpowers/research/2026-11-03-grok-memory-import.md).
   - **Letta Code**: Cloud backend, live model behavior and execution of the PowerShell handoff remain unverified. The local-backend Bash handoff, restore, create JSON, cron schema, list/read and facts/skill round trip passed on 0.34.39; see [the report](superpowers/research/2026-11-03-letta-runtime-check.md).
 
 ## Fixes shipped in 0.4.2

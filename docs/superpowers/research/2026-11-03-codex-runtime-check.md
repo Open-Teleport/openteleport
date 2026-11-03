@@ -85,3 +85,10 @@ The client used approval policy `on-request`. It was prepared to accept only the
 - [Official custom-agent documentation](https://learn.chatgpt.com/docs/agent-configuration/subagents): role `name`, standalone TOML files and `agents.enabled`. Retrieved 2026-11-03; documentation is not a substitute for the installed behavior above.
 - [Earlier discovery check](2026-10-29-real-install-check.md).
 - [Issue #20](https://github.com/Open-Teleport/openteleport/issues/20) now remains open only for UI-specific invocation (including whether `@<name>` has special meaning) and generated-memory filenames. Natural-language requests for the exact role name are verified; shared skill execution, signed-in native-role discovery and actual child-model selection passed in the authorized follow-up.
+
+
+## Remaining-check audit after 0.4.5
+
+The current [official subagent guide](https://learn.chatgpt.com/docs/agent-configuration/subagents) confirms TOML `name` as the role identity but does not establish dedicated `@name` UI selection. Both supported computer-use entry points failed at kernel initialization (Windows error 3), including a reset/retry, so the UI check remains unverified.
+
+The [official memory guide](https://learn.chatgpt.com/docs/customization/memories?surface=app) now distinguishes `memories/` and `memories_v2/` and describes background generation. On this machine `memories/` exists with no top-level files and `memories_v2/` does not exist. No memory contents were read or configuration changed. Generated filenames remain unobserved; issue #20 stays open. The adapter's v2-memory support must be assessed against an actual generated store before claiming it.
