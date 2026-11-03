@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Letta: resolve local MemFS by the record's validated agent ID when its filename is base64url encoded; include the required cron description; create a Git snapshot before memory restore so MemFS history remains usable. Verified with Letta Code 0.34.39 in an isolated Linux container.
 
+### Maintenance
+
+- Configure isolated, loopback-only provider fixtures for OpenClaw compatibility tests: 2026.10.10 requires inference authentication even when creating disabled routines. Preserve the routine assertions and reject attempted model calls.
+
 ## [0.4.5] - 2026-11-03
 
 ### Fixed

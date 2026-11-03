@@ -246,3 +246,9 @@ The unmodified PowerShell demo (`pwsh -File scripts/demo.ps1`) also completed wi
 | Native CLI | Layouts | Result | Scope |
 | --- | --- | --- | --- |
 | Claude Code 2.1.273, Windows | Main checkout, subfolder, linked worktree, worktree subfolder, plain folder | Imported fact loaded in all five outgoing native prompts; the four Git layouts share the main repository memory | Synthetic files, isolated config, dummy key and loopback HTTP endpoint; response deliberately rejected before any model execution. See [report and evidence](superpowers/research/2026-11-03-claude-worktree-memory.md). |
+
+### OpenClaw 2026.10.10 provider preflight
+
+The scheduled run [41613123848](https://github.com/Open-Teleport/openteleport/actions/runs/41613123848) passed three matrix jobs, but the latest/Gateway job rejected both disabled routine creations: `No route-compatible authentication source is configured for openai`. The newest OpenClaw validates inference authentication at creation time.
+
+Fresh e2e state now gets synthetic OpenAI/Anthropic provider configuration pointing only to a loopback HTTP sink. Background scheduling is disabled; job creation, listing, disabled-state and multiline-prompt assertions remain unchanged. Any attempted provider request is rejected and fails the test. Child processes inherit only process-launch essentials, with isolated app directories. No real provider credentials are used. Manually supplied state directories are not rewritten by this setup. The corrected [four-job matrix](https://github.com/Open-Teleport/openteleport/actions/runs/41645003736) passed on OpenClaw 2026.10.8 and 2026.10.10, Gateway on/off, with zero provider requests. Standard CI passed on all three platforms; the Windows cancellation test required one rerun after its completion wait expired on the first run.
