@@ -4,7 +4,7 @@ import { MAX_FACT_CHARS } from "../../core/paths.js";
 import type { Bundle, Manifest, ModelPref, Note, Routine } from "../../core/schema.js";
 import { oneLine, truncate, withoutMark } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
-import { entriesOf, lstatIfAny } from "../fs.js";
+import { entriesOf, isSafeName, lstatIfAny } from "../fs.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { readCrons, taskToRoutine, taskWarnings } from "./crons.js";
 import { type MemFs, REFERENCE_PREFIX, readMemFs, readPersona } from "./memfs.js";
@@ -43,8 +43,12 @@ async function localAgents(backend: string): Promise<Located[]> {
     try {
       const record: unknown = JSON.parse(withoutMark(await readFile(file, "utf8")));
       if (!isRecord(record)) throw new Error("not a JSON object");
+      const id = nonBlank(record.id) ?? stem;
+      if (!isSafeName(id)) throw new Error("unsafe agent id in local record");
       located.record = record;
-      located.id = nonBlank(record.id) ?? stem;
+      located.id = id;
+      // Letta Code encodes record filenames as base64url, but MemFS uses the actual ID.
+      located.memoryDir = join(backend, "memfs", id, "memory");
     } catch (error) {
       located.problem = `${file}: ${(error as Error).message}`;
     }

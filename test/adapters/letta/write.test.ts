@@ -145,7 +145,7 @@ describe("writeLettaAgent: the folder", () => {
     await writeLettaAgent(ctx, adaBundle(), ENABLE);
     const readme = await text(join(ADA_DIR(), "README.md"));
     expect(readme.startsWith("# Ada for Letta Code\n")).toBe(true);
-    for (const needle of ["letta-commands.sh", "letta-commands.ps1", "letta memory restore", "has not been verified"]) {
+    for (const needle of ["letta-commands.sh", "letta-commands.ps1", "letta memory restore", "local Git snapshot"]) {
       expect(readme).toContain(needle);
     }
   });
@@ -280,16 +280,16 @@ describe("writeLettaAgent: the scripts", () => {
     expect(at("memory restore")).toBeLessThan(at("cron add"));
 
     expect(lines(script)).toContain(
-      `letta cron add --name "Morning digest" --prompt "$(cat "${routines}/morning-digest.txt")" --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning digest" --description "Morning digest" --prompt "$(cat "${routines}/morning-digest.txt")" --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
     );
     expect(lines(script)).toContain(
-      `letta cron add --name "Launch day" --prompt "$(cat "${routines}/launch-day.txt")" --at "2026-12-01T07:00:00.000Z" --agent "$AGENT_ID"`,
+      `letta cron add --name "Launch day" --description "Launch day" --prompt "$(cat "${routines}/launch-day.txt")" --at "2026-12-01T07:00:00.000Z" --agent "$AGENT_ID"`,
     );
     // The paused routine is a comment, with the reason above it; an interval becomes cron.
     const paused = lines(script).findIndex((line) => line.startsWith("# paused in the source"));
     expect(lines(script)[paused]).toBe("# paused in the source; uncomment to add it");
     expect(lines(script)[paused + 1]).toBe(
-      `# letta cron add --name "Half hourly check" --prompt "$(cat "${routines}/half-hourly-check.txt")" --cron "*/30 * * * *" --agent "$AGENT_ID"`,
+      `# letta cron add --name "Half hourly check" --description "Half hourly check" --prompt "$(cat "${routines}/half-hourly-check.txt")" --cron "*/30 * * * *" --agent "$AGENT_ID"`,
     );
     expect(lines(script).filter((line) => line.startsWith("letta cron add"))).toHaveLength(2);
     expect(lines(script)).toContain("# Morning digest: every weekday at 08:00 (Europe/Warsaw)");
@@ -315,13 +315,13 @@ describe("writeLettaAgent: the scripts", () => {
       `letta memory restore --agent "$AGENT_ID" --from "${memory}" --force`,
     );
     expect(lines(script)).toContain(
-      `letta cron add --name "Morning digest" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/morning-digest.txt") --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning digest" --description "Morning digest" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/morning-digest.txt") --cron "0 8 * * 1-5" --agent "$AGENT_ID"`,
     );
     expect(lines(script)).toContain(
-      `# letta cron add --name "Half hourly check" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/half-hourly-check.txt") --cron "*/30 * * * *" --agent "$AGENT_ID"`,
+      `# letta cron add --name "Half hourly check" --description "Half hourly check" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${routines}/half-hourly-check.txt") --cron "*/30 * * * *" --agent "$AGENT_ID"`,
     );
     // Each command is checked, and a commented one is commented together with its check.
-    expect(script.match(/\$LASTEXITCODE -ne 0/g)).toHaveLength(5);
+    expect(script.match(/\$LASTEXITCODE -ne 0/g)).toHaveLength(8);
     expect(lines(script)).toContain('# if ($LASTEXITCODE -ne 0) { throw "letta cron add failed" }');
     expect(script).not.toContain("cat ");
   });
@@ -392,7 +392,7 @@ describe("writeLettaAgent: the scripts", () => {
       const unexpected = lines(script).filter(
         (line) =>
           line !== "" &&
-          !/^(#|letta |read |set |if |fi$|exit |function |\$|\}|  )/.test(line),
+          !/^(#|letta |git |read |set |if |fi$|exit |function |\$|\}|  )/.test(line),
       );
       expect(unexpected).toEqual([]);
       expect(lines(script).filter((line) => line.startsWith("letta cron add"))).toHaveLength(1);
@@ -451,11 +451,11 @@ describe("writeLettaAgent: the report", () => {
     expect(items.skipped).toEqual([]);
   });
 
-  it("warns that a restore replaces the whole memory and that a plain folder is unverified", async () => {
+  it("warns about replacement and the required local Git snapshot", async () => {
     const { items } = await writeLettaAgent(ctx, adaBundle(), ENABLE);
     expect(items.warnings).toEqual([
       "`letta memory restore` replaces the agent's whole memory directory; the script runs it on the new agent only",
-      "Letta's `memory restore --from <dir>` is documented for backups made by `memory backup`; a plain memory folder is assumed to work (unverified)",
+      "The handoff script requires Git and creates a local memory snapshot before restoring it; no remote or user Git identity is configured",
     ]);
   });
 
