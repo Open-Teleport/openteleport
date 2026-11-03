@@ -62,14 +62,14 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-Open verification issues include Grok Bot #17, Letta #18 and Codex roles #20 (labelled help wanted). The scoped Letta #18 local-backend checks are now complete; closure follows merge of the fixes below. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
+Open verification issues include Grok Bot #17 and Codex roles #20 (labelled help wanted). Letta #18 is closed by PR #47 after the scoped local-backend checks passed. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
 
 - OpenClaw versions other than 2026.5.28 (partial round trip and manual checks), 2026.10.8 (full round trip on Windows and Linux) and 2026.10.9 and 2026.10.10 (full Linux compatibility matrix, Gateway on/off).
 - Claude Code custom `autoMemoryDirectory` settings and remote-memory overrides remain outside the adapter's default/local memory resolution.
 - **Remaining adapter checks.** Initial fixtures were rebuilt from documentation and source code. The real-install checks above cover only the recorded scenarios; a verifier should still check:
   - **Hermes** (the rest of it): the scheduler running a resumed job (`hermes cron list --all` and `hermes cron resume` were checked on 2026-11-01, see `docs/demo.md`), and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
   - **Codex** (the rest of it): UI-specific invocation (do not assume `@<name>` is special syntax) and generated memory filenames (`memories/` was still empty). Named-role spawning, `agents.enabled`, the actual child model and shared-user-skill execution were verified on 2026-11-03.
-  - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
+  - **Grok Bot**: a genuine export ZIP and live memory persistence remain unverified. Inspection of installed 0.78.1 confirms Add to Memory takes pasted text and asks a Bot to save shared user memory, rather than importing a file directly. [Report and UI-test blocker](superpowers/research/2026-11-03-grok-memory-import.md).
   - **Letta Code**: Cloud backend, live model behavior and execution of the PowerShell handoff remain unverified. The local-backend Bash handoff, restore, create JSON, cron schema, list/read and facts/skill round trip passed on 0.34.39; see [the report](superpowers/research/2026-11-03-letta-runtime-check.md).
 
 ## Fixes shipped in 0.4.2

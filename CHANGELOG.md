@@ -7,7 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-03
+
 ### Fixed
+
+- Grok Bot: clarify that Add to Memory takes pasted text and asks a Bot to save shared user memory across Bots; remove the misleading direct-file-import claim. Checked against the installed 0.78.1 UI code; live persistence and export remain unverified.
 
 - Letta: resolve local MemFS by the record's validated agent ID when its filename is base64url encoded; include the required cron description; create a Git snapshot before memory restore so MemFS history remains usable. Verified with Letta Code 0.34.39 in an isolated Linux container.
 

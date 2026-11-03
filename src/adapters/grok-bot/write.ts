@@ -31,7 +31,7 @@ const MIN_INTERVAL_MS = MIN_INTERVAL_MINUTES * 60 * 1000;
 const SKILLS_WARNING =
   "Grok Bot keeps one set of skills for the whole account, so saving these skills affects every Bot you have";
 const MEMORY_WARNING =
-  "Grok Bot does not document the format of its memory import; 2-memory.txt is plain text, one fact per line, and may not be accepted";
+  "Grok Bot's Add to Memory sends pasted text to a Bot and requests shared user memory across Bots; review what it saves. This is not a direct file import";
 
 type Items = WriteResult["items"];
 
@@ -111,7 +111,7 @@ function renderReadme(manifest: Manifest, has: Contents): string {
       ? `4. Paste each line of \`${ROUTINES_FILE}\` into the chat, one message per line. The Bot creates the routine. A line that ends with (paused) is a routine that should stay off: pause it once the Bot has created it. Routines move paused unless OpenTeleport was run with --enable-routines.`
       : "4. This Bot has no routines, so there is nothing to create.",
     has.memory
-      ? `5. Optional: in Settings > General > Import, choose Add to Memory and give it \`${MEMORY_FILE}\`. This saves the facts to Grok Bot's memory directly; the first message already asks the Bot to remember them.`
+      ? `5. Optional, only if these facts should be shared across your Bots: open Settings > General > Import, paste the contents of \`${MEMORY_FILE}\` into the import text box, then choose Add to Memory. This sends a request to a Bot to save shared user memory; it is not a direct file import. Review the Bot's confirmation and check what it remembers. The first chat message already asks it to remember these facts.`
       : `5. This Bot has no facts, so there is no \`${MEMORY_FILE}\` to import.`,
   ];
   return `# ${name} for Grok Bot
