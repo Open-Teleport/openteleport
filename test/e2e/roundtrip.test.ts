@@ -15,6 +15,7 @@
 // Gateway gets a free port of its own, so no command reaches a Gateway the user runs.
 import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { createConnection, createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -74,6 +75,8 @@ let stateDir = "";
 let gatewayPort: number | undefined;
 let gatewayUp = false;
 let gateway: ResultPromise | undefined;
+let providerSink: Server | undefined;
+let providerRequests = 0;
 let openclawCommand: OpenClawCommand | undefined;
 /** The user's own OpenClaw config, and its digest before the test, to show it is left alone. */
 const USER_CONFIG = resolve(
@@ -118,6 +121,8 @@ async function namesIn(dir: string): Promise<string[]> {
  * `agents list --json` prints nothing.
  */
 const LEAKY = /^(?:OPENCLAW_|OPENTELEPORT_|CLAUDE_CONFIG_DIR$|VITEST|TEST$|NODE_ENV$)/i;
+// Never inherit provider keys, tokens, proxy routes or personal SDK configuration.
+const LAUNCH_ENV = /^(?:PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|TMPDIR|LANG|LC_ALL|TERM|TZ)$/i;
 
 /**
  * The environment of every child process: the user's (for `PATH`), with every home and app
@@ -128,6 +133,8 @@ function childEnv(extra: Record<string, string> = {}): Record<string, string> {
   const overrides: Record<string, string> = {
     HOME: home,
     USERPROFILE: home,
+    APPDATA: join(home, "AppData", "Roaming"),
+    LOCALAPPDATA: join(home, "AppData", "Local"),
     OPENTELEPORT_HOME: home,
     CLAUDE_CONFIG_DIR: join(home, ".claude"),
     NO_COLOR: "1",
@@ -136,7 +143,7 @@ function childEnv(extra: Record<string, string> = {}): Record<string, string> {
   const replaced = new Set(Object.keys(overrides).map((key) => key.toUpperCase()));
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined || LEAKY.test(key) || replaced.has(key.toUpperCase())) continue;
+    if (value === undefined || !LAUNCH_ENV.test(key) || LEAKY.test(key) || replaced.has(key.toUpperCase())) continue;
     env[key] = value;
   }
   return { ...env, ...overrides };
@@ -329,6 +336,43 @@ async function onboard(port: number): Promise<void> {
   }
 }
 
+/**
+ * OpenClaw 2026.10.10 validates inference auth even for disabled jobs. Give only our freshly
+ * onboarded fixture synthetic provider credentials and loopback endpoints. Any attempted
+ * inference fails locally and fails the test; no model is served here. Disable background
+ * scheduling while retaining the real Gateway's job creation and listing paths.
+ */
+async function configureOfflineProviders(): Promise<void> {
+  providerSink = createHttpServer((_request, response) => {
+    providerRequests += 1;
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end('{"error":"No model execution in OpenTeleport compatibility tests"}');
+  });
+  await new Promise<void>((done, fail) => {
+    providerSink!.once("error", fail);
+    providerSink!.listen(0, "127.0.0.1", done);
+  });
+  const address = providerSink.address();
+  if (address === null || typeof address === "string") throw new Error("No provider sink port");
+  const config = await sandboxConfig();
+  if (config === undefined) throw new Error("Missing freshly onboarded config");
+  const agents = isRecord(config.agents) ? config.agents : {};
+  const defaults = isRecord(agents.defaults) ? agents.defaults : {};
+  const provider = (api: string, model: string) => ({
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    apiKey: "openteleport-synthetic-not-a-real-key",
+    api,
+    models: [{ id: model, name: "Offline fixture (never executed)" }],
+  });
+  config.agents = { ...agents, defaults: { ...defaults, model: { primary: "openai/gpt-5.5" } } };
+  config.models = { mode: "merge", providers: {
+    openai: provider("openai-completions", "gpt-5.5"),
+    anthropic: provider("anthropic-messages", "claude-opus-5-5"),
+  } };
+  config.cron = { ...(isRecord(config.cron) ? config.cron : {}), enabled: false };
+  await writeFile(join(stateDir, "openclaw.json"), `${JSON.stringify(config, null, 2)}\n`);
+}
+
 /** Where the sandbox Gateway's output goes; never into an error or the diagnostics. */
 const gatewayLogFile = (): string => join(root, "gateway.log");
 
@@ -442,6 +486,7 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
     if (GIVEN_STATE_DIR === undefined) {
       gatewayPort = await freePort();
       await onboard(gatewayPort);
+      await configureOfflineProviders();
     } else {
       if (!(await isFile(join(stateDir, "openclaw.json")))) {
         throw new Error(`OPENTELEPORT_E2E_OPENCLAW_STATE_DIR has no openclaw.json: ${stateDir}`);
@@ -475,6 +520,11 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
       diagnostics.gatewayPortClosedAfterStop =
         gatewayPort === undefined ? null : await closes(gatewayPort);
     }
+    if (providerSink !== undefined) {
+      providerSink.closeAllConnections();
+      await new Promise<void>((done, fail) => providerSink!.close((error) => error ? fail(error) : done()));
+      diagnostics.providerRequests = providerRequests;
+    }
     const kept = KEEP ? ", kept" : "";
     console.info(
       `OpenTeleport e2e diagnostics (sandbox ${root}${kept}):\n` +
@@ -483,6 +533,7 @@ describe.skipIf(!E2E)("round trip on the installed OpenClaw and Claude Code", ()
     if (!KEEP && root !== "") {
       await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
     }
+    expect(providerRequests, "disabled routine transfers must not call a model").toBe(0);
   }, TEST_TIMEOUT_MS);
 
   it(

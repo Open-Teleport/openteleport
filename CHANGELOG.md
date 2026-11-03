@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Maintenance
+
+- Configure isolated, loopback-only provider fixtures for OpenClaw compatibility tests: 2026.10.10 requires inference authentication even when creating disabled routines. Preserve the routine assertions and reject attempted model calls.
+
 ## [0.4.5] - 2026-11-03
 
 ### Fixed
