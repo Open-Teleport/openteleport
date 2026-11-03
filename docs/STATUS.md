@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-10-30. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
+Last updated: 2026-11-03. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
 
 ## What is done
 
@@ -17,7 +17,7 @@ Last updated: 2026-10-30. This page says what exists, what is verified, and what
 
 The design is `docs/superpowers/specs/2026-10-28-openteleport-v0.2-design.md`; the research behind it is in `docs/superpowers/research/`.
 
-- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code, not recorded from an install. Hermes and Codex have since been checked on real installs (see "What is verified").
+- **Five adapters**, all read and write, each with fixtures reproduced from documentation and source code, not recorded from an install. Hermes, Codex and OpenBot have since been checked on real installs (see "What is verified").
   - `hermes`: profiles (the Hermes home and `profiles/*`), `SOUL.md`, skills, memory entries, `cron/jobs.json` (written paused). Result: `done`.
   - `codex`: the global setup and the custom agents in `agents/*.toml`; a write makes a custom agent file and puts its skills in `~/.agents/skills`. Result: `done`.
   - `openbot`: reads a copy of `openbot.db` (with the agent's skills from its workspace) or an export zip; writes an `openbot-agent-import` zip. Result: `handoff` (import the zip on the server's Import page, Grok Bot entry).
@@ -40,11 +40,11 @@ The combined integration passed 2,719 tests (12 skipped) locally and CI on Ubunt
 
 Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). The evidence is `docs/superpowers/research/2026-10-29-real-install-check.md`. OpenClaw was checked the same day by the end-to-end test; the evidence is the table at the end of `docs/demo.md`.
 
-- **Hermes** (0.13.0): import, same-id update, copy and export through the engine, with Hermes's own code reading the result back. It recovered the facts, the skill, the three routines (all paused, none run) and both profiles, and `skills/.bundled_manifest` has `name:hash` lines. Two edge cases came out of it, both fixed on this branch and not yet rechecked on an install:
+- **Hermes** (0.13.0): import, same-id update, copy and export through the engine, with Hermes's own code reading the result back. It recovered the facts, the skill, the three routines (all paused, none run) and both profiles, and `skills/.bundled_manifest` has `name:hash` lines. Two edge cases came out of it, both fixed in the adapter and not yet rechecked on an install:
   - A one-off time without an offset (`once.run_at`, as a hand-written job has it) is read by Hermes in the machine's time zone, not the profile's. The adapter now reads it the same way and warns about the assumption; cron expressions keep the profile's zone.
   - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
 - **OpenClaw** (2026.5.28 and 2026.10.8, Windows): the end-to-end round trip passed on 2026.10.8 with the Gateway running: a Claude Code project into OpenClaw, back out into a folder, exported as the bundle that left, and two routines landed disabled with a two-line instruction whole. The first run, on 2026.5.28, found two wrong assumptions, fixed since: that version keeps the roster in `agents.list` (an array) and rejects `agents.entries`, which newer versions use, and its `agents list --json` names the workspace `location`. The adapter now reads both forms and sets model and runtime at the path the install keeps the agent under. The no-Gateway path also passed 6/6 on 2026-10-30; routine creation was explicitly skipped with a Gateway-start warning. The demo-script check is recorded separately.
-- **OpenBot** (0.58.0, Windows, 2026-11-02): both ways. The import zip went in through the server's Import page (Grok Bot entry) with the skill, the routine, the facts and the avatar; a Hermes profile folder that OpenTeleport wrote went in through the Hermes Agent entry; and `export --from openbot` on a copy of the database returned the instructions, the routine (schedule kept), the facts and, with this branch, the skill from the workspace. The database is at migration 49 and the warning about a newer schema fired. Two fixes came out of it: the persona layout and the workspace skills (PR #35).
+- **OpenBot** (0.58.0, Windows, 2026-11-02): both ways. The import zip went in through the server's Import page (Grok Bot entry) with the skill, the routine, the facts and the avatar; a Hermes profile folder that OpenTeleport wrote went in through the Hermes Agent entry; and `export --from openbot` on a copy of the database returned the instructions, the routine (schedule kept), the facts and, with the 0.4.3 reader, the skill from the workspace. The database is at migration 49 and the warning about a newer schema fired. Two fixes came out of it: the persona layout and the workspace skills (PRs #35 and #36).
 - **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the fixes and remaining verification below.
 
 ## Codex fixes
@@ -53,17 +53,17 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-Each item below has an issue labelled help wanted: Grok Bot #17, Letta #18, Codex roles #20. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35.
+Open verification issues include Grok Bot #17, Letta #18 and Codex roles #20 (labelled help wanted). Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
 
-- The Bash demo end to end (the PowerShell demo passed on 2026-10-30), and OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
+- OpenClaw versions other than 2026.5.28 (first half of the round trip, then the fix checked by hand) and 2026.10.8 (the whole round trip).
 - Claude Code memory location for projects inside git worktrees (the adapter keys on the project folder as given).
-- **The v0.2 adapters not yet checked on a real install.** Their layouts come from documentation and source code, and their fixtures were not recorded from an install. A verifier should check:
+- **Remaining adapter checks.** Initial fixtures were rebuilt from documentation and source code. The real-install checks above cover only the recorded scenarios; a verifier should still check:
   - **Hermes** (the rest of it): the scheduler running a resumed job (`hermes cron list --all` and `hermes cron resume` were checked on 2026-11-01, see `docs/demo.md`), and the two edge cases above on the fixed code, with `HERMES_HOME` unset and with a hand-written offset-free `once` job.
   - **Codex** (the rest of it): the `@<name>` syntax and `agents.enabled`, and the file names Codex gives its generated memory (`memories/` was empty).
   - **Grok Bot**: the shape of the export zip the OpenBot export skill makes (`source.app`, the agent keys), and whether Settings, General, Import takes the plain-text memory file.
   - **Letta Code**: that `letta memory restore --agent <id> --from <plain folder> --force` accepts a folder that `letta memory backup` did not make, what `letta agents create` prints (the script asks you for the id), and the `crons.json` fields the adapter reads.
 
-## Fixes prepared for 0.4.2
+## Fixes shipped in 0.4.2
 
 PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attachments (including CLI move), wizard missing-source exit codes, shared memory note naming and cancellation-test deadlines. The combined build passed 2,738 tests (12 skipped) and fresh-install package verification. Real-install follow-up results belong in `docs/demo.md`; unit and package tests do not replace them.
 
@@ -74,10 +74,12 @@ PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attac
 3. SSH transport (`--to openclaw@server`).
 4. An Ed25519 signature in the manifest (the field is reserved).
 5. Letta Cloud over REST, once its authorization header and `agents.update` are checked on a real account.
-6. Promoting `letta` and `openbot` from `handoff` to `done` after they are verified on real installs, and Codex automations once Codex documents a format.
-7. Running the end-to-end test on each OpenClaw release the adapter claims, and the demo scripts end to end.
+6. Automating the remaining manual import steps before promoting `letta` or `openbot` from `handoff` to `done`; real-install verification alone does not remove a handoff. Add Codex automations once Codex documents a format.
+7. Run the end-to-end test on each OpenClaw release the adapter claims. Both demo scripts have passed on Windows (PowerShell on 2026-10-30; Git Bash on 2026-11-01); repeat them when relevant behavior changes.
 
 ## Release
+
+[OpenTeleport 0.4.2](https://www.npmjs.com/package/openteleport/v/0.4.2) was published on 2026-10-30 from `c7237a0` by [Release workflow 41089960970](https://github.com/Open-Teleport/openteleport/actions/runs/41089960970). [OpenTeleport 0.4.3](https://www.npmjs.com/package/openteleport/v/0.4.3) is the current npm `latest`, verified on 2026-11-03. [PR #36](https://github.com/Open-Teleport/openteleport/pull/36) was merged and [Release workflow 41549200654](https://github.com/Open-Teleport/openteleport/actions/runs/41549200654) published successfully with provenance. The registry reports `gitHead` `f514022c4f710b9c00906eed46e623a7c2d10683`, matching the release commit. The production website also serves version 0.4.3. A fresh-cache install of the public 0.4.3 package passed the package verifier on 2026-11-03: CLI version, public API, MCP preview/apply, archive round trip, capability-loss reporting, manual handoff, source preservation and operation receipts. This uses synthetic data and does not expand the real-application verification above.
 
 The owner chose to skip a separate 0.1.0 and ship 0.2.0 directly. [OpenTeleport 0.2.0](https://www.npmjs.com/package/openteleport/v/0.2.0) was published on 2026-10-29 as the first public version.
 
@@ -85,15 +87,15 @@ The `v0.2.0` tag points to commit `ee4371a52a40cd6f85533344067601c45dc53cac`. [R
 
 A fresh-cache check outside the repository ran `npx openteleport@0.2.0 --version`, exported a synthetic folder agent, imported the resulting archive into a fresh folder, and verified that the instructions were preserved. This checks the published CLI path; it does not establish real-application behavior for every adapter.
 
-Users with Node.js 24+ can start with `npx openteleport`. [OpenTeleport 0.4.1](https://www.npmjs.com/package/openteleport/v/0.4.1) was published on 2026-10-30 by [Release workflow 40978652536](https://github.com/Open-Teleport/openteleport/actions/runs/40978652536) from the `v0.4.1` tag on `235c8bf`. It is the first version with the OpenClaw fixes from PR #12: the roster in both forms, five-minute command limits, and the verification table in `docs/demo.md` filled in. A fresh-cache `npx openteleport@0.4.1 --version` outside the repository printed `0.4.1`, and `npx openteleport@0.4.1 adapters` found OpenClaw 2026.10.8, Claude Code 2.1.273, Hermes and Codex on the machine. The 0.4.0 release combines the merged session and native plugin milestones. Use `npx openteleport@0.4.0` for its CLI and MCP server; install source plugins from the `v0.4.0` repository tag. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
+Users with Node.js 24+ can start with `npx openteleport`. [OpenTeleport 0.4.1](https://www.npmjs.com/package/openteleport/v/0.4.1) was published on 2026-10-30 by [Release workflow 40978652536](https://github.com/Open-Teleport/openteleport/actions/runs/40978652536) from the `v0.4.1` tag on `235c8bf`. It is the first version with the OpenClaw fixes from PR #12: the roster in both forms, five-minute command limits, and the verification table in `docs/demo.md` filled in. A fresh-cache `npx openteleport@0.4.1 --version` outside the repository printed `0.4.1`, and `npx openteleport@0.4.1 adapters` found OpenClaw 2026.10.8, Claude Code 2.1.273, Hermes and Codex on the machine. The 0.4.0 release combined the merged session and native plugin milestones. For current setup, follow [MCP installation](integrations/mcp.md) and [native plugin installation](integrations/native-plugins.md), keeping the CLI and source plugin versions aligned. Publication is performed by the tag-triggered Release workflow; consult the npm registry and GitHub Release for publication evidence.
 
-From the next tag on, the Release workflow authenticates to npm with Trusted Publishing (OpenID Connect from GitHub Actions, configured on npmjs.com for `Open-Teleport/openteleport` and `release.yml`); the `NPM_TOKEN` secret is no longer used and can be deleted once the first release through it has succeeded.
+The Release workflow authenticates to npm with Trusted Publishing (OpenID Connect from GitHub Actions, configured on npmjs.com for `Open-Teleport/openteleport` and `release.yml`); the workflow does not use an `NPM_TOKEN` secret.
 
 ## How decisions are recorded
 
 ### Landing and release consistency check (2026-10-30)
 
-The public npm registry's `latest` metadata was checked directly: 0.4.1, gitHead `235c8bffb73d396bfcc32ae636ed832f82e19dc2`, matching the local `v0.4.1` tag. The current repository HEAD also includes the subsequent publication-status documentation. No new package publication is needed for landing/brand changes; npm does not include `site/`.
+Historical snapshot (superseded by the release information above): on 2026-10-30 the public npm registry's `latest` metadata was checked directly: 0.4.1, gitHead `235c8bffb73d396bfcc32ae636ed832f82e19dc2`, matching the local `v0.4.1` tag. The current repository HEAD also includes the subsequent publication-status documentation. No new package publication is needed for landing/brand changes; npm does not include `site/`.
 
 The landing's previous A/B merge omitted A's portal flight and retained B's terminal scatter. The local revision adds a portal transition in both themes, defaults to a clean light theme, adds MCP/native-plugin information, and updates SEO. The website build has its own version (0.1.0), independent of the CLI version. Brand proposals 04–07 await selection. These local changes are not evidence of a live deployment. This focused check does not revalidate the real-app limitations listed above.
 
