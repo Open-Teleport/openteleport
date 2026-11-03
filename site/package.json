@@ -11,6 +11,7 @@
     "check:social": "node ../scripts/check-social-preview.mjs"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "astro": "^7.4.2"
   },
   "engines": {

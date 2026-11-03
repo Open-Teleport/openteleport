@@ -8,13 +8,27 @@ export type AgentFile = {
   /** Present when the frontmatter declares `tools`, as a list or a comma-separated string. */
   tools?: string[];
   model?: string;
+  /** Present when the frontmatter declares `disallowedTools`, as a list or a comma-separated string. */
+  disallowedTools?: string[];
+  /** The raw `permissionMode` value, as written. */
+  permissionMode?: string;
   /** The text after the frontmatter, without the blank lines that open it. */
   body: string;
-  /** Frontmatter keys other than `name`, `description`, `tools` and `model`, in file order. */
+  /**
+   * Frontmatter keys other than `name`, `description`, `tools`, `disallowedTools`, `model` and
+   * `permissionMode`, in file order.
+   */
   ignored: string[];
 };
 
-const KNOWN_KEYS = new Set(["name", "description", "tools", "model"]);
+const KNOWN_KEYS = new Set([
+  "name",
+  "description",
+  "tools",
+  "disallowedTools",
+  "model",
+  "permissionMode",
+]);
 
 /** A scalar as text; anything else, and an empty string, is absent. */
 function scalar(value: unknown): string | undefined {
@@ -69,25 +83,36 @@ export function parseAgentFile(text: string): AgentFile {
   if (description !== undefined) file.description = description;
   const tools = toolsOf(fields.tools);
   if (tools !== undefined) file.tools = tools;
+  const disallowedTools = toolsOf(fields.disallowedTools);
+  if (disallowedTools !== undefined) file.disallowedTools = disallowedTools;
   const model = scalar(fields.model);
   if (model !== undefined) file.model = model;
+  const permissionMode = scalar(fields.permissionMode);
+  if (permissionMode !== undefined) file.permissionMode = permissionMode;
   return file;
 }
 
 /**
- * Writes a subagent file: `name`, `description`, then `tools` (comma-separated, left out when
- * empty) and `model` (left out when absent), then a blank line and the body ending in a newline.
+ * Writes a subagent file: `name`, `description`, then `tools` and `disallowedTools`
+ * (comma-separated, left out when empty), `model` and `permissionMode` (left out when absent),
+ * then a blank line and the body ending in a newline.
  */
 export function renderAgentFile(agent: {
   name: string;
   description: string;
   tools?: string[];
+  disallowedTools?: string[];
   model?: string;
+  permissionMode?: string;
   body: string;
 }): string {
   const fields: Record<string, string> = { name: agent.name, description: agent.description };
   if (agent.tools !== undefined && agent.tools.length > 0) fields.tools = agent.tools.join(", ");
+  if (agent.disallowedTools !== undefined && agent.disallowedTools.length > 0) {
+    fields.disallowedTools = agent.disallowedTools.join(", ");
+  }
   if (agent.model !== undefined) fields.model = agent.model;
+  if (agent.permissionMode !== undefined) fields.permissionMode = agent.permissionMode;
   // lineWidth 0: never fold a long description onto several lines.
   const frontmatter = `---\n${stringify(fields, { lineWidth: 0 })}---\n`;
   if (agent.body === "") return frontmatter;

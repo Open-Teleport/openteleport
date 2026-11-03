@@ -914,3 +914,311 @@ describe("write", () => {
     expect(await readFile(memoryFile, "utf8")).toBe("- Old.\n- New.\n");
   });
 });
+
+describe("write: policy", () => {
+  const TEXT_REASON =
+    "Claude Code takes pattern rules only in settings files, which a move does not edit";
+  const SECTION_INTRO =
+    "## Permissions\n\nThese rules came with the agent. The app you are running in does not enforce them; follow\nthem yourself.\n\n";
+  const written = async (stem = "ada") =>
+    parseAgentFile(await readFile(agentFile(project, stem), "utf8"));
+
+  it("writes the mode as permissionMode and plain tool denies as disallowedTools", async () => {
+    const result = await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          policy: {
+            mode: "readOnly",
+            rules: [
+              { effect: "deny", on: "tool", tool: "WebFetch" },
+              { effect: "deny", on: "tool", tool: "mcp__github__*" },
+            ],
+          },
+        },
+      }),
+      COPY,
+    );
+
+    const file = await written();
+    expect(file.permissionMode).toBe("plan");
+    expect(file.disallowedTools).toEqual(["WebFetch", "mcp__github__*"]);
+    expect(file.body).toBe("Answer briefly.\n");
+    expect(file.ignored).toEqual([]);
+    expect(result.items.approximated.filter(({ field }) => field.startsWith("rule:"))).toEqual([]);
+    expect(result.items.approximated.some(({ field }) => field === "policy")).toBe(false);
+  });
+
+  it.each([
+    ["ask", "default"],
+    ["auto", "auto"],
+    ["readOnly", "plan"],
+  ] as const)("writes mode %s as permissionMode %s", async (mode, permissionMode) => {
+    await claudeCodeAdapter.write(ctx, bundleOf({ manifest: { policy: { mode, rules: [] } } }), COPY);
+    expect((await written()).permissionMode).toBe(permissionMode);
+  });
+
+  it("writes every other rule as a Permissions section and reports each as approximated", async () => {
+    const result = await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          policy: {
+            mode: "ask",
+            rules: [
+              { effect: "deny", on: "files.write", pattern: "./.env" },
+              { effect: "deny", on: "tool", tool: "WebFetch" },
+              { effect: "ask", on: "shell", pattern: "git push *" },
+              { effect: "allow", on: "tool", tool: "Read" },
+              { effect: "deny", on: "tool", tool: "Bash(rm -rf *)" },
+              { effect: "deny", on: "tool", tool: "WebSearch", pattern: "example.com" },
+            ],
+          },
+        },
+      }),
+      COPY,
+    );
+
+    const file = await written();
+    expect(file.permissionMode).toBe("default");
+    expect(file.disallowedTools).toEqual(["WebFetch"]);
+    expect(file.body).toBe(
+      `Answer briefly.\n\n${SECTION_INTRO}` +
+        [
+          "- Never write files matching `./.env`.",
+          "- Ask before running shell commands matching `git push *`.",
+          "- The tool `Read` is allowed without asking.",
+          "- Never use the tool `Bash(rm -rf *)`.",
+          "- Never use the tool `WebSearch` matching `example.com`.",
+          "",
+        ].join("\n"),
+    );
+    expect(file.body).not.toContain("Mode:");
+    expect(result.items.approximated.filter(({ field }) => field.startsWith("rule:"))).toEqual([
+      { field: "rule:1", detail: TEXT_REASON },
+      { field: "rule:3", detail: TEXT_REASON },
+      { field: "rule:4", detail: TEXT_REASON },
+      { field: "rule:5", detail: TEXT_REASON },
+      { field: "rule:6", detail: TEXT_REASON },
+    ]);
+  });
+
+  it("writes the raw Claude Code values back when the policy is what they stand for", async () => {
+    await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          policy: {
+            mode: "ask",
+            rules: [
+              { effect: "allow", on: "files.write" },
+              { effect: "deny", on: "tool", tool: "Bash(rm:*)" },
+            ],
+          },
+          "x-claude-code": { permissionMode: "acceptEdits", disallowedTools: ["Bash(rm:*)"] },
+        },
+      }),
+      COPY,
+    );
+
+    const file = await written();
+    expect(file.permissionMode).toBe("acceptEdits");
+    expect(file.disallowedTools).toEqual(["Bash(rm:*)"]);
+    expect(file.body).toBe("Answer briefly.\n");
+  });
+
+  it("lets an edited policy win over stale raw values", async () => {
+    const result = await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          policy: { mode: "auto", rules: [{ effect: "deny", on: "tool", tool: "WebFetch" }] },
+          "x-claude-code": { permissionMode: "acceptEdits", disallowedTools: ["Bash(rm:*)"] },
+        },
+      }),
+      COPY,
+    );
+
+    const file = await written();
+    expect(file.permissionMode).toBe("auto");
+    expect(file.disallowedTools).toEqual(["WebFetch"]);
+    expect(result.items.approximated.filter(({ field }) => field.startsWith("rule:"))).toEqual([]);
+  });
+
+  it("writes rules that came from settings.json as text, never into settings.json", async () => {
+    const settings = join(project, ".claude", "settings.json");
+    const before = JSON.stringify({ permissions: { deny: ["WebFetch"], allow: ["Bash(npm test)"] } });
+    await writeFile(settings, before);
+
+    const result = await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          policy: {
+            mode: "ask",
+            rules: [
+              { effect: "deny", on: "tool", tool: "WebFetch" },
+              { effect: "allow", on: "tool", tool: "Bash(npm test)" },
+            ],
+          },
+          "x-claude-code": {
+            permissionMode: "default",
+            settingsPermissions: { deny: ["WebFetch"], allow: ["Bash(npm test)"] },
+          },
+        },
+      }),
+      COPY,
+    );
+
+    const file = await written();
+    expect(file.permissionMode).toBe("default");
+    expect(file.disallowedTools).toBeUndefined();
+    expect(file.body).toContain("- Never use the tool `WebFetch`.");
+    expect(file.body).toContain("- The tool `Bash(npm test)` is allowed without asking.");
+    expect(result.items.approximated.filter(({ field }) => field.startsWith("rule:"))).toEqual([
+      { field: "rule:1", detail: TEXT_REASON },
+      { field: "rule:2", detail: TEXT_REASON },
+    ]);
+    expect(await readFile(settings, "utf8")).toBe(before);
+  });
+
+  it("replaces a Permissions section the instructions carry, and drops it without text rules", async () => {
+    const instructions = `Answer briefly.\n\n${SECTION_INTRO}- Never use the tool \`Old\`.\n\n## After\n\nMore.\n`;
+    await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        instructions,
+        manifest: { policy: { rules: [{ effect: "deny", on: "tool", tool: "WebFetch" }] } },
+      }),
+      COPY,
+    );
+    expect((await written()).body).toBe("Answer briefly.\n\n## After\n\nMore.\n");
+
+    await claudeCodeAdapter.write(ctx, bundleOf({ instructions }), REPLACE);
+    const plain = await written();
+    expect(plain.body).toBe("Answer briefly.\n\n## After\n\nMore.\n");
+    expect(plain.permissionMode).toBeUndefined();
+    expect(plain.disallowedTools).toBeUndefined();
+
+    await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        instructions,
+        manifest: { policy: { rules: [{ effect: "ask", on: "shell", pattern: "git push *" }] } },
+      }),
+      REPLACE,
+    );
+    const body = (await written()).body;
+    expect(body).toBe(
+      `Answer briefly.\n\n## After\n\nMore.\n\n${SECTION_INTRO}- Ask before running shell commands matching \`git push *\`.\n`,
+    );
+    expect(body.match(/## Permissions/g)).toHaveLength(1);
+  });
+
+  it("keeps the tools list and the capabilities item as before", async () => {
+    const result = await claudeCodeAdapter.write(
+      ctx,
+      bundleOf({
+        manifest: {
+          capabilities: ["shell"],
+          policy: { mode: "ask", rules: [] },
+          "x-claude-code": { tools: ["Read", "Bash"] },
+        },
+      }),
+      COPY,
+    );
+    const file = await written();
+    expect(file.tools).toEqual(["Read", "Bash"]);
+    expect(file.permissionMode).toBe("default");
+    expect(result.items.approximated.some(({ field }) => field === "capabilities")).toBe(false);
+  });
+
+  it("round trips an agent read from Claude Code with its mode and disallowedTools intact", async () => {
+    await writeFile(
+      agentFile(project, "guard"),
+      [
+        "---",
+        "name: guard",
+        "description: Guards the repo.",
+        "tools: Read, Bash",
+        "disallowedTools: WebFetch, Bash(rm:*)",
+        "permissionMode: acceptEdits",
+        "---",
+        "",
+        "Guard.",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(project, ".claude", "settings.json"),
+      JSON.stringify({ permissions: { ask: ["Bash(git push *)"] } }),
+    );
+    const source: Ctx = { ...ctx, sourceDir: project };
+
+    const first = await claudeCodeAdapter.read(source, "guard");
+    const result = await claudeCodeAdapter.write(ctx, first.bundle, REPLACE);
+    const second = await claudeCodeAdapter.read(source, "guard");
+
+    const file = await written("guard");
+    expect(file.permissionMode).toBe("acceptEdits");
+    expect(file.disallowedTools).toEqual(["WebFetch", "Bash(rm:*)"]);
+    expect(file.tools).toEqual(["Read", "Bash"]);
+    expect(file.body).toContain("- Ask before using the tool `Bash(git push *)`.");
+    expect(result.items.approximated.filter(({ field }) => field.startsWith("rule:"))).toEqual([
+      { field: "rule:4", detail: TEXT_REASON },
+    ]);
+    expect(second.bundle.manifest.policy).toEqual(first.bundle.manifest.policy);
+    expect(second.bundle.manifest.policy).toEqual({
+      mode: "ask",
+      rules: [
+        { effect: "allow", on: "files.write" },
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+        { effect: "deny", on: "tool", tool: "Bash(rm:*)" },
+        { effect: "ask", on: "tool", tool: "Bash(git push *)" },
+      ],
+    });
+    expect(second.bundle.manifest["x-claude-code"]).toMatchObject({
+      permissionMode: "acceptEdits",
+      disallowedTools: ["WebFetch", "Bash(rm:*)"],
+    });
+    expect(first.bundle.instructions).toBe("Guard.\n");
+    expect(second.bundle.instructions.startsWith("Guard.\n\n## Permissions\n")).toBe(true);
+    expect(second.bundle.instructions.match(/## Permissions/g)).toHaveLength(1);
+  });
+
+  it("reports the text rules through the engine with the written-as-text prefix", async () => {
+    const folder = join(root, "agents", "guard");
+    await cp(ADA_DIR, folder, { recursive: true });
+    const manifestFile = join(folder, "jetpack.json");
+    const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+    manifest.policy = {
+      mode: "readOnly",
+      rules: [
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+        { effect: "ask", on: "shell", pattern: "git push *" },
+      ],
+    };
+    await writeFile(manifestFile, JSON.stringify(manifest, null, 2));
+
+    const report = await move({
+      from: folderAdapter,
+      to: claudeCodeAdapter,
+      agent: ".",
+      ctx: { ...ctx, sourceDir: folder, targetDir: project },
+      write: COPY,
+    });
+
+    expect(report.moved).toContainEqual({
+      field: "policy",
+      detail: "mode readOnly, 1 rule enforced by Claude Code",
+    });
+    expect(report.approximated).toContainEqual({
+      field: "rule:2",
+      detail: `written as text in AGENTS.md; ${TEXT_REASON}`,
+    });
+    const file = await written();
+    expect(file.permissionMode).toBe("plan");
+    expect(file.disallowedTools).toEqual(["WebFetch"]);
+    expect(file.body).toContain("- Ask before running shell commands matching `git push *`.");
+  });
+});

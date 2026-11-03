@@ -109,7 +109,7 @@ An app is found where it normally keeps its data. These variables move it; `--so
 A `.jetpack` file is a zip archive. Unzipped, it is a folder with a fixed layout that reuses the file names tools already share instead of inventing new ones:
 
 ```
-jetpack.json            manifest: schema version, id, name, title, model and runtime preferences, capabilities
+jetpack.json            manifest: schema version, id, name, title, model and runtime preferences, capabilities, permission rules
 AGENTS.md               how the agent works: its instructions (the AGENTS.md standard)
 SOUL.md                 who the agent is: persona and tone (optional; the OpenClaw and Hermes convention)
 skills/<name>/SKILL.md  skills in the Agent Skills format
@@ -123,6 +123,23 @@ avatar.png              optional, PNG, JPEG or WebP, up to 512 KB
 An unzipped .jetpack is a working agent folder for any AGENTS.md-aware tool. It works the other way round too: a folder without `jetpack.json` is a valid source, and the `folder` adapter makes up the manifest from what the folder holds.
 
 The manifest is described by a JSON Schema, [`schema/jetpack.schema.json`](schema/jetpack.schema.json), published as `https://openteleport.dev/schema/0.1/jetpack.json`. Its `id` is a ULID given on the first export and kept on every later one, so moving the same agent again updates it in place. `models` lists preferences in order, each with an optional `runtime` (such as `claude-code` or `codex`), and `capabilities` says what the agent needs (`browser`, `shell`, `filesystem`, `network`, `computerUse`, `scheduler`), not what it is granted. Fields only one app understands go under `x-<vendor>` keys, which other apps ignore.
+
+### Permission rules
+
+`policy` in the manifest carries what the agent may and may not do: a `mode` (`ask`, `auto` or `readOnly`) and `rules`, each an `effect` (`allow`, `deny`, `ask`) on a scope (`shell`, `files.read`, `files.write`, `network`, `browser`, `computerUse`, `scheduler`, or `tool` with the app's tool name) and an optional `pattern` carried as the source app wrote it (`git push *`, `./.env`, `domain:example.com`).
+
+```json
+"policy": {
+  "mode": "ask",
+  "rules": [
+    { "effect": "deny", "on": "files.write", "pattern": "./.env" },
+    { "effect": "ask", "on": "shell", "pattern": "git push *" },
+    { "effect": "deny", "on": "tool", "tool": "WebFetch" }
+  ]
+}
+```
+
+A target that enforces rules per agent gets them natively: Claude Code (`permissionMode` and `disallowedTools` of the subagent), OpenClaw (`tools.allow` and `tools.deny` of the agent entry, `sandbox.workspaceAccess`), Codex (`features.shell_tool` for a shell deny). What a target cannot enforce, and every rule for a target without per-agent rules (folder, Hermes, Letta, Gemini CLI, Cline, OpenBot, Grok Bot), is written at the end of `AGENTS.md` as a `## Permissions` section the model reads, and the report lists each such rule under *Approximated* with the reason. A move never edits an app's project or user settings, and never widens a permission. `inspect` shows the policy; the design is in `docs/superpowers/specs/2026-11-03-permission-rules-design.md`. OpenTeleport 0.4.6 and older refuse an archive whose manifest has `policy`; the field is written only when the agent has rules.
 
 ## Remote installs over SSH
 

@@ -104,6 +104,7 @@ Konsekwencja: katalog bez `jetpack.json` też jest poprawnym źródłem. Adapter
 - `models`: lista preferencji w kolejności, każda z opcjonalnym `runtime`, bo w OpenBocie agent nie "używa claude-opus", tylko "działa przez Claude Code na planie Claude, a po limicie przeskakuje na Codex". Np. `[{runtime:"claude-code", provider:"anthropic", model:"claude-opus-5-5"}, {runtime:"codex", provider:"openai", model:"gpt-5.5"}]`. Aplikacja docelowa wybiera pierwszy wpis, który obsługuje; brak `runtime` znaczy "dowolny".
 - `capabilities`: czego agent potrzebuje: `browser`, `shell`, `filesystem`, `network`, `computerUse`, `scheduler`. Deklaracja wymagań, nie uprawnienia; aplikacja docelowa decyduje, co przyznać.
 - `origin`: skąd wyeksportowano (aplikacja, wersja, data). Informacyjne.
+- `policy` (od 0.4.7): reguły uprawnień agenta: tryb (`ask`, `auto`, `readOnly`) i lista reguł (`effect`, zakres, wzorzec). Projekt w `docs/superpowers/specs/2026-11-03-permission-rules-design.md`: cel egzekwuje natywnie, co umie, resztę dostaje jako sekcję `## Permissions` w `AGENTS.md`, a raport mówi, która reguła gdzie trafiła.
 - `x-<vendor>`: przestrzeń na pola specyficzne dla vendora, które inni ignorują. Dzięki temu format pozostaje neutralny, a nic nie ginie.
 
 Zasady:

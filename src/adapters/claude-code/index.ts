@@ -61,6 +61,7 @@ export const claudeCodeAdapter: Adapter = {
     avatar: false,
     models: true,
     schedules: [],
+    policy: "native",
   },
   detect,
   list: listAgents,

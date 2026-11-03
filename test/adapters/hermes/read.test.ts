@@ -675,3 +675,107 @@ describe("hermesCacheIdentity", () => {
     await expect(hermesCacheIdentity(ctx, "../x")).rejects.toThrow(/invalid Hermes profile id/);
   });
 });
+
+describe("policy", () => {
+  const GLOBAL = "approvals and the command allowlist are global in Hermes, not per agent";
+  const withConfig = async (extra: string): Promise<void> => {
+    const config = await readFile(join(hermes, "config.yaml"), "utf8");
+    await writeFile(join(hermes, "config.yaml"), `${config}${extra}`);
+  };
+
+  it("reads nothing from the fixture's config.yaml", async () => {
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+
+    expect(bundle.manifest.policy).toBeUndefined();
+    expect(bundle.manifest["x-hermes"]).not.toHaveProperty("approvals");
+    expect(warnings).not.toContain(GLOBAL);
+  });
+
+  it("reads approvals.deny, command_allowlist and approvals.mode, with one global warning", async () => {
+    await withConfig(
+      [
+        "approvals:",
+        "  mode: manual",
+        "  deny:",
+        '    - "rm -rf *"',
+        '    - "git push --force*"',
+        "command_allowlist:",
+        "  - npm test",
+        "  - git status",
+        "",
+      ].join("\n"),
+    );
+
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+
+    expect(bundle.manifest.policy).toEqual({
+      mode: "ask",
+      rules: [
+        { effect: "deny", on: "shell", pattern: "rm -rf *" },
+        { effect: "deny", on: "shell", pattern: "git push --force*" },
+        { effect: "allow", on: "shell", pattern: "npm test" },
+        { effect: "allow", on: "shell", pattern: "git status" },
+      ],
+    });
+    expect(bundle.manifest["x-hermes"]).toMatchObject({
+      approvals: {
+        mode: "manual",
+        deny: ["rm -rf *", "git push --force*"],
+        command_allowlist: ["npm test", "git status"],
+      },
+    });
+    expect(warnings.filter((warning) => warning === GLOBAL)).toHaveLength(1);
+  });
+
+  it.each([
+    ["manual", "ask"],
+    ["smart", "ask"],
+    ["off", "auto"],
+  ])("reads approvals.mode %s as mode %s", async (hermesMode, mode) => {
+    await withConfig(`approvals:\n  mode: ${hermesMode}\n`);
+
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+
+    expect(bundle.manifest.policy).toEqual({ mode, rules: [] });
+    expect(bundle.manifest["x-hermes"]).toMatchObject({ approvals: { mode: hermesMode } });
+    expect(warnings).toContain(GLOBAL);
+  });
+
+  it("reads a mode it does not know as no mode, and the rules still", async () => {
+    await withConfig("approvals:\n  mode: someday\n  deny: ['sudo *']\n");
+
+    const { bundle } = await readHermesProfile(ctx, "default");
+
+    expect(bundle.manifest.policy).toEqual({
+      rules: [{ effect: "deny", on: "shell", pattern: "sudo *" }],
+    });
+  });
+
+  it("skips entries that are not text and reads no policy when nothing is left", async () => {
+    await withConfig("approvals:\n  deny: [1, '', null]\ncommand_allowlist: not-a-list\n");
+
+    const { bundle, warnings } = await readHermesProfile(ctx, "default");
+
+    expect(bundle.manifest.policy).toBeUndefined();
+    expect(warnings).not.toContain(GLOBAL);
+  });
+
+  it("comes back as a valid manifest through a folder", async () => {
+    await withConfig("approvals:\n  mode: off\n  deny: ['rm *']\n");
+    const out = join(root, "out");
+
+    await move({
+      from: hermesAdapter,
+      to: folderAdapter,
+      agent: "default",
+      ctx: { ...ctx, targetDir: out },
+      write: { enableRoutines: false, includeFiles: false, onConflict: "update" },
+    });
+
+    const manifest = parseManifest(JSON.parse(await readFile(join(out, "jetpack.json"), "utf8")));
+    expect(manifest.policy).toEqual({
+      mode: "auto",
+      rules: [{ effect: "deny", on: "shell", pattern: "rm *" }],
+    });
+  });
+});

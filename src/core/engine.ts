@@ -7,6 +7,7 @@ import { ensureId } from "./ids.js";
 import type { Item, MoveReport } from "./report.js";
 import type { Bundle } from "./schema.js";
 import { MAX_TEXT_ENTRY_BYTES } from "./paths.js";
+import { AS_TEXT, fitPolicy, policyMovedItem, summarizePolicy } from "./policy.js";
 import { type SecretFinding, scanSecrets, unscannedFiles } from "./secrets.js";
 
 /** The `source.app` of a report for an import: the agent came from a bundle, not from an app. */
@@ -262,6 +263,25 @@ function filesWarnings(bundle: Bundle): string[] {
   return warnings;
 }
 
+const RULE_OR_POLICY = /^(?:rule:[1-9]\d*|policy)$/;
+
+/**
+ * A native target's `rule:<n>` and `policy` items say why a rule went to text; the engine says
+ * that it did. An item that already says so is left alone.
+ */
+const asTextItems = (items: readonly Item[]): Item[] =>
+  items.map((item) =>
+    RULE_OR_POLICY.test(item.field) && !item.detail.includes(AS_TEXT)
+      ? {
+          ...item,
+          detail:
+            item.field === "policy"
+              ? item.detail.replace(/^(mode \S+) /, `$1 ${AS_TEXT}`)
+              : `${AS_TEXT}${item.detail}`,
+        }
+      : item,
+  );
+
 /**
  * The part of a move after the Bundle has its id: leave `files/` behind unless asked for, refuse
  * secrets in what is left, fit the Bundle to the target, write it and report. Read warnings come
@@ -281,8 +301,12 @@ async function deliver(opts: {
   const selection = selectMemory(opts.bundle, opts.includeMemory, write.onConflict);
   const carried = filesIf(selection.bundle, write.includeFiles);
   assertNoSecrets(carried);
-  const { bundle, skipped } = diffCapabilities(carried, to.capabilities, to.displayName);
+  const diffed = diffCapabilities(carried, to.capabilities, to.displayName);
+  const fitted = fitPolicy(diffed.bundle, to.capabilities.policy, to.displayName);
+  const { bundle } = fitted;
   const result = await to.write(targetSide(ctx), bundle, write);
+  const approximated = [...fitted.approximated, ...asTextItems(result.items.approximated)];
+  const policyMoved = policyMovedItem(bundle.manifest.policy, approximated, to.displayName);
   return {
     source: opts.source,
     target: {
@@ -292,9 +316,9 @@ async function deliver(opts: {
     outcome: result.outcome,
     ...(result.nextStep === undefined ? {} : { nextStep: result.nextStep }),
     // What the target handed back as skipped did not arrive, so it is not listed as moved.
-    moved: movedItems(bundle, result.items.skipped),
-    approximated: [...result.items.approximated],
-    skipped: [...selection.excluded, ...skipped, ...result.items.skipped],
+    moved: [...movedItems(bundle, result.items.skipped), ...(policyMoved === undefined ? [] : [policyMoved])],
+    approximated,
+    skipped: [...selection.excluded, ...diffed.skipped, ...fitted.skipped, ...result.items.skipped],
     warnings: [...opts.readWarnings, ...selection.warnings, ...filesWarnings(bundle), ...result.items.warnings],
   };
 }
@@ -350,7 +374,12 @@ export async function exportBundle(opts: {
     report: {
       source: { app: from.name, agent },
       outcome: "exported",
-      moved: movedItems(bundle),
+      moved: [
+        ...movedItems(bundle),
+        ...(bundle.manifest.policy === undefined
+          ? []
+          : [{ field: "policy", detail: summarizePolicy(bundle.manifest.policy) }]),
+      ],
       approximated: [],
       skipped: selection.excluded,
       warnings: [...read.warnings, ...selection.warnings, ...filesWarnings(bundle)],

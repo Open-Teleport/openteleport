@@ -821,3 +821,144 @@ describe("a move from Letta to Letta", () => {
     );
   });
 });
+
+describe("writeLettaAgent: the policy", () => {
+  const NO_COMMAND = "Letta Code has no CLI command for tool approval";
+  const PER_TOOL = "Letta sets approval per tool only";
+  const withPolicy = (policy: Bundle["manifest"]["policy"]): Bundle => {
+    const bundle = adaBundle();
+    return { ...bundle, manifest: { ...bundle.manifest, policy } };
+  };
+  const policy = {
+    mode: "ask" as const,
+    rules: [
+      { effect: "ask" as const, on: "tool" as const, tool: "web_search" },
+      { effect: "deny" as const, on: "shell" as const, pattern: "rm -rf *" },
+      { effect: "ask" as const, on: "tool" as const, tool: "run_code" },
+      { effect: "ask" as const, on: "tool" as const, tool: "web_search" },
+    ],
+  };
+
+  it("lists the tools to ask before as a marked comment block in both scripts", async () => {
+    await writeLettaAgent(ctx, withPolicy(policy), ENABLE);
+
+    for (const file of ["letta-commands.sh", "letta-commands.ps1"]) {
+      const script = lines(await text(join(ADA_DIR(), file)));
+      const start = script.indexOf(`# ${NO_COMMAND}; set these in Letta yourself once the agent exists:`);
+      expect(start).toBeGreaterThan(-1);
+      expect(script.slice(start + 1, start + 3)).toEqual([
+        "# Permissions to set in Letta: ask before web_search",
+        "# Permissions to set in Letta: ask before run_code",
+      ]);
+      expect(script[start + 3]).toBe("");
+      // After the restore, before the routines.
+      expect(start).toBeGreaterThan(script.findIndex((line) => line.includes("memory restore")));
+      expect(start).toBeLessThan(script.findIndex((line) => line.includes("cron add")));
+    }
+  });
+
+  it("writes no such block without ask rules on tools", async () => {
+    await writeLettaAgent(ctx, withPolicy({ rules: [{ effect: "deny", on: "shell" }] }), ENABLE);
+    expect(await text(join(ADA_DIR(), "letta-commands.sh"))).not.toContain("Permissions to set");
+  });
+
+  it("keeps a tool name on one line of the comment", async () => {
+    await writeLettaAgent(
+      ctx,
+      withPolicy({ rules: [{ effect: "ask", on: "tool", tool: "odd\ntool" }] }),
+      ENABLE,
+    );
+    expect(lines(await text(join(ADA_DIR(), "letta-commands.sh")))).toContain(
+      "# Permissions to set in Letta: ask before odd tool",
+    );
+  });
+
+  it("writes every rule and the mode as a Permissions section of instructions.md", async () => {
+    await writeLettaAgent(ctx, withPolicy(policy), ENABLE);
+
+    const instructions = await text(join(ADA_DIR(), "memory", "instructions.md"));
+    expect(instructions).toBe(
+      [
+        "Read the papers first.",
+        "Then summarise them.",
+        "",
+        "## Permissions",
+        "",
+        "These rules came with the agent. The app you are running in does not enforce them; follow",
+        "them yourself.",
+        "",
+        "- Mode: ask before any action that changes files or runs commands.",
+        "- Ask before using the tool `web_search`.",
+        "- Never run shell commands matching `rm -rf *`.",
+        "- Ask before using the tool `run_code`.",
+        "- Ask before using the tool `web_search`.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("writes instructions.md for the section alone when there are no instructions", async () => {
+    const bundle = { ...withPolicy({ mode: "readOnly", rules: [] }), instructions: "" };
+
+    const { items } = await writeLettaAgent(ctx, bundle, ENABLE);
+
+    expect(await text(join(ADA_DIR(), "memory", "instructions.md"))).toContain(
+      "- Mode: read only; do not change files or run commands.",
+    );
+    expect(items.approximated).toContainEqual({
+      field: "instructions",
+      detail:
+        "written to memory/instructions.md, which Letta loads on every turn like core memory; it is not the agent's system prompt",
+    });
+  });
+
+  it("reports each rule and the mode with its reason", async () => {
+    const { items } = await writeLettaAgent(ctx, withPolicy(policy), ENABLE);
+
+    expect(items.approximated.filter(({ field }) => /^(rule:|policy)/.test(field))).toEqual([
+      { field: "rule:1", detail: NO_COMMAND },
+      { field: "rule:2", detail: PER_TOOL },
+      { field: "rule:3", detail: NO_COMMAND },
+      { field: "rule:4", detail: NO_COMMAND },
+      { field: "policy", detail: `mode ask ${PER_TOOL}` },
+    ]);
+  });
+
+  it("does not change the bundle it is given", async () => {
+    const bundle = withPolicy(policy);
+    const before = structuredClone(bundle);
+
+    await writeLettaAgent(ctx, bundle, ENABLE);
+
+    expect(bundle).toEqual(before);
+  });
+
+  it("reports through the engine that nothing was enforced and everything went to text", async () => {
+    const source = join(root, "source");
+    await mkdir(source);
+    const { folderAdapter } = await import("../../../src/adapters/folder/index.js");
+    await folderAdapter.write({ ...ctx, targetDir: source }, withPolicy(policy), ENABLE);
+
+    const report = await move({
+      from: folderAdapter,
+      to: lettaAdapter,
+      agent: ".",
+      ctx: { ...ctx, sourceDir: source, targetDir: cwd },
+      write: ENABLE,
+    });
+
+    expect(report.moved.some(({ field }) => field === "policy")).toBe(false);
+    expect(report.approximated).toContainEqual({
+      field: "rule:1",
+      detail: `written as text in AGENTS.md; ${NO_COMMAND}`,
+    });
+    expect(report.approximated).toContainEqual({
+      field: "rule:2",
+      detail: `written as text in AGENTS.md; ${PER_TOOL}`,
+    });
+    // The engine adds "written as text in AGENTS.md; " to the mode item; only the parts are checked.
+    const mode = report.approximated.find(({ field }) => field === "policy");
+    expect(mode?.detail).toMatch(/^mode .*written as text in AGENTS\.md; .*Letta sets approval per tool only$/);
+    expect(mode?.detail).toContain("ask");
+  });
+});

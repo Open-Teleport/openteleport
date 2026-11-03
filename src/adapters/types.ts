@@ -5,6 +5,7 @@ import type { Bundle, Schedule } from "../core/schema.js";
 /**
  * What an app can hold. The engine empties every field marked `false` before `write` and lists
  * it as skipped; a routine whose `schedule.kind` is not in `schedules` is skipped on its own.
+ * `policy` says how the permission rules travel; see its comment.
  */
 export type AdapterCapabilities = {
   persona: boolean;
@@ -17,6 +18,14 @@ export type AdapterCapabilities = {
   avatar: boolean;
   models: boolean;
   schedules: Schedule["kind"][];
+  /**
+   * `native`: `write` enforces the manifest's `policy` in the app and hands back, as
+   * `approximated` items `rule:<n>` (n from 1) and `policy` (for the mode), what it could not,
+   * after writing those as a `## Permissions` section of the instructions itself
+   * (`withPolicySection` in `src/core/policy.ts`). `text`: the engine writes the whole policy
+   * as that section before `write`. `false`: the policy is dropped and listed as skipped.
+   */
+  policy: "native" | "text" | false;
 };
 
 /** An agent as `list` shows it. `id` is what `read` takes. */

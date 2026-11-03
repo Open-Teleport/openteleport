@@ -9,6 +9,8 @@ import {
   type Manifest,
   type ModelPref,
   type Note,
+  type Policy,
+  type PolicyMode,
   type Skill,
   ULID_PATTERN,
 } from "../../core/schema.js";
@@ -38,6 +40,11 @@ const MAX_TITLE_CHARS = 120;
 /** The note that carries `memories/MEMORY.md`. */
 const MEMORY_NOTE = "codex-memory";
 const NOT_FOUND_HINT = "Install Codex or pass --source-dir <CODEX_HOME>";
+/** Said whenever `policy.mode` is derived from `config.toml`, which every agent shares. */
+export const GLOBAL_POLICY_WARNING =
+  "approval policy and sandbox mode are global in Codex, not per agent";
+/** The `approval_policy` values that make Codex confirm before acting. */
+const ASKING_POLICIES = new Set(["on-request", "on-failure", "untrusted"]);
 
 /** What an agent file holds that a Bundle has a place for. Everything else is `rest`. */
 export type CodexAgentFile = {
@@ -273,6 +280,32 @@ async function readSettings(home: string, warnings: string[]): Promise<Settings>
   };
 }
 
+/**
+ * The posture `config.toml` sets: `sandbox_mode = "read-only"` is read only; else
+ * `approval_policy` `never` is auto and `on-request`, `on-failure` or `untrusted` is ask. A
+ * granular table or any other value gives no mode.
+ */
+export function policyModeOf(settings: {
+  approvalPolicy?: string;
+  sandboxMode?: string;
+}): PolicyMode | undefined {
+  if (settings.sandboxMode === "read-only") return "readOnly";
+  if (settings.approvalPolicy === "never") return "auto";
+  if (settings.approvalPolicy !== undefined && ASKING_POLICIES.has(settings.approvalPolicy)) {
+    return "ask";
+  }
+  return undefined;
+}
+
+/** The policy an agent file states: `features.shell_tool = false` denies the shell. */
+export function policyOfAgentFile(rest: Table): Policy | undefined {
+  const { features } = rest;
+  if (isRecord(features) && features.shell_tool === false) {
+    return { rules: [{ effect: "deny", on: "shell" }] };
+  }
+  return undefined;
+}
+
 function modelsOf(model: string | undefined, provider?: string): ModelPref[] {
   if (model === undefined) return [];
   return [{ ...(provider === undefined ? {} : { provider }), model }];
@@ -342,6 +375,8 @@ async function readGlobal(ctx: Ctx): Promise<{ bundle: Bundle; warnings: string[
     warnings.push("Codex memory is machine-generated; carried as a note");
   }
 
+  const mode = policyModeOf(settings);
+  if (mode !== undefined) warnings.push(GLOBAL_POLICY_WARNING);
   const manifest: Manifest = {
     schemaVersion: "0.1",
     id: "",
@@ -349,6 +384,7 @@ async function readGlobal(ctx: Ctx): Promise<{ bundle: Bundle; warnings: string[
     models: modelsOf(settings.model, settings.provider),
     capabilities: [],
     origin: { app: APP, exportedAt: new Date().toISOString() },
+    ...(mode === undefined ? {} : { policy: { mode, rules: [] } }),
     ...vendorOf({
       reasoningEffort: settings.reasoningEffort,
       approvalPolicy: settings.approvalPolicy,
@@ -360,8 +396,16 @@ async function readGlobal(ctx: Ctx): Promise<{ bundle: Bundle; warnings: string[
 
 /** The keys of an agent file that the Bundle has no place for, by name. */
 function ignoredSettings(rest: Table, skillsConfigKept: boolean): string[] {
-  const names = Object.keys(rest).filter((key) => key !== "skills");
-  const { skills } = rest;
+  const names = Object.keys(rest).filter((key) => key !== "skills" && key !== "features");
+  const { skills, features } = rest;
+  // `features.shell_tool` is the policy; any other feature has no place in a Bundle.
+  if (isRecord(features) && Object.hasOwn(features, "shell_tool")) {
+    for (const key of Object.keys(features)) {
+      if (key !== "shell_tool") names.push(`features.${key}`);
+    }
+  } else if (features !== undefined) {
+    names.push("features");
+  }
   if (isRecord(skills)) {
     for (const key of Object.keys(skills)) {
       if (key !== "config" || !skillsConfigKept) names.push(`skills.${key}`);
@@ -391,6 +435,7 @@ async function readCustom(
   if (ignored.length > 0) warnings.push(`agent file settings not exported: ${ignored.join(", ")}`);
 
   const title = agent.description === "" ? undefined : truncate(agent.description, MAX_TITLE_CHARS);
+  const policy = policyOfAgentFile(rest);
   const manifest: Manifest = {
     schemaVersion: "0.1",
     id: await recordedId(home, stem),
@@ -401,6 +446,7 @@ async function readCustom(
     models: modelsOf(agent.model),
     capabilities: [],
     origin: { app: APP, exportedAt: new Date().toISOString() },
+    ...(policy === undefined ? {} : { policy }),
     ...vendorOf({
       reasoningEffort: agent.model_reasoning_effort,
       nickname_candidates: agent.nickname_candidates,

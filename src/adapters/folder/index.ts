@@ -51,6 +51,7 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: true,
   models: true,
   schedules: ["cron", "every", "at"],
+  policy: "text",
 };
 
 // -- Disk helpers ---------------------------------------------------------------------------

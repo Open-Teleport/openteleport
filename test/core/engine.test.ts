@@ -390,6 +390,79 @@ describe("move", () => {
   });
 });
 
+describe("the policy", () => {
+  const policy = {
+    mode: "ask" as const,
+    rules: [
+      { effect: "deny" as const, on: "files.write" as const, pattern: "./.env" },
+      { effect: "deny" as const, on: "tool" as const, tool: "WebFetch" },
+    ],
+  };
+  const withPolicy = (): Bundle => {
+    const agent = fullAgent();
+    return { ...agent, manifest: { ...agent.manifest, policy } };
+  };
+
+  it("writes it as text for a text target and lists every rule as approximated", async () => {
+    const to = target({ policy: "text" });
+    const report = await move({ from: source(withPolicy()), to, agent: "ada", ctx, write: WRITE });
+    const written = writtenTo(to);
+    expect(written.instructions).toContain("## Permissions");
+    expect(written.instructions).toContain("- Never write files matching `./.env`.");
+    expect(written.manifest.policy).toEqual(policy);
+    const reason = "written as text in AGENTS.md; In-memory dst has no per-agent permission rules";
+    expect(report.approximated).toEqual([
+      { field: "policy", detail: `mode ask ${reason}` },
+      { field: "rule:1", detail: reason },
+      { field: "rule:2", detail: reason },
+    ]);
+    expect(report.moved.map(({ field }) => field)).not.toContain("policy");
+  });
+
+  it("hands it to a native target as is and counts what the target did not hand back", async () => {
+    const to = target({ policy: "native" });
+    const original = to.write.bind(to);
+    to.write = async (c, b, o) => {
+      const result = await original(c, b, o);
+      result.items.approximated.push({ field: "rule:2", detail: "OpenClaw has no WebFetch" });
+      result.items.approximated.push({ field: "policy", detail: "mode ask is global there" });
+      return result;
+    };
+    const report = await move({ from: source(withPolicy()), to, agent: "ada", ctx, write: WRITE });
+    expect(writtenTo(to).instructions).not.toContain("## Permissions");
+    expect(report.approximated).toEqual([
+      { field: "rule:2", detail: "written as text in AGENTS.md; OpenClaw has no WebFetch" },
+      { field: "policy", detail: "mode ask written as text in AGENTS.md; is global there" },
+    ]);
+    expect(report.moved).toContainEqual({
+      field: "policy",
+      detail: "1 rule enforced by In-memory dst",
+    });
+  });
+
+  it("drops it for a target without one and says so", async () => {
+    const to = target({ policy: false });
+    const report = await move({ from: source(withPolicy()), to, agent: "ada", ctx, write: WRITE });
+    expect(writtenTo(to).manifest.policy).toBeUndefined();
+    expect(report.skipped).toContainEqual({
+      field: "policy",
+      detail: "In-memory dst does not support policy",
+    });
+  });
+
+  it("adds nothing when the agent has none", async () => {
+    const to = target({ policy: "text" });
+    const report = await move({ from: source(), to, agent: "ada", ctx, write: WRITE });
+    expect(writtenTo(to).instructions).not.toContain("## Permissions");
+    expect(report.approximated).toEqual([]);
+  });
+
+  it("is listed by an export", async () => {
+    const { report } = await exportBundle({ from: source(withPolicy()), agent: "ada", ctx, includeFiles: false });
+    expect(report.moved).toContainEqual({ field: "policy", detail: "mode ask, 2 rules" });
+  });
+});
+
 describe("facts the target skipped", () => {
   const THREE = ["Prefers Polish.", "Reads on a phone.", "Works late."];
 

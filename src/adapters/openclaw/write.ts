@@ -18,6 +18,7 @@ import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { type AgentRow, type JobRow, OpenClawCli, ShimLineBreakError } from "./cli.js";
 import {
   DEFAULT_AGENT_ID,
+  type OpenClawAgentEntry,
   type OpenClawConfig,
   type OpenClawPaths,
   agentConfigPath,
@@ -27,6 +28,7 @@ import {
   openclawPaths,
   readOpenClawConfig,
 } from "./paths.js";
+import { planPolicy } from "./policy.js";
 
 const MAX_ID_CHARS = 32;
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
@@ -644,9 +646,11 @@ export async function writeOpenClawAgent(
   const target = await claimTarget(paths, cfg, cli, bundle, opts.onConflict, items.warnings);
   const existing = await existingJobs(cli, cfg, target, bundle.routines, items);
 
+  // What the agent already holds is merged on `update` only; `replace` and a new agent start over.
+  const entry = target.mode === "update" ? agentEntries(cfg)[target.id] : undefined;
   if (target.mode === "new") await cli.agentsAdd(target.id, target.workspace);
   try {
-    return await finishWrite(cli, paths, target, bundle, opts, existing, items);
+    return await finishWrite(cli, paths, target, bundle, opts, existing, entry, items);
   } catch (error) {
     if (target.mode !== "new") throw error;
     // The agent exists now; say where, so that it can be removed or the move retried (the
@@ -685,7 +689,10 @@ async function existingJobs(
   }
 }
 
-/** Everything after the agent exists: workspace, marker, identity, config, routines, Gateway. */
+/**
+ * Everything after the agent exists: workspace (with the policy's text section in AGENTS.md),
+ * marker, identity, config (model, runtime, tools, sandbox), routines, Gateway.
+ */
 async function finishWrite(
   cli: OpenClawCli,
   paths: OpenClawPaths,
@@ -693,9 +700,16 @@ async function finishWrite(
   bundle: Bundle,
   opts: WriteOpts,
   existing: JobRow[],
+  entry: OpenClawAgentEntry | undefined,
   items: Items,
 ): Promise<WriteResult> {
-  const identity = await writeWorkspace(target.workspace, bundle, items);
+  const policy = planPolicy(bundle.manifest, bundle.instructions, entry);
+  items.approximated.push(...policy.approximated);
+  const identity = await writeWorkspace(
+    target.workspace,
+    { ...bundle, instructions: policy.instructions },
+    items,
+  );
   const marker = { id: bundle.manifest.id, movedAt: new Date().toISOString() };
   const unmarked = await writeInside(target.workspace, MARKER_FILE, renderMarker(marker));
   if (unmarked !== undefined) {
@@ -710,7 +724,7 @@ async function finishWrite(
     ...(identity.avatar === undefined ? {} : { avatar: identity.avatar }),
     ...(identity.theme === undefined ? {} : { theme: identity.theme }),
   });
-  const config = modelConfig(bundle.manifest.models, items.approximated);
+  const config = [...modelConfig(bundle.manifest.models, items.approximated), ...policy.values];
   await setAgentConfig(cli, paths.configFile, target, config, items.warnings);
   await writeRoutines(cli, target, bundle.routines, existing, opts, items);
   if (await gatewayRunning(cli)) items.warnings.push(RESTART_WARNING);

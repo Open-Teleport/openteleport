@@ -10,6 +10,9 @@ import {
   type Manifest,
   type ModelPref,
   type Note,
+  type Policy,
+  type PolicyMode,
+  type PolicyRule,
   type Routine,
   type Skill,
   ULID_PATTERN,
@@ -42,6 +45,11 @@ const MANIFEST_FILE = ".bundled_manifest";
 const PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 /** How many names a warning lists before it says "and N more". */
 const LISTED_NAMES = 10;
+/** Said whenever anything of the policy was read: `config.yaml` is shared by every profile. */
+export const GLOBAL_POLICY_WARNING =
+  "approvals and the command allowlist are global in Hermes, not per agent";
+/** `approvals.mode` as a posture: `manual` and `smart` confirm, `off` does not. */
+const APPROVAL_MODES: Record<string, PolicyMode> = { manual: "ask", smart: "ask", off: "auto" };
 
 const MEBIBYTE = 1024 * 1024;
 
@@ -346,6 +354,37 @@ async function readRoutines(
   return { routines, extras };
 }
 
+// -- Permissions -------------------------------------------------------------------------------
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => nonBlank(item) !== undefined) : [];
+
+/**
+ * The permission posture of `config.yaml`: the globs of `approvals.deny` deny shell commands,
+ * the entries of `command_allowlist` allow them, and `approvals.mode` is the mode. The raw
+ * values come back as `raw` for `x-hermes.approvals`; both are `undefined` when the file says
+ * nothing about it. The values are global in Hermes, which the caller warns about.
+ */
+export function policyOfConfig(
+  config: Record<string, unknown>,
+): { policy: Policy; raw: Record<string, unknown> } | undefined {
+  const approvals = isRecord(config.approvals) ? config.approvals : {};
+  const rules: PolicyRule[] = [
+    ...strings(approvals.deny).map((pattern): PolicyRule => ({ effect: "deny", on: "shell", pattern })),
+    ...strings(config.command_allowlist).map(
+      (pattern): PolicyRule => ({ effect: "allow", on: "shell", pattern }),
+    ),
+  ];
+  const modeName = nonBlank(approvals.mode);
+  const mode = modeName === undefined ? undefined : APPROVAL_MODES[modeName];
+  if (mode === undefined && rules.length === 0) return undefined;
+  const raw: Record<string, unknown> = {
+    ...(isRecord(config.approvals) ? config.approvals : {}),
+    ...(config.command_allowlist === undefined ? {} : { command_allowlist: config.command_allowlist }),
+  };
+  return { policy: { ...(mode === undefined ? {} : { mode }), rules }, raw };
+}
+
 // -- The profile -------------------------------------------------------------------------------
 
 /** The model preference of `config.yaml`; none without a model name. */
@@ -395,11 +434,15 @@ export async function readHermesProfile(
   const meta = "meta" in profileFile ? profileFile.meta : {};
 
   let config: HermesConfig | undefined;
+  let permissions: ReturnType<typeof policyOfConfig>;
   try {
-    config = (await readConfig(dir))?.config;
+    const read = await readConfig(dir);
+    config = read?.config;
+    permissions = read === undefined ? undefined : policyOfConfig(read.raw);
   } catch (error) {
     warnings.push(`${(error as Error).message}; its model and time zone are not used`);
   }
+  if (permissions !== undefined) warnings.push(GLOBAL_POLICY_WARNING);
 
   const soul = await readText(join(dir, "SOUL.md"), "SOUL.md", warnings);
   let persona: string | undefined;
@@ -433,9 +476,11 @@ export async function readHermesProfile(
     models: modelsOf(config),
     capabilities: [],
     origin: { app: APP, exportedAt: new Date().toISOString() },
+    ...(permissions === undefined ? {} : { policy: permissions.policy }),
     "x-hermes": {
       profile: id,
       ...(config?.model?.base_url === undefined ? {} : { baseUrl: config.model.base_url }),
+      ...(permissions === undefined ? {} : { approvals: permissions.raw }),
       ...(routines.length === 0 ? {} : { timezone }),
       routines: extras,
     },

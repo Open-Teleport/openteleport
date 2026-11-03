@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { ModelPref } from "../core/schema.js";
+import { summarizePolicy } from "../core/policy.js";
+import type { ModelPref, Policy } from "../core/schema.js";
 import { oneLine } from "../core/text.js";
 import {
   type CommonOptions,
@@ -18,6 +19,8 @@ type Summary = {
   id: string | null;
   title: string | null;
   models: ModelPref[];
+  /** `null` when the manifest has no permission rules. */
+  policy: Policy | null;
   counts: { skills: number; routines: number; facts: number; notes: number; files: number };
   /** The size of the archive, or of every file in the folder. */
   bytes: number;
@@ -55,6 +58,7 @@ export async function inspectCommand(source: string, opts: CommonOptions): Promi
     id: manifest.id === "" ? null : manifest.id,
     title: manifest.title ?? null,
     models: manifest.models,
+    policy: manifest.policy ?? null,
     counts: {
       skills: bundle.skills.length,
       routines: bundle.routines.length,
@@ -78,6 +82,7 @@ export async function inspectCommand(source: string, opts: CommonOptions): Promi
       `id: ${summary.id ?? none}`,
       `title: ${summary.title === null ? none : oneLine(summary.title)}`,
       `models: ${models === "" ? none : oneLine(models)}`,
+      `policy: ${summary.policy === null ? none : summarizePolicy(summary.policy)}`,
       ...Object.entries(summary.counts).map(([what, count]) => `${what}: ${count}`),
       `size: ${summary.bytes} bytes`,
       ...summary.warnings.map((warning) => `warning: ${oneLine(warning)}`),

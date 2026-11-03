@@ -151,6 +151,7 @@ describe("the adapter", () => {
       avatar: false,
       models: true,
       schedules: [],
+      policy: "native",
     });
   });
 
@@ -1086,5 +1087,151 @@ describe("move through the CLI", () => {
     expect(result.stderr).toContain("Codex was not detected at ");
     expect(result.stderr).toContain("Install Codex or pass --source-dir <CODEX_HOME>");
     expect(await exists(join(box.home, ".codex"))).toBe(false);
+  });
+});
+
+describe("policy", () => {
+  const RULE_REASON = "a Codex agent file cannot set approval or sandbox rules";
+  const policyBundle = (policy: Bundle["manifest"]["policy"], instructions = "Answer briefly.\n"): Bundle =>
+    bundleOf({ manifest: { policy }, instructions });
+
+  it("writes deny shell as features.shell_tool = false and nothing to the text", async () => {
+    const { items } = await writeCodexAgent(ctx, policyBundle({ rules: [{ effect: "deny", on: "shell" }] }), UPDATE);
+
+    const file = await readAgentFile("ada");
+    expect(file.features).toEqual({ shell_tool: false });
+    expect(file.developer_instructions).toBe("Answer briefly.\n");
+    expect(items.approximated).toEqual([]);
+  });
+
+  it("keeps the other features of a file it writes over", async () => {
+    await writeCodexAgent(ctx, bundleOf({}), UPDATE);
+    const own = await readFile(agentPath("ada"), "utf8");
+    await writeFile(agentPath("ada"), `${own}\n[features]\nmemories = true\n`);
+
+    await writeCodexAgent(ctx, policyBundle({ rules: [{ effect: "deny", on: "shell" }] }), UPDATE);
+
+    expect((await readAgentFile("ada")).features).toEqual({ memories: true, shell_tool: false });
+  });
+
+  it("writes every other rule, and the mode, as a Permissions section and reports each", async () => {
+    const bundle = policyBundle({
+      mode: "ask",
+      rules: [
+        { effect: "deny", on: "shell", pattern: "rm -rf *" },
+        { effect: "deny", on: "shell" },
+        { effect: "ask", on: "files.write", pattern: "./.env" },
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+      ],
+    });
+
+    const { items } = await writeCodexAgent(ctx, bundle, UPDATE);
+
+    const file = await readAgentFile("ada");
+    expect(file.features).toEqual({ shell_tool: false });
+    expect(file.developer_instructions).toBe(
+      [
+        "Answer briefly.",
+        "",
+        "## Permissions",
+        "",
+        "These rules came with the agent. The app you are running in does not enforce them; follow",
+        "them yourself.",
+        "",
+        "- Mode: ask before any action that changes files or runs commands.",
+        "- Never run shell commands matching `rm -rf *`.",
+        "- Ask before writing files matching `./.env`.",
+        "- Never use the tool `WebFetch`.",
+        "",
+      ].join("\n"),
+    );
+    expect(items.approximated).toEqual([
+      { field: "rule:1", detail: RULE_REASON },
+      { field: "rule:3", detail: RULE_REASON },
+      { field: "rule:4", detail: RULE_REASON },
+      { field: "policy", detail: "mode ask is global in Codex" },
+    ]);
+  });
+
+  it("puts the section before the Facts section and after the persona", async () => {
+    const bundle = bundleOf({
+      manifest: { policy: { mode: "readOnly", rules: [] } },
+      persona: "Calm.",
+      instructions: "Read first.",
+      facts: ["Likes tea."],
+    });
+
+    const { items } = await writeCodexAgent(ctx, bundle, UPDATE);
+
+    const text = (await readAgentFile("ada")).developer_instructions as string;
+    expect(text.indexOf("# Persona")).toBeLessThan(text.indexOf("## Permissions"));
+    expect(text.indexOf("## Permissions")).toBeLessThan(text.indexOf("# Facts"));
+    expect(text).toContain("- Mode: read only; do not change files or run commands.");
+    expect(items.approximated).toContainEqual({ field: "policy", detail: "mode readOnly is global in Codex" });
+    expect((await readAgentFile("ada")).features).toBeUndefined();
+  });
+
+  it("replaces a Permissions section the instructions already have", async () => {
+    const stale = "Answer briefly.\n\n## Permissions\n\nOld.\n\n- Never use the network.\n";
+    const bundle = policyBundle({ rules: [{ effect: "deny", on: "network" }] }, stale);
+
+    await writeCodexAgent(ctx, bundle, UPDATE);
+
+    const text = (await readAgentFile("ada")).developer_instructions as string;
+    expect(text.match(/## Permissions/g)).toHaveLength(1);
+    expect(text).not.toContain("Old.");
+    expect(text).toContain("- Never use the network.");
+  });
+
+  it("leaves the instructions alone without a policy, section included", async () => {
+    const kept = "Answer briefly.\n\n## Permissions\n\nKept as it was.\n";
+    await writeCodexAgent(ctx, bundleOf({ instructions: kept }), UPDATE);
+
+    expect((await readAgentFile("ada")).developer_instructions).toBe(kept);
+  });
+
+  it("round trips deny shell through an agent file", async () => {
+    await writeCodexAgent(ctx, policyBundle({ rules: [{ effect: "deny", on: "shell" }] }), UPDATE);
+
+    const { bundle } = await readCodexAgent({ ...ctx, sourceDir: codex }, "ada");
+
+    expect(bundle.manifest.policy).toEqual({ rules: [{ effect: "deny", on: "shell" }] });
+  });
+
+  it("reports through the engine what was enforced and what went to text", async () => {
+    const source = join(root, "source");
+    await folderAdapter.write(
+      { ...ctx, targetDir: source },
+      policyBundle({
+        mode: "auto",
+        rules: [
+          { effect: "deny", on: "shell" },
+          { effect: "allow", on: "shell", pattern: "npm test" },
+        ],
+      }),
+      UPDATE,
+    );
+
+    const report = await move({
+      from: folderAdapter,
+      to: codexAdapter,
+      agent: ".",
+      ctx: { ...ctx, sourceDir: source, targetDir: codex },
+      write: UPDATE,
+    });
+
+    expect(report.moved).toContainEqual({ field: "policy", detail: "1 rule enforced by Codex" });
+    expect(report.approximated).toContainEqual({
+      field: "rule:2",
+      detail: `written as text in AGENTS.md; ${RULE_REASON}`,
+    });
+    // The engine adds "written as text in AGENTS.md; " to the mode item; only the parts are checked.
+    const mode = report.approximated.find(({ field }) => field === "policy");
+    expect(mode?.detail).toMatch(/^mode .*written as text in AGENTS\.md; .*is global in Codex$/);
+    expect(mode?.detail).toContain("auto");
+    expect((await readAgentFile("ada")).features).toEqual({ shell_tool: false });
+    expect((await readAgentFile("ada")).developer_instructions).toContain(
+      "- Shell commands matching `npm test` are allowed without asking.",
+    );
   });
 });
