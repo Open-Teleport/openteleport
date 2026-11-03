@@ -56,6 +56,7 @@ describe("inspect", () => {
         { runtime: "claude-code", provider: "anthropic", model: "claude-opus-5-5" },
         { runtime: "codex", provider: "openai", model: "gpt-5.5" },
       ],
+      policy: null,
       counts: { skills: 1, routines: 1, facts: 2, notes: 2, files: 0 },
       bytes: (await stat(file)).size,
       warnings: [],
@@ -68,6 +69,20 @@ describe("inspect", () => {
     expect(result.stdout).toContain(
       "models: claude-code/anthropic/claude-opus-5-5, codex/openai/gpt-5.5",
     );
+  });
+
+  it("summarizes the policy, and says none without one", async () => {
+    expect((await run(box, ["inspect", ADA_DIR])).stdout).toContain("policy: (none)");
+    const bundle = await readBundle(ADA_DIR);
+    const policy = {
+      mode: "ask" as const,
+      rules: [{ effect: "deny" as const, on: "tool" as const, tool: "WebFetch" }],
+    };
+    const file = join(box.root, "ruled.jetpack");
+    await writeBundle({ ...bundle, manifest: { ...bundle.manifest, policy } }, file);
+    const result = await run(box, ["inspect", file]);
+    expect(result.stdout).toContain("policy: mode ask, 1 rule");
+    expect(json(await run(box, ["inspect", file, "--json"])).policy).toEqual(policy);
   });
 
   it("exits 2 for a path that does not exist", async () => {

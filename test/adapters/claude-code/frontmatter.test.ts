@@ -75,7 +75,22 @@ describe("parseAgentFile", () => {
 
   it("names the frontmatter keys it does not map", () => {
     const parsed = parseAgentFile("---\nname: a\ncolor: green\npermissionMode: plan\n---\n");
-    expect(parsed.ignored).toEqual(["color", "permissionMode"]);
+    expect(parsed.ignored).toEqual(["color"]);
+  });
+
+  it("reads permissionMode as text and disallowedTools as a list or a comma string", () => {
+    const list = parseAgentFile(
+      "---\nname: a\npermissionMode: acceptEdits\ndisallowedTools:\n  - WebFetch\n  - Bash(rm:*)\n---\n",
+    );
+    expect(list.permissionMode).toBe("acceptEdits");
+    expect(list.disallowedTools).toEqual(["WebFetch", "Bash(rm:*)"]);
+    expect(list.ignored).toEqual([]);
+
+    const string = parseAgentFile(
+      "---\nname: a\ndisallowedTools: WebFetch, Bash(git add:*, git commit:*)\n---\n",
+    );
+    expect(string.disallowedTools).toEqual(["WebFetch", "Bash(git add:*, git commit:*)"]);
+    expect(string.permissionMode).toBeUndefined();
   });
 
   it("turns scalar values into text", () => {
@@ -132,6 +147,43 @@ describe("renderAgentFile", () => {
     expect(parsed.description).toBe(description);
     expect(parsed.model).toBe(long);
     expect(parsed.body).toBe("Fix it.\n");
+  });
+
+  it("writes disallowedTools after tools and permissionMode after model, and reads them back", () => {
+    const text = renderAgentFile({
+      name: "guard",
+      description: "Guards.",
+      tools: ["Read"],
+      disallowedTools: ["WebFetch", "Bash(rm:*)"],
+      model: "sonnet",
+      permissionMode: "plan",
+      body: "Guard.\n",
+    });
+    expect(text).toBe(
+      [
+        "---",
+        "name: guard",
+        "description: Guards.",
+        "tools: Read",
+        "disallowedTools: WebFetch, Bash(rm:*)",
+        "model: sonnet",
+        "permissionMode: plan",
+        "---",
+        "",
+        "Guard.",
+        "",
+      ].join("\n"),
+    );
+    expect(parseAgentFile(text)).toMatchObject({
+      disallowedTools: ["WebFetch", "Bash(rm:*)"],
+      permissionMode: "plan",
+    });
+  });
+
+  it("leaves out an empty disallowedTools list", () => {
+    expect(renderAgentFile({ name: "a", description: "b", disallowedTools: [], body: "" })).toBe(
+      "---\nname: a\ndescription: b\n---\n",
+    );
   });
 
   it("writes an empty body as frontmatter alone", () => {

@@ -1,5 +1,6 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { renderPolicySection, withPolicySection } from "../../core/policy.js";
 import type { Item } from "../../core/report.js";
 import type { Bundle, Manifest } from "../../core/schema.js";
 import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
@@ -10,6 +11,7 @@ import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudeMemoryDir, claudePaths } from "./paths.js";
+import { type ClaudePolicySource, fitClaudePolicy } from "./policy.js";
 
 const MAX_DESCRIPTION_CHARS = 120;
 const MEMORY_FILE = "MEMORY.md";
@@ -19,6 +21,9 @@ const MEMORY_FILE = "MEMORY.md";
  * memory, and the agent file itself stays as Claude Code writes it.
  */
 const IDS_FILE = "openteleport-ids.json";
+/** Why a rule went to text; the engine prefixes "written as text in AGENTS.md; " itself. */
+const TEXT_RULE_REASON =
+  "Claude Code takes pattern rules only in settings files, which a move does not edit";
 
 type Items = WriteResult["items"];
 
@@ -42,13 +47,63 @@ function firstSentence(instructions: string): string {
   return /^.*?[.!?](?=\s|$)/.exec(prose)?.[0] ?? prose;
 }
 
+function vendorOf(manifest: Manifest): Record<string, unknown> {
+  const vendor = manifest["x-claude-code"];
+  return typeof vendor === "object" && vendor !== null ? (vendor as Record<string, unknown>) : {};
+}
+
+const stringList = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? [...value]
+    : undefined;
+
 /** `x-claude-code.tools` when it is a non-empty list of names. */
 function toolsOf(manifest: Manifest): string[] | undefined {
-  const vendor = manifest["x-claude-code"];
-  if (typeof vendor !== "object" || vendor === null) return undefined;
-  const { tools } = vendor as { tools?: unknown };
-  if (!Array.isArray(tools) || tools.length === 0) return undefined;
-  return tools.every((tool) => typeof tool === "string") ? [...tools] : undefined;
+  const tools = stringList(vendorOf(manifest).tools);
+  return tools === undefined || tools.length === 0 ? undefined : tools;
+}
+
+/** What `readAgent` kept of Claude Code's own permission values; anything of the wrong type is left out. */
+function rawPolicyOf(manifest: Manifest): ClaudePolicySource {
+  const { permissionMode, disallowedTools, settingsPermissions } = vendorOf(manifest);
+  const raw: ClaudePolicySource = {};
+  if (typeof permissionMode === "string") raw.permissionMode = permissionMode;
+  const disallowed = stringList(disallowedTools);
+  if (disallowed !== undefined) raw.disallowedTools = disallowed;
+  if (typeof settingsPermissions === "object" && settingsPermissions !== null) {
+    const lists = settingsPermissions as Record<string, unknown>;
+    raw.settingsPermissions = {};
+    for (const effect of ["allow", "ask", "deny"] as const) {
+      const list = stringList(lists[effect]);
+      if (list !== undefined) raw.settingsPermissions[effect] = list;
+    }
+  }
+  return raw;
+}
+
+/**
+ * The frontmatter permission fields for the manifest's `policy`, and the body with the rules
+ * Claude Code does not enforce from the agent file as a `## Permissions` section (an older
+ * section is replaced, or removed when nothing goes to text). Each rule written as text is one
+ * `approximated` item `rule:<n>`.
+ */
+function policyFields(
+  bundle: Bundle,
+  body: string,
+  items: Items,
+): { permissionMode?: string; disallowedTools?: string[]; body: string } {
+  const { policy } = bundle.manifest;
+  if (policy === undefined) return { body: withPolicySection(body, undefined) };
+  const fit = fitClaudePolicy(policy, rawPolicyOf(bundle.manifest));
+  const section = renderPolicySection(policy, { mode: false, rules: fit.textRules });
+  items.approximated.push(
+    ...fit.textRules.map((n) => ({ field: `rule:${n}`, detail: TEXT_RULE_REASON })),
+  );
+  return {
+    ...(fit.permissionMode === undefined ? {} : { permissionMode: fit.permissionMode }),
+    ...(fit.disallowedTools === undefined ? {} : { disallowedTools: fit.disallowedTools }),
+    body: withPolicySection(body, section),
+  };
 }
 
 /**
@@ -132,6 +187,11 @@ async function writeAgentFile(
     truncate(firstSentence(bundle.instructions), MAX_DESCRIPTION_CHARS) ||
     manifest.name;
 
+  const { body, ...permissions } = policyFields(
+    bundle,
+    mergeInstructions(bundle.persona, bundle.instructions),
+    items,
+  );
   const path = join(dir, `${slug}.md`);
   await mkdir(dir, { recursive: true });
   await writeFile(
@@ -141,7 +201,8 @@ async function writeAgentFile(
       description,
       ...(tools === undefined ? {} : { tools }),
       ...(model === undefined ? {} : { model }),
-      body: mergeInstructions(bundle.persona, bundle.instructions),
+      ...permissions,
+      body,
     }),
   );
   return { slug, path };

@@ -14,6 +14,7 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: false,
   models: true,
   schedules: ["cron", "every", "at"],
+  policy: "text",
 };
 
 const HINT = "Install Hermes Agent or pass --source-dir <HERMES_HOME>";

@@ -86,6 +86,7 @@ describe("the adapter", () => {
         avatar: true,
         models: false,
         schedules: ["cron", "every"],
+        policy: "text",
       },
     });
   });

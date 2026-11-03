@@ -16,6 +16,7 @@ import { readSkillFolders } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
 import { type ClaudePaths, claudeMemoryDir, claudePaths } from "./paths.js";
+import { type SettingsPermissions, policyFromClaude } from "./policy.js";
 import { idsFileOf, isNoteLink } from "./write.js";
 
 const APP = "claude-code";
@@ -23,6 +24,8 @@ const MAX_NAME_CHARS = 80;
 const MAX_TITLE_CHARS = 120;
 const USER_PREFIX = "user:";
 const MEMORY_FILE = "MEMORY.md";
+/** The project settings file whose `permissions` block is read as rules. */
+const SETTINGS_FILE = "settings.json";
 /** The note that carries the lines of `MEMORY.md` that are not facts. */
 import { MEMORY_PROSE_NOTE as PROSE_NOTE } from "../../core/memory.js";
 /** The note that carries the `MEMORY.md` bullets too long to be facts. */
@@ -195,6 +198,47 @@ async function recordedId(paths: ClaudePaths, location: AgentLocation): Promise<
   }
 }
 
+const stringList = (value: unknown): string[] | undefined =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry !== "")
+    : undefined;
+
+/**
+ * The `permissions.allow`, `ask` and `deny` string entries of `<project>/.claude/settings.json`,
+ * or `undefined` when the file is missing, is not JSON (with a warning) or has no such entries.
+ */
+async function readSettingsPermissions(
+  paths: ClaudePaths,
+  warnings: string[],
+): Promise<SettingsPermissions | undefined> {
+  const path = join(paths.projectDir, ".claude", SETTINGS_FILE);
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  let settings: unknown;
+  try {
+    settings = JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch {
+    warnings.push(`${path} is not valid JSON; its permissions were not read`);
+    return undefined;
+  }
+  if (typeof settings !== "object" || settings === null) return undefined;
+  const { permissions } = settings as { permissions?: unknown };
+  if (typeof permissions !== "object" || permissions === null) return undefined;
+  const { allow, ask, deny } = permissions as Record<string, unknown>;
+  const read: SettingsPermissions = {};
+  const allowList = stringList(allow);
+  if (allowList !== undefined) read.allow = allowList;
+  const askList = stringList(ask);
+  if (askList !== undefined) read.ask = askList;
+  const denyList = stringList(deny);
+  if (denyList !== undefined) read.deny = denyList;
+  return Object.keys(read).length === 0 ? undefined : read;
+}
+
 function modelsOf(model: string | undefined, warnings: string[]): ModelPref[] {
   if (model === undefined || model.toLowerCase() === "inherit") {
     warnings.push("model is inherited; not exported");
@@ -237,6 +281,15 @@ export async function readAgent(
   if (skills.length > 0) warnings.push("Claude Code skills are project-wide; all were exported");
   const { facts, notes } = await readMemory(await claudeMemoryDir(ctx, paths), warnings);
 
+  const settingsPermissions = await readSettingsPermissions(paths, warnings);
+  const { permissionMode, disallowedTools } = file;
+  const { policy, warnings: policyWarnings } = policyFromClaude({
+    permissionMode,
+    disallowedTools,
+    settingsPermissions,
+  });
+  warnings.push(...policyWarnings);
+
   const { description } = file;
   const title = description === undefined ? undefined : truncate(description, MAX_TITLE_CHARS);
   const manifest: Manifest = {
@@ -249,9 +302,13 @@ export async function readAgent(
     models,
     capabilities,
     origin: { app: APP, exportedAt: new Date().toISOString() },
+    ...(policy === undefined ? {} : { policy }),
     "x-claude-code": {
       tools: file.tools ?? [],
       ...(file.model === undefined ? {} : { model: file.model }),
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      ...(disallowedTools === undefined ? {} : { disallowedTools }),
+      ...(settingsPermissions === undefined ? {} : { settingsPermissions }),
       scope: location.scope,
     },
   };

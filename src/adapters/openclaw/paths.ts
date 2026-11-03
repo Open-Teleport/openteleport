@@ -22,6 +22,10 @@ export type OpenClawAgentEntry = {
   identity?: OpenClawIdentity;
   /** `{ type: "acp", acp: { agent: "codex" } }` runs the agent through an external harness. */
   runtime?: { type?: string; acp?: { agent?: string } };
+  /** Tool names, `group:<name>` or `*`; deny wins over allow. */
+  tools?: { allow?: unknown; deny?: unknown; profile?: unknown };
+  /** `workspaceAccess: "ro" | "none"` limits what the agent may do to its workspace. */
+  sandbox?: { workspaceAccess?: unknown };
 };
 
 /** The part of `openclaw.json` the adapter uses. */

@@ -32,6 +32,7 @@ import {
   openclawPaths,
   readOpenClawConfig,
 } from "./paths.js";
+import { policyOf, policyVendorOf } from "./policy.js";
 
 /** OpenClaw does not say what an agent may do, so every export claims the same. */
 const CAPABILITIES: readonly Capability[] = [
@@ -465,6 +466,10 @@ export async function readOpenClawAgent(
       ? undefined
       : clip(identity.theme, MAX_TITLE_CHARS, "title", clipped);
 
+  const policyVendor = policyVendorOf(entry);
+  const policy = policyOf(policyVendor.tools, policyVendor.workspaceAccess);
+  const vendor = { ...(identity === undefined ? {} : { identity }), ...policyVendor };
+
   const manifest: Manifest = {
     schemaVersion: "0.1",
     id: await markerId(workspace),
@@ -473,7 +478,8 @@ export async function readOpenClawAgent(
     models: modelsFor(entry),
     capabilities: [...CAPABILITIES],
     origin: { app: "openclaw", exportedAt: new Date().toISOString() },
-    ...(identity === undefined ? {} : { "x-openclaw": { identity } }),
+    ...(policy === undefined ? {} : { policy }),
+    ...(Object.keys(vendor).length === 0 ? {} : { "x-openclaw": vendor }),
   };
   const bundle: Bundle = {
     manifest,

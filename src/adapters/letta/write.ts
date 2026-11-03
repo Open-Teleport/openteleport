@@ -4,9 +4,10 @@
 // Imported instructions remain core memory; the native system prompt stays managed by Letta.
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
+import { renderPolicySection, withPolicySection } from "../../core/policy.js";
 import type { Item } from "../../core/report.js";
 import { describeSchedule } from "../../core/schedule.js";
-import type { Bundle, ModelPref, Routine } from "../../core/schema.js";
+import type { Bundle, ModelPref, Policy, Routine } from "../../core/schema.js";
 import { oneLine, slugify } from "../../core/text.js";
 import { isRecord, nonBlank } from "../../core/values.js";
 import { MARKER_FILE, writeMarker } from "../marker.js";
@@ -30,6 +31,12 @@ const RESTORE_WARNING =
 const GIT_WARNING =
   "The handoff script requires Git and creates a local memory snapshot before restoring it; " +
   "no remote or user Git identity is configured";
+/** Why an `ask` on a tool is a comment in the script rather than a command. */
+export const NO_APPROVAL_COMMAND = "Letta Code has no CLI command for tool approval";
+/** Why every other rule, and the mode, goes to text. */
+const PER_TOOL_ONLY = "Letta sets approval per tool only";
+/** How the script marks a tool to set to ask before in Letta. */
+const PERMISSION_MARK = "# Permissions to set in Letta: ask before ";
 
 type Items = WriteResult["items"];
 
@@ -82,6 +89,41 @@ function modelHandle(models: readonly ModelPref[], approximated: Item[]): string
       (others === 0 ? "" : `, and ${others} other preference${others === 1 ? "" : "s"} not used`),
   });
   return handle;
+}
+
+// -- Permissions ------------------------------------------------------------------------------
+
+/** The tools the policy says to ask before using, in rule order, each once. */
+export function toolsToAsk(policy: Policy | undefined): string[] {
+  const tools: string[] = [];
+  for (const rule of policy?.rules ?? []) {
+    const tool = rule.on === "tool" && rule.effect === "ask" ? nonBlank(rule.tool) : undefined;
+    if (tool !== undefined && !tools.includes(tool)) tools.push(tool);
+  }
+  return tools;
+}
+
+/**
+ * Fits the policy to Letta. Letta sets approval per tool, and Letta Code's CLI has no command
+ * for it, so an `ask` on a tool becomes a marked comment in the handoff script (see
+ * `renderCommands`) and, like every other rule and the mode, a line of the `## Permissions`
+ * section of the instructions; `items` lists each with its reason. Without a policy the
+ * instructions are left as they are.
+ */
+export function fitLettaPolicy(policy: Policy | undefined, instructions: string, items: Items): string {
+  if (policy === undefined) return instructions;
+  for (const [index, rule] of policy.rules.entries()) {
+    const comment = rule.on === "tool" && rule.effect === "ask";
+    items.approximated.push({
+      field: `rule:${index + 1}`,
+      detail: comment ? NO_APPROVAL_COMMAND : PER_TOOL_ONLY,
+    });
+  }
+  if (policy.mode !== undefined) {
+    items.approximated.push({ field: "policy", detail: `mode ${policy.mode} ${PER_TOOL_ONLY}` });
+  }
+  const every = policy.rules.map((_rule, index) => index + 1);
+  return withPolicySection(instructions, renderPolicySection(policy, { mode: true, rules: every }));
 }
 
 // -- The script -------------------------------------------------------------------------------
@@ -196,6 +238,14 @@ export function renderCommands(
       ...check("letta memory restore"),
     ],
   ];
+
+  const toAsk = toolsToAsk(manifest.policy);
+  if (toAsk.length > 0) {
+    sections.push([
+      `# ${NO_APPROVAL_COMMAND}; set these in Letta yourself once the agent exists:`,
+      ...toAsk.map((tool) => `${PERMISSION_MARK}${oneLine(tool)}`),
+    ]);
+  }
 
   const slugs = routineSlugs(bundle.routines);
   for (const [index, routine] of bundle.routines.entries()) {
@@ -347,8 +397,10 @@ export async function writeLettaAgent(
   const items: Items = { approximated: [], skipped: [], warnings: [] };
   const { manifest } = bundle;
 
-  // Everything that can be rendered is rendered before the disk is touched.
-  const memory = renderMemFs(bundle, items.skipped);
+  // Everything that can be rendered is rendered before the disk is touched. The rules Letta
+  // cannot hold are part of the instructions, so `memory/instructions.md` carries them.
+  const fitted = { ...bundle, instructions: fitLettaPolicy(manifest.policy, bundle.instructions, items) };
+  const memory = renderMemFs(fitted, items.skipped);
   const slugs = routineSlugs(bundle.routines);
   const base = resolve(ctx.cwd, ctx.targetDir ?? ".");
   const wanted = join(base, `${slugify(manifest.name, { fallback: "agent" })}${FOLDER_SUFFIX}`);
@@ -358,7 +410,7 @@ export async function writeLettaAgent(
   const sh = renderCommands(bundle, dir, "sh", opts.enableRoutines);
   const ps1 = renderCommands(bundle, dir, "ps1", opts.enableRoutines);
   modelHandle(manifest.models, items.approximated);
-  if (bundle.instructions.trim() !== "") {
+  if (fitted.instructions.trim() !== "") {
     items.approximated.push({
       field: "instructions",
       detail:

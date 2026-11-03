@@ -62,6 +62,54 @@ export const RoutineSchema = z.strictObject({
 });
 export type Routine = z.infer<typeof RoutineSchema>;
 
+export const PolicyModeSchema = z.enum(["ask", "auto", "readOnly"]);
+export type PolicyMode = z.infer<typeof PolicyModeSchema>;
+
+export const PolicyScopeSchema = z.enum([
+  "shell",
+  "files.read",
+  "files.write",
+  "network",
+  "browser",
+  "computerUse",
+  "scheduler",
+  "tool",
+]);
+export type PolicyScope = z.infer<typeof PolicyScopeSchema>;
+
+export const PolicyEffectSchema = z.enum(["allow", "deny", "ask"]);
+export type PolicyEffect = z.infer<typeof PolicyEffectSchema>;
+
+/**
+ * One permission rule. `on: "tool"` names the app's own tool in `tool`; `pattern` is the app's
+ * own matcher (a command prefix, a path, a domain), carried as the source wrote it.
+ */
+export const PolicyRuleSchema = z
+  .strictObject({
+    effect: PolicyEffectSchema,
+    on: PolicyScopeSchema,
+    tool: z.string().min(1).optional(),
+    pattern: z.string().min(1).optional(),
+  })
+  .refine((rule) => rule.on !== "tool" || rule.tool !== undefined, {
+    error: "A rule on a tool names the tool",
+  })
+  .refine((rule) => rule.on === "tool" || rule.tool === undefined, {
+    error: "Only a rule on a tool names a tool",
+  });
+export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
+
+/** The permission posture of an agent: an overall mode and rules, in order. Never empty. */
+export const PolicySchema = z
+  .strictObject({
+    mode: PolicyModeSchema.optional(),
+    rules: z.array(PolicyRuleSchema),
+  })
+  .refine((policy) => policy.mode !== undefined || policy.rules.length > 0, {
+    error: "A policy sets a mode or has at least one rule",
+  });
+export type Policy = z.infer<typeof PolicySchema>;
+
 const ManifestObject = z.object({
   schemaVersion: z.literal("0.1"),
   /** ULID, assigned on first export and kept on every later one. */
@@ -80,6 +128,8 @@ const ManifestObject = z.object({
     })
     .optional(),
   signature: z.null().optional(),
+  /** What the agent may and may not do; see docs/superpowers/specs/2026-11-03-permission-rules-design.md. */
+  policy: PolicySchema.optional(),
 });
 
 // Keys outside the known fields survive parsing only when they are `x-<vendor>`

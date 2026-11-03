@@ -77,6 +77,65 @@
     },
     "signature": {
       "type": "null"
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto",
+            "readOnly"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "effect": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny",
+                  "ask"
+                ]
+              },
+              "on": {
+                "type": "string",
+                "enum": [
+                  "shell",
+                  "files.read",
+                  "files.write",
+                  "network",
+                  "browser",
+                  "computerUse",
+                  "scheduler",
+                  "tool"
+                ]
+              },
+              "tool": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pattern": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "effect",
+              "on"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

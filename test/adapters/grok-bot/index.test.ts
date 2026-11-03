@@ -51,6 +51,7 @@ describe("grokBotAdapter", () => {
       avatar: false,
       models: false,
       schedules: ["cron", "every", "at"],
+      policy: "text",
     });
   });
 });
