@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-03
+
 ### Fixed
 
 - Folder: refuse tool-skill updates through linked `.agents` directories and stop before changing the export if a same-name mirror contains foreign or edited files. Stale edited mirrors are preserved with a warning; linked tool-skill roots are skipped on export.
@@ -195,3 +197,5 @@ First release.
 
 [0.4.3]: https://github.com/Open-Teleport/openteleport/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Open-Teleport/openteleport/compare/v0.4.1...v0.4.2
+
+[0.4.4]: https://github.com/Open-Teleport/openteleport/compare/v0.4.3...v0.4.4
