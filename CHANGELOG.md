@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-03
+
 ### Fixed
 
 - Grok Bot: clarify that Add to Memory takes pasted text and asks a Bot to save shared user memory across Bots; remove the misleading direct-file-import claim. Checked against the installed 0.78.1 UI code; live persistence and export remain unverified.

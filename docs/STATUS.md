@@ -62,7 +62,7 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 ## What is not verified yet
 
-Open verification issues include Grok Bot #17, Letta #18 and Codex roles #20 (labelled help wanted). The scoped Letta #18 local-backend checks are now complete; closure follows merge of the fixes below. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
+Open verification issues include Grok Bot #17 and Codex roles #20 (labelled help wanted). Letta #18 is closed by PR #47 after the scoped local-backend checks passed. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
 
 - OpenClaw versions other than 2026.5.28 (partial round trip and manual checks), 2026.10.8 (full round trip on Windows and Linux) and 2026.10.9 and 2026.10.10 (full Linux compatibility matrix, Gateway on/off).
 - Claude Code custom `autoMemoryDirectory` settings and remote-memory overrides remain outside the adapter's default/local memory resolution.

@@ -6,7 +6,7 @@ Status: Prepared, not posted. Publish after the patch reaches npm.
 
 Your agent's memory should survive the move.
 
-Tested OpenTeleport with real Letta Code: memory and skills went in, then came back intact. The handoff now preserves Git history too.
+Tested OpenTeleport with real Letta Code: memory and skills went in, then came back intact. The handoff now creates the Git snapshot Letta needs.
 
 Local backend verified. Open source.
 
