@@ -4,7 +4,9 @@ import { getAdapter } from "../adapters/registry.js";
 import type { Adapter, AgentRef, Ctx } from "../adapters/types.js";
 import { bundleToZip, writeBundle } from "../core/bundle.js";
 import { exportBundle } from "../core/engine.js";
-import { writeReportFile } from "../core/report.js";
+import { type MoveReport, writeReportFile } from "../core/report.js";
+import type { Bundle } from "../core/schema.js";
+import { bundleAsAdapter, fetchRemoteBundle, parseTarget, targetLabel } from "./remote.js";
 import {
   type CommonOptions,
   UsageError,
@@ -53,17 +55,30 @@ export const STDOUT_OUT = "-";
  * which is how a move over ssh fetches it.
  */
 export async function exportCommand(opts: ExportOptions): Promise<void> {
-  const from = getAdapter(opts.from ?? "folder");
+  const target = parseTarget(opts.from ?? "folder");
   const ctx = sideOf(buildCtx(opts), "source");
+  let from: Adapter;
   let agent: AgentRef;
-  if (opts.from === undefined && opts.agent === undefined) {
-    agent = await agentHere(from, ctx);
+  if (target.host !== undefined) {
+    // Fetched through ssh as a Bundle, then exported here as any local source would be.
+    getAdapter(target.adapter);
+    if (opts.agent === undefined) {
+      throw new UsageError("Missing --agent: a remote source cannot be browsed interactively");
+    }
+    const bundle = await fetchRemoteBundle(ctx, { ...target, host: target.host }, opts.agent, opts);
+    from = bundleAsAdapter(bundle, targetLabel(target));
+    agent = { id: opts.agent, name: bundle.manifest.name };
   } else {
-    await ensureDetected(from, ctx, "source");
-    agent = await resolveAgent(from, ctx, opts.agent, isInteractive(opts));
+    from = getAdapter(target.adapter);
+    if (opts.from === undefined && opts.agent === undefined) {
+      agent = await agentHere(from, ctx);
+    } else {
+      await ensureDetected(from, ctx, "source");
+      agent = await resolveAgent(from, ctx, opts.agent, isInteractive(opts));
+    }
   }
 
-  const { bundle, report } = await exportBundle({
+  const { bundle, report }: { bundle: Bundle; report: MoveReport } = await exportBundle({
     from,
     agent: agent.id,
     ctx,

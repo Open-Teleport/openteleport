@@ -494,7 +494,7 @@ export function conflictMode(opts: WriteFlags & CommonOptions): WriteOpts["onCon
 export async function confirmReplace(
   opts: WriteFlags,
   agentName: string,
-  target: Adapter,
+  target: Pick<Adapter, "displayName">,
 ): Promise<void> {
   if (opts.yes === true) return;
   const answer = await confirm({

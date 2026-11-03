@@ -2,9 +2,21 @@
 // OpenTeleport, pinned to this version, on the host through plain `ssh`, with a `.jetpack`
 // streamed over stdin (to a remote target) or stdout (from a remote source). The design is
 // `docs/superpowers/specs/2026-11-03-ssh-transport-design.md`.
-import type { Ctx } from "../adapters/types.js";
+import type { Adapter, Ctx } from "../adapters/types.js";
+import { bundleToZip, readBundleBytes } from "../core/bundle.js";
+import { exportBundle } from "../core/engine.js";
+import type { MoveReport } from "../core/report.js";
+import type { Bundle } from "../core/schema.js";
 import { VERSION } from "../version.js";
-import { NotDetectedError, RemoteError, UsageError } from "./shared.js";
+import {
+  type CommonOptions,
+  NotDetectedError,
+  RemoteError,
+  UsageError,
+  type WriteFlags,
+  messageOf,
+} from "./shared.js";
+import type { WriteOpts } from "../adapters/types.js";
 
 /** What `--from` or `--to` names: an adapter, on this machine or on an ssh host. */
 export type Target = { adapter: string; host?: string };
@@ -145,4 +157,156 @@ export async function runRemoteJson<T>(
         "A shell profile that prints on login breaks the transport; silence it for non-interactive shells.",
     );
   }
+}
+
+// -- The two directions ---------------------------------------------------------------------
+
+const EVERYTHING: Adapter["capabilities"] = {
+  persona: true,
+  instructions: true,
+  skills: true,
+  routines: true,
+  facts: true,
+  notes: true,
+  files: true,
+  avatar: true,
+  models: true,
+  // Capabilities describe a target; this adapter is only ever a source.
+  policy: "native",
+  schedules: ["cron", "every", "at"],
+};
+
+/**
+ * A Bundle that arrived from `label` (a remote host, or a file on its way to one), as the source
+ * adapter of a move or an export: `read` hands it over, so the engine gives it its id, applies
+ * the memory selection, scans it for secrets and reports on it as on any other source.
+ */
+export function bundleAsAdapter(bundle: Bundle, label: string): Adapter {
+  const absent = async () => {
+    throw new Error(`${label} is not an app`);
+  };
+  return {
+    name: label,
+    displayName: label,
+    capabilities: EVERYTHING,
+    detect: async () => ({ found: true }),
+    list: async () => [{ id: bundle.manifest.name, name: bundle.manifest.name }],
+    read: async () => ({ bundle, warnings: [] }),
+    write: absent,
+  };
+}
+
+/** The read flags of `export` and `move`, as the remote `export` takes them. */
+export function readFlagArgs(opts: { includeFiles?: boolean; memory?: boolean }): string[] {
+  return [
+    ...(opts.includeFiles === true ? ["--include-files"] : []),
+    ...(opts.memory === false ? ["--no-memory"] : []),
+  ];
+}
+
+/** The write flags of `import` and `move`, as the remote `import` takes them. */
+export function writeFlagArgs(opts: WriteFlags, onConflict: WriteOpts["onConflict"]): string[] {
+  return [
+    ...(onConflict === "copy" ? ["--copy"] : []),
+    // Confirmed on this side, before ssh; the remote has no terminal to ask on.
+    ...(onConflict === "replace" ? ["--replace", "--yes"] : []),
+    ...(opts.enableRoutines === true ? ["--enable-routines"] : []),
+    ...readFlagArgs(opts),
+  ];
+}
+
+/** Whether what the remote printed is shaped like a MoveReport. */
+function isMoveReport(value: unknown): value is MoveReport {
+  const report = value as Partial<MoveReport> | null;
+  return (
+    typeof report === "object" &&
+    report !== null &&
+    typeof report.outcome === "string" &&
+    Array.isArray(report.moved) &&
+    Array.isArray(report.approximated) &&
+    Array.isArray(report.skipped) &&
+    Array.isArray(report.warnings)
+  );
+}
+
+/**
+ * Fetches `agent` from `source.adapter` on `source.host`: the remote `export --out -`, its
+ * archive read with the same checks as a `.jetpack` file. The Bundle comes back as it left the
+ * server, its id included; the caller feeds it to the engine as a source (`bundleAsAdapter`).
+ */
+export async function fetchRemoteBundle(
+  ctx: Ctx,
+  source: Target & { host: string },
+  agent: string,
+  opts: CommonOptions & { includeFiles?: boolean; memory?: boolean },
+): Promise<Bundle> {
+  const args = [
+    "export",
+    "--from",
+    source.adapter,
+    "--agent",
+    agent,
+    ...readFlagArgs(opts),
+    "--out",
+    "-",
+    // With `--json` a failure comes back on stdout as `{ error }`, which `runRemote` relays
+    // with its exit code; the report of a success goes to stderr and is only forwarded.
+    "--json",
+    "--quiet",
+  ];
+  const bytes = await runRemote(ctx, source.host, args, { quiet: opts.quiet === true });
+  try {
+    return readBundleBytes(bytes, `${targetLabel(source)}`);
+  } catch (error) {
+    throw new Error(
+      `Cannot read the .jetpack from ${source.host}: ${messageOf(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * Sends `bundle`, read locally from `sourceApp` as `agent`, into `target.adapter` on
+ * `target.host`: the engine prepares it here (id, memory selection, `files/` only with
+ * `--include-files`, the secret scan: a secret stops it before ssh starts), the archive goes
+ * over stdin to the remote `import -`, and the remote's report comes back relabelled with
+ * the local source and the remote target.
+ */
+export async function sendToRemote(
+  ctx: Ctx,
+  from: { adapter: Adapter; agent: string },
+  target: Target & { host: string },
+  opts: CommonOptions & WriteFlags,
+  onConflict: WriteOpts["onConflict"],
+): Promise<{ bundle: Bundle; report: MoveReport }> {
+  const { bundle, report: local } = await exportBundle({
+    from: from.adapter,
+    agent: from.agent,
+    ctx,
+    includeFiles: opts.includeFiles === true,
+    includeMemory: opts.memory !== false,
+  });
+  const args = [
+    "import",
+    "--to",
+    target.adapter,
+    ...writeFlagArgs(opts, onConflict),
+    "--json",
+    "--quiet",
+    "-",
+  ];
+  const remote = await runRemoteJson<unknown>(ctx, target.host, args, {
+    input: bundleToZip(bundle),
+    quiet: opts.quiet === true,
+  });
+  if (!isMoveReport(remote)) {
+    throw new Error(`openteleport on ${target.host} printed JSON that is not a move report`);
+  }
+  const report: MoveReport = {
+    ...remote,
+    source: { app: from.adapter.name, agent: from.agent },
+    target: { ...remote.target, app: targetLabel(target) },
+    warnings: [...new Set([...local.warnings, ...remote.warnings])],
+  };
+  return { bundle, report };
 }

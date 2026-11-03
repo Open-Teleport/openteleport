@@ -45,8 +45,8 @@ type Row = readonly [term: string, description: string];
 
 /** The flags `openteleport --help` lists, once for all the commands. */
 const BASIC_FLAGS: readonly Row[] = [
-  ["--from <app>", "the app an agent comes from"],
-  ["--to <app>", "the app an agent goes to"],
+  ["--from <app>", "the app an agent comes from (<app>@<host> for one over ssh)"],
+  ["--to <app>", "the app an agent goes to (<app>@<host> for one over ssh)"],
   ["--agent <id|name>", "which agent (a terminal asks if you leave it out)"],
   ["--out <file.jetpack>", "where export writes the file"],
   ["--include-files", "carry the agent's files/ too"],
@@ -72,6 +72,11 @@ const ENVIRONMENT: readonly Row[] = [
   ["OPENTELEPORT_EXTRA_ADAPTER", "a module whose default export adds an app"],
 ];
 
+/** The one thing to know about `<app>@<host>`; the details are in the README. */
+const REMOTE_NOTE =
+  "Remote: `--to openclaw@server` runs `npx openteleport` on the host over ssh (same version, " +
+  "settings from ~/.ssh/config).";
+
 /** A titled list of `term  description` lines, the descriptions in one column. */
 function section(title: string, rows: readonly Row[]): string {
   const width = Math.max(...rows.map(([term]) => term.length));
@@ -83,9 +88,9 @@ function section(title: string, rows: readonly Row[]): string {
 /** What `openteleport --help` and `--help-all` print below the list of commands. */
 function rootHelpFooter(showAll: boolean): string {
   if (showAll) {
-    return `\n${section("Flags", [...BASIC_FLAGS, ...ADVANCED_FLAGS])}\n\n${section("Environment", ENVIRONMENT)}`;
+    return `\n${section("Flags", [...BASIC_FLAGS, ...ADVANCED_FLAGS])}\n\n${section("Environment", ENVIRONMENT)}\n\n${REMOTE_NOTE}`;
   }
-  return `\n${section("Flags", BASIC_FLAGS)}\n\nMore: \`openteleport ${HELP_ALL}\` lists every command and flag.`;
+  return `\n${section("Flags", BASIC_FLAGS)}\n\n${REMOTE_NOTE}\n\nMore: \`openteleport ${HELP_ALL}\` lists every command and flag.`;
 }
 
 // -- The commands ---------------------------------------------------------------------------
@@ -128,8 +133,8 @@ function buildProgram(showAll: boolean): Command {
   const moving = program
     .command("move")
     .description("move an agent from one app to another")
-    .requiredOption("--from <adapter>", "the app to move from")
-    .requiredOption("--to <adapter>", "the app to move to")
+    .requiredOption("--from <adapter>", "the app to move from (<adapter>@<host> over ssh)")
+    .requiredOption("--to <adapter>", "the app to move to (<adapter>@<host> over ssh)")
     .option("--agent <id|name>", "the agent to move")
     .addOption(advanced("--keep <file.jetpack>", "also save the agent as a .jetpack file"));
   withOutput(withWriteFlags(withDirs(moving))).action(
@@ -151,7 +156,7 @@ function buildProgram(showAll: boolean): Command {
     .command("import")
     .description("write a .jetpack file or an agent folder into an app")
     .argument("<file.jetpack|folder>", "the bundle to import")
-    .option("--to <adapter>", "the app to import into (default: a folder named after the agent)");
+    .option("--to <adapter>", "the app to import into (default: a folder named after the agent; <adapter>@<host> over ssh)");
   withOutput(withWriteFlags(withDirs(importing))).action(
     act((source: string, opts: ImportOptions) => importCommand(source, opts)),
   );
@@ -159,7 +164,7 @@ function buildProgram(showAll: boolean): Command {
   const listing = program
     .command("list")
     .description("list the agents of an app")
-    .requiredOption("--from <adapter>", "the app to list");
+    .requiredOption("--from <adapter>", "the app to list (<adapter>@<host> over ssh)");
   withOutput(withDirs(listing)).action(act((opts: ListOptions) => listCommand(opts)));
 
   const inspecting = program
