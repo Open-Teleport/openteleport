@@ -248,13 +248,13 @@ describe("cronAddCommand", () => {
 
   it("is one line for sh that reads the prompt from its file", () => {
     expect(cronAddCommand(cron, file, "sh")).toBe(
-      `letta cron add --name "Morning review" --prompt "$(cat "${file}")" --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning review" --description "Morning review" --prompt "$(cat "${file}")" --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
     );
   });
 
   it("is one line for PowerShell that reads the prompt from its file", () => {
     expect(cronAddCommand(cron, file, "ps1")).toBe(
-      `letta cron add --name "Morning review" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${file}") --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
+      `letta cron add --name "Morning review" --description "Morning review" --prompt (Get-Content -Raw -Encoding UTF8 -LiteralPath "${file}") --cron "0 9 * * 1-5" --agent "$AGENT_ID"`,
     );
   });
 
@@ -290,6 +290,6 @@ describe("cronAddCommand", () => {
     expect(cronAddCommand(cron, file, "sh", "Check the $PRs")).toContain(
       '--name "Morning review" --description "Check the \\$PRs" --prompt',
     );
-    expect(cronAddCommand(cron, file, "sh", "  ")).not.toContain("--description");
+    expect(cronAddCommand(cron, file, "sh", "  ")).toContain('--description "Morning review"');
   });
 });

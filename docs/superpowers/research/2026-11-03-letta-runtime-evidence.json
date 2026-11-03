@@ -1,0 +1,25 @@
+{
+  "lettaVersion": "0.34.39",
+  "node": "v24.22.1",
+  "platform": "Linux container",
+  "network": "disconnected before probe",
+  "modelExecution": false,
+  "cliCreateJson": true,
+  "encodedAgentFilenames": true,
+  "plainRestoreAccepted": true,
+  "plainRestoreLosesGit": true,
+  "generatedBashScript": true,
+  "gitBackedMemoryRestore": true,
+  "nativeMemoryExport": true,
+  "agentListing": true,
+  "factsAndSkillsRoundTrip": true,
+  "cronDescriptionRequired": true,
+  "cronSchemaRead": true,
+  "routinesDefaultCommented": true,
+  "restoredRoutineDisabled": true,
+  "cronFireCount": 0,
+  "remaining": [
+    "PowerShell handoff not run against real Letta",
+    "Cloud backend and model-turn behavior not tested"
+  ]
+}

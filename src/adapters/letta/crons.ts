@@ -212,11 +212,11 @@ export function cronAddCommand(
       : schedule.kind === "every"
         ? `--cron ${quote(everyToCron(schedule.every))}`
         : `--at ${quote(schedule.at)}`;
-  const about = oneLine(description ?? "");
+  const about = oneLine(description ?? "").trim() || oneLine(routine.name);
   return [
     "letta cron add",
     `--name ${quote(oneLine(routine.name))}`,
-    ...(about === "" ? [] : [`--description ${quote(about)}`]),
+    `--description ${quote(about)}`,
     `--prompt ${prompt}`,
     when,
     AGENT_FLAG,

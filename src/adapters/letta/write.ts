@@ -1,8 +1,7 @@
 // Writes a Bundle for Letta Code as a folder to hand over: the agent's memory in MemFS layout, the
 // prompt of every routine, and a script that runs the three `letta` commands that load them. The
-// agent itself is not created here (see the spec, section 8.4): `letta agents create` takes no
-// system prompt, and writing the local backend's files would mean rebuilding an agent record
-// from code that is not documented, so the last step stays with the user.
+// agent itself is created by the handoff script, not by editing Letta backend records.
+// Imported instructions remain core memory; the native system prompt stays managed by Letta.
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Item } from "../../core/report.js";
@@ -28,9 +27,9 @@ const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 const RESTORE_WARNING =
   "`letta memory restore` replaces the agent's whole memory directory; the script runs it on " +
   "the new agent only";
-const UNVERIFIED_WARNING =
-  "Letta's `memory restore --from <dir>` is documented for backups made by `memory backup`; a " +
-  "plain memory folder is assumed to work (unverified)";
+const GIT_WARNING =
+  "The handoff script requires Git and creates a local memory snapshot before restoring it; " +
+  "no remote or user Git identity is configured";
 
 type Items = WriteResult["items"];
 
@@ -168,6 +167,15 @@ export function renderCommands(
           '$ErrorActionPreference = "Stop"',
         ],
     ...(shell === "ps1" ? [POWERSHELL_LETTA] : []),
+    [
+      "# A plain restore removes MemFS Git metadata. Snapshot the generated memory first.",
+      `git -C ${quote(`${root}/${MEMORY_DIR}`)} -c init.templateDir= init --initial-branch=main`,
+      ...check("git init"),
+      `git -C ${quote(`${root}/${MEMORY_DIR}`)} add -- .`,
+      ...check("git add"),
+      `git -C ${quote(`${root}/${MEMORY_DIR}`)} -c core.hooksPath=${quote(`${root}/.openteleport-no-hooks`)} -c commit.gpgSign=false -c user.name=OpenTeleport -c user.email=import@openteleport.invalid commit --allow-empty -m "Import OpenTeleport memory"`,
+      ...check("git commit"),
+    ],
     [create, ...check("letta agents create")],
     shell === "sh"
       ? [
@@ -214,10 +222,10 @@ function renderReadme(bundle: Bundle): string {
   const name = oneLine(bundle.manifest.name);
   return `# ${name} for Letta Code
 
-OpenTeleport wrote this folder. It is not an agent yet: Letta Code has no documented way to
-create an agent with a system prompt from files, so the last step is yours.
+OpenTeleport wrote this folder. Run the handoff script to create a new Letta agent and load
+its memory. Imported instructions become core memory; Letta keeps its native system prompt.
 
-1. Run \`${SH_FILE}\` (macOS, Linux, Git Bash) or \`${PS1_FILE}\` (Windows PowerShell).
+1. Install Git, then run \`${SH_FILE}\` (macOS, Linux, Git Bash) or \`${PS1_FILE}\` (Windows PowerShell).
 2. The script creates the agent with \`letta agents create\` and prints its id. Type the id at
    the prompt.
 3. The script loads \`${MEMORY_DIR}/\` into the new agent with \`letta memory restore\` and adds the
@@ -235,8 +243,9 @@ Good to know:
 
 - \`letta memory restore\` replaces the agent's whole memory directory. The script runs it on the
   new agent only.
-- Letta documents \`memory restore --from <dir>\` for backups made by \`memory backup\`. A plain
-  memory folder like this one is assumed to work; that has not been verified.
+- The script creates a local Git snapshot of \`memory/\` before restore. This preserves MemFS
+  history support; restoring plain files alone removes Git metadata in Letta Code 0.34.39.
+  No remote is added and your global Git identity is not changed.
 - Routines are commented out in the script when they were paused in the source, or when they
   moved disabled. Uncomment the ones you want.
 - The scripts name this folder by its full path. If you move it, move the agent again instead.
@@ -364,7 +373,7 @@ export async function writeLettaAgent(
       detail: "Letta has no field for it beside the title, which is used",
     });
   }
-  items.warnings.push(RESTORE_WARNING, UNVERIFIED_WARNING);
+  items.warnings.push(RESTORE_WARNING, GIT_WARNING);
 
   if (placement.owned) {
     for (const part of [MEMORY_DIR, ROUTINES_DIR]) {

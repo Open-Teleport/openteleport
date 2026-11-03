@@ -86,6 +86,29 @@ describe("paths", () => {
   });
 });
 
+describe("real local backend filenames", () => {
+  it("reads memory by the record ID when the JSON filename is base64url encoded", async () => {
+    const dir = await copyOfFixture();
+    const records = join(dir, "lc-local-backend", "agents");
+    const old = join(records, `${LOCAL}.json`);
+    await writeFile(join(records, `${Buffer.from(LOCAL).toString("base64url")}.json`), await readFile(old));
+    await rm(old);
+    const agents = await listLettaAgents(ctxFor(dir));
+    expect(agents[0]?.location).toBe(join(dir, "lc-local-backend", "memfs", LOCAL, "memory"));
+    const original = await readLettaAgent(ctxFor(FIXTURE), LOCAL);
+    const result = await readLettaAgent(ctxFor(dir), LOCAL);
+    expect(result.bundle.facts).toEqual(original.bundle.facts);
+    expect(result.bundle.skills).toEqual(original.bundle.skills);
+    expect(result.bundle.instructions).toBe(original.bundle.instructions);
+  });
+
+  it("rejects a record ID that would escape the memory directory", async () => {
+    const dir = await copyOfFixture();
+    await writeFile(join(dir, "lc-local-backend", "agents", `${LOCAL}.json`), JSON.stringify({ id: "../../outside" }));
+    await expect(readLettaAgent(ctxFor(dir), LOCAL)).rejects.toThrow(/unsafe agent id/);
+  });
+});
+
 describe("list", () => {
   it("lists the local agent, then the Cloud one", async () => {
     const agents = await listLettaAgents(ctxFor(FIXTURE));
