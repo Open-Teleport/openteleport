@@ -707,6 +707,271 @@ describe("writeOpenClawAgent: runtime", () => {
   });
 });
 
+describe("writeOpenClawAgent: policy", () => {
+  const TEXT_REASON = "OpenClaw sets ask and exec approvals globally, not per agent";
+  const configSets = (): string[][] =>
+    argsOf()
+      .filter((args) => args[0] === "config")
+      .map((args) => args.slice(2));
+  const toolsSet = (): unknown => {
+    const call = configSets().find(([path]) => path === "agents.entries.ada.tools");
+    return call === undefined ? undefined : JSON.parse(call[1]);
+  };
+  const sandboxSet = (): unknown => {
+    const call = configSets().find(([path]) => path === "agents.entries.ada.sandbox");
+    return call === undefined ? undefined : JSON.parse(call[1]);
+  };
+  const policyBundle = (policy: Bundle["manifest"]["policy"], manifest: Partial<Bundle["manifest"]> = {}) =>
+    ada({}, { policy, ...manifest });
+
+  it("writes tool rules to tools.allow and tools.deny as named, and scope denies as tools", async () => {
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({
+        rules: [
+          { effect: "allow", on: "tool", tool: "group:fs" },
+          { effect: "deny", on: "tool", tool: "*" },
+          { effect: "deny", on: "shell" },
+          { effect: "deny", on: "files.write" },
+          { effect: "deny", on: "network" },
+          { effect: "deny", on: "browser" },
+          { effect: "allow", on: "tool", tool: "Group:FS" },
+        ],
+      }),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({
+      allow: ["group:fs"],
+      deny: ["*", "exec", "write", "edit", "apply_patch", "group:web", "browser"],
+    });
+    expect(configSets().map(([path]) => path)).toEqual([
+      "agents.entries.ada.model",
+      "agents.entries.ada.tools",
+    ]);
+    expect(sandboxSet()).toBeUndefined();
+    expect(result.items.approximated).toEqual([]);
+    // Nothing went to text, so AGENTS.md carries no section.
+    expect(await text(join(stateDir, "workspace-ada", "AGENTS.md"))).toBe(ada().instructions);
+  });
+
+  it("sets the workspace read-only for mode readOnly, with the write denies", async () => {
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({ mode: "readOnly", rules: [] }),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({ deny: ["write", "edit", "apply_patch"] });
+    expect(sandboxSet()).toEqual({ workspaceAccess: "ro" });
+    expect(result.items.approximated).toEqual([]);
+  });
+
+  it("writes what it cannot enforce as text, naming each rule and the mode", async () => {
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({
+        mode: "ask",
+        rules: [
+          { effect: "deny", on: "shell", pattern: "rm -rf *" },
+          { effect: "ask", on: "tool", tool: "exec" },
+          { effect: "allow", on: "network" },
+          { effect: "deny", on: "files.read" },
+          { effect: "deny", on: "tool", tool: "browser" },
+        ],
+      }),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({ deny: ["browser"] });
+    expect(sandboxSet()).toBeUndefined();
+    expect(result.items.approximated).toEqual([
+      { field: "policy", detail: "mode ask is not a per-agent setting in OpenClaw" },
+      { field: "rule:1", detail: TEXT_REASON },
+      { field: "rule:2", detail: TEXT_REASON },
+      { field: "rule:3", detail: TEXT_REASON },
+      { field: "rule:4", detail: TEXT_REASON },
+    ]);
+    expect(await text(join(stateDir, "workspace-ada", "AGENTS.md"))).toBe(
+      `${ada().instructions}\n` +
+        "## Permissions\n\n" +
+        "These rules came with the agent. The app you are running in does not enforce them; follow\n" +
+        "them yourself.\n\n" +
+        "- Mode: ask before any action that changes files or runs commands.\n" +
+        "- Never run shell commands matching `rm -rf *`.\n" +
+        "- Ask before using the tool `exec`.\n" +
+        "- Network access is allowed without asking.\n" +
+        "- Never read files.\n",
+    );
+  });
+
+  it("replaces a stale section when nothing goes to text, and leaves one alone without a policy", async () => {
+    const stale = `${ada().instructions}\n## Permissions\n\nOld.\n\n- Never use the network.\n`;
+    await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({ rules: [{ effect: "deny", on: "shell" }] }, { name: "Ada" }),
+      { ...OPTS, onConflict: "copy" },
+    );
+    const copy = await writeOpenClawAgent(
+      makeCtx(),
+      ada({ instructions: stale }, { policy: { rules: [{ effect: "deny", on: "shell" }] } }),
+      { ...OPTS, onConflict: "copy" },
+    );
+    expect(await text(join(copy.artifactPath ?? "", "AGENTS.md"))).toBe(ada().instructions);
+
+    const kept = await writeOpenClawAgent(makeCtx(), ada({ instructions: stale }), {
+      ...OPTS,
+      onConflict: "copy",
+    });
+    expect(await text(join(kept.artifactPath ?? "", "AGENTS.md"))).toBe(stale);
+    expect(configSets().map(([path]) => path)).not.toContain(`agents.entries.${kept.targetAgentId}.tools`);
+  });
+
+  it("merges with what the agent already has on update, deduplicated, keeping the profile", async () => {
+    const ws = join(stateDir, "workspace-ada");
+    await writeTree(ws, { ".openteleport.json": MARKER() });
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      JSON.stringify({
+        agents: {
+          entries: {
+            ada: {
+              workspace: ws,
+              tools: { profile: "coding", allow: ["group:fs"], deny: ["EXEC"] },
+              sandbox: { mode: "all" },
+            },
+          },
+        },
+      }),
+    );
+    await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({
+        mode: "readOnly",
+        rules: [
+          { effect: "deny", on: "shell" },
+          { effect: "allow", on: "tool", tool: "browser" },
+        ],
+      }),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({
+      profile: "coding",
+      allow: ["group:fs", "browser"],
+      deny: ["EXEC", "write", "edit", "apply_patch"],
+    });
+    expect(sandboxSet()).toEqual({ mode: "all", workspaceAccess: "ro" });
+  });
+
+  it("writes the raw lists back when the policy is what read made of x-openclaw.tools", async () => {
+    const tools = { profile: "coding", allow: ["group:fs", "*"], deny: ["exec"] };
+    await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle(
+        {
+          mode: "readOnly",
+          rules: [
+            { effect: "deny", on: "tool", tool: "exec" },
+            { effect: "allow", on: "tool", tool: "group:fs" },
+            { effect: "allow", on: "tool", tool: "*" },
+          ],
+        },
+        { "x-openclaw": { identity: { emoji: "🔎" }, tools, workspaceAccess: "ro" } },
+      ),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual(tools);
+    expect(sandboxSet()).toEqual({ workspaceAccess: "ro" });
+  });
+
+  it("lets an edited policy win over stale x-openclaw.tools", async () => {
+    await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle(
+        { rules: [{ effect: "deny", on: "tool", tool: "exec" }] },
+        { "x-openclaw": { tools: { profile: "coding", allow: ["*"], deny: ["exec"] } } },
+      ),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({ deny: ["exec"] });
+  });
+
+  it("lands in openclaw.json when `config set` is unknown", async () => {
+    override = (args) => (args[0] === "config" ? unknownCommand() : undefined);
+    await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({ mode: "readOnly", rules: [{ effect: "deny", on: "tool", tool: "exec" }] }),
+      OPTS,
+    );
+    const config = JSON5.parse(await text(join(stateDir, "openclaw.json")));
+    expect(config.agents.entries.ada).toEqual({
+      model: "anthropic/claude-opus-5-5",
+      tools: { deny: ["exec", "write", "edit", "apply_patch"] },
+      sandbox: { workspaceAccess: "ro" },
+    });
+  });
+
+  it("round-trips through read, keeping profile, groups and order", async () => {
+    const tools = { profile: "coding", allow: ["group:fs", "Browser", "*"], deny: ["group:web", "exec"] };
+    await writeFile(
+      join(stateDir, "openclaw.json"),
+      JSON.stringify({
+        agents: {
+          entries: {
+            ada: {
+              workspace: join(stateDir, "workspace-ada"),
+              tools,
+              sandbox: { workspaceAccess: "ro" },
+            },
+          },
+        },
+      }),
+    );
+    await writeTree(join(stateDir, "workspace-ada"), { "AGENTS.md": "Do research.\n" });
+    const readCtx = makeCtx({ sourceDir: stateDir, targetDir: undefined });
+    const { bundle } = await readOpenClawAgent(readCtx, "ada");
+    expect(bundle.manifest.policy).toEqual({
+      mode: "readOnly",
+      rules: [
+        { effect: "deny", on: "tool", tool: "group:web" },
+        { effect: "deny", on: "tool", tool: "exec" },
+        { effect: "allow", on: "tool", tool: "group:fs" },
+        { effect: "allow", on: "tool", tool: "Browser" },
+        { effect: "allow", on: "tool", tool: "*" },
+      ],
+    });
+
+    const other = join(scratch, "other");
+    await mkdir(other);
+    await writeFile(join(other, "openclaw.json"), CONFIG_SOURCE);
+    const written = await writeOpenClawAgent(
+      makeCtx({ targetDir: other }),
+      { ...bundle, manifest: { ...bundle.manifest, id: ADA_ID, name: "Ada" } },
+      OPTS,
+    );
+    expect(written.items.approximated).toEqual([CAPABILITIES_ITEM]);
+    expect(toolsSet()).toEqual(tools);
+    expect(sandboxSet()).toEqual({ workspaceAccess: "ro" });
+    expect(await text(join(other, "workspace-ada", "AGENTS.md"))).toBe("Do research.\n");
+
+    // Read again from the write, as a rewritten openclaw.json would hold it.
+    override = (args) => (args[0] === "config" ? unknownCommand() : undefined);
+    const again = join(scratch, "again");
+    await mkdir(again);
+    // With `main` beside it, `ada` is not the default agent and keeps `workspace-ada`.
+    await writeFile(join(again, "openclaw.json"), '{ agents: { entries: { main: {} } } }');
+    await writeOpenClawAgent(
+      makeCtx({ targetDir: again }),
+      { ...bundle, manifest: { ...bundle.manifest, id: ADA_ID, name: "Ada" } },
+      OPTS,
+    );
+    const back = await readOpenClawAgent(makeCtx({ sourceDir: again, targetDir: undefined }), "ada");
+    expect(back.bundle.manifest.policy).toEqual(bundle.manifest.policy);
+    expect(back.bundle.manifest["x-openclaw"]).toEqual({
+      identity: { name: "Ada", emoji: "🤖" },
+      tools,
+      workspaceAccess: "ro",
+    });
+  });
+});
+
 describe("writeOpenClawAgent: config fallback", () => {
   it("rewrites openclaw.json once, with a backup, when `config set` is unknown", async () => {
     override = (args) => (args[0] === "config" ? unknownCommand() : undefined);

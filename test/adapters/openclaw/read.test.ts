@@ -939,6 +939,57 @@ describe("readOpenClawAgent", () => {
     });
   });
 
+  describe("policy", () => {
+    async function readWith(entry: Record<string, unknown>): Promise<Bundle> {
+      const dir = await makeState({ ada: entry }, { "workspace/AGENTS.md": "x\n" });
+      return (await readOpenClawAgent(makeCtx({ sourceDir: dir }, noJobs), "ada")).bundle;
+    }
+
+    it("reads tools.deny then tools.allow as tool rules, groups and * kept, raw in x-openclaw", async () => {
+      const tools = { profile: "coding", allow: ["group:fs", "Browser", "*"], deny: ["exec", "group:web"] };
+      const bundle = await readWith({ tools });
+      expect(bundle.manifest.policy).toEqual({
+        rules: [
+          { effect: "deny", on: "tool", tool: "exec" },
+          { effect: "deny", on: "tool", tool: "group:web" },
+          { effect: "allow", on: "tool", tool: "group:fs" },
+          { effect: "allow", on: "tool", tool: "Browser" },
+          { effect: "allow", on: "tool", tool: "*" },
+        ],
+      });
+      expect(bundle.manifest["x-openclaw"]).toEqual({ tools });
+    });
+
+    it("reads sandbox.workspaceAccess ro as mode readOnly, beside the identity", async () => {
+      const bundle = await readWith({
+        identity: { name: "Ada" },
+        sandbox: { workspaceAccess: "ro" },
+        tools: { deny: ["exec"] },
+      });
+      expect(bundle.manifest.policy).toEqual({
+        mode: "readOnly",
+        rules: [{ effect: "deny", on: "tool", tool: "exec" }],
+      });
+      expect(bundle.manifest["x-openclaw"]).toEqual({
+        identity: { name: "Ada" },
+        tools: { deny: ["exec"] },
+        workspaceAccess: "ro",
+      });
+    });
+
+    it("gives no policy without tools or a read-only workspace, keeping the raw access", async () => {
+      const none = await readWith({ sandbox: { workspaceAccess: "none" }, tools: { profile: "full" } });
+      expect(none.manifest).not.toHaveProperty("policy");
+      expect(none.manifest["x-openclaw"]).toEqual({ tools: { profile: "full" }, workspaceAccess: "none" });
+      const empty = await readWith({ tools: { allow: [] }, sandbox: {} });
+      expect(empty.manifest).not.toHaveProperty("policy");
+      expect(empty.manifest["x-openclaw"]).toEqual({ tools: { allow: [] } });
+      const bare = await readWith({});
+      expect(bare.manifest).not.toHaveProperty("policy");
+      expect(bare.manifest).not.toHaveProperty("x-openclaw");
+    });
+  });
+
   describe("skills", () => {
     async function readSkills(
       entry: Record<string, unknown>,
@@ -1268,7 +1319,7 @@ describe("openclawAdapter", () => {
       avatar: true,
       models: true,
       schedules: ["cron", "every", "at"],
-      policy: "text",
+      policy: "native",
     });
   });
 
