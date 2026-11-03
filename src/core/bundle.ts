@@ -24,7 +24,7 @@ import {
   parseManifest,
 } from "./schema.js";
 import { byCodeUnit, slugify } from "./text.js";
-import { type ZipPolicy, readZipEntries } from "./zip.js";
+import { type ZipPolicy, readZipBytes, readZipEntries } from "./zip.js";
 
 const MANIFEST_PATH = "jetpack.json";
 const INSTRUCTIONS_PATH = "AGENTS.md";
@@ -579,6 +579,27 @@ export async function readBundle(source: string, opts: ReadBundleOptions = {}): 
   return bundle;
 }
 
+/**
+ * `readBundle` for a `.jetpack` archive already in memory. `source` names it in errors; a name
+ * ending in `.jetpack` also gives the synthesized manifest its name, as a file would.
+ */
+export function readBundleBytes(
+  bytes: Uint8Array,
+  source: string,
+  opts: Pick<ReadBundleOptions, "requireManifest"> = {},
+): Bundle {
+  return entriesToBundle(readZipBytes(source, bytes, ZIP_POLICY), {
+    requireManifest: opts.requireManifest,
+    fallbackName: basename(source).replace(/\.jetpack$/i, ""),
+  });
+}
+
+/** A Bundle as the bytes of a `.jetpack` archive: what `writeBundle` writes to a file. */
+export function bundleToZip(bundle: Bundle): Uint8Array {
+  const entries = bundleToEntries(bundle);
+  return zipSync(Object.fromEntries(entries.map(({ path, bytes }) => [path, bytes])));
+}
+
 /** What an export puts at the top of a directory besides `jetpack.json` and the avatar. */
 const LAYOUT_NAMES: ReadonlySet<string> = new Set([
   INSTRUCTIONS_PATH,
@@ -668,8 +689,7 @@ export async function writeBundle(
   const entries = bundleToEntries(bundle);
 
   if (!opts.asDirectory) {
-    const files = Object.fromEntries(entries.map(({ path, bytes }) => [path, bytes]));
-    await writeFile(target, zipSync(files), { flag: opts.exclusiveArchive ? "wx" : "w" });
+    await writeFile(target, bundleToZip(bundle), { flag: opts.exclusiveArchive ? "wx" : "w" });
     return { removed: [] };
   }
 

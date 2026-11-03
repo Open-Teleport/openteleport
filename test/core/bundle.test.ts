@@ -17,8 +17,10 @@ import { unzipSync, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bundleToEntries,
+  bundleToZip,
   entriesToBundle,
   readBundle,
+  readBundleBytes,
   writeBundle,
 } from "../../src/core/bundle.js";
 import {
@@ -216,6 +218,45 @@ async function writeZip(name: string, entries: FileEntry[]): Promise<string> {
   await writeFile(file, zipOf(entries));
   return file;
 }
+
+describe("in-memory archives", () => {
+  it("round-trips Bundle -> bundleToZip -> readBundleBytes", async () => {
+    const original = await readBundle(ADA_DIR);
+    const bytes = bundleToZip(original);
+    const back = readBundleBytes(bytes, "ada.jetpack");
+    expect(back.manifest).toEqual(original.manifest);
+    expect(back.instructions).toBe(original.instructions);
+    expect(back.skills.map((skill) => skill.name)).toEqual(["web-brief"]);
+    expect(back.facts).toEqual(original.facts);
+  });
+
+  it("writes the same bytes as writeBundle", async () => {
+    const bundle = await readBundle(ADA_DIR);
+    const file = join(tmp, "ada.jetpack");
+    await writeBundle(bundle, file);
+    expect(Object.keys(unzipSync(bundleToZip(bundle))).sort()).toEqual(
+      Object.keys(unzipSync(new Uint8Array(await readFile(file)))).sort(),
+    );
+  });
+
+  it("names the source when the bytes are not a zip", () => {
+    expect(() => readBundleBytes(new TextEncoder().encode("hello"), "stdin of ssh")).toThrow(
+      /stdin of ssh is not a valid zip archive/,
+    );
+  });
+
+  it("refuses bytes over the archive limit before looking at them", () => {
+    const huge = new Uint8Array(MAX_ARCHIVE_BYTES + 1);
+    expect(() => readBundleBytes(huge, "big.jetpack")).toThrow(/over the .* byte limit/);
+  });
+
+  it("synthesizes the manifest from the name when allowed", () => {
+    const bytes = zipSync({ "AGENTS.md": new TextEncoder().encode("# Bob\n") });
+    const bundle = readBundleBytes(bytes, "bob.jetpack", { requireManifest: false });
+    expect(bundle.manifest.name).toBe("bob");
+    expect(() => readBundleBytes(bytes, "bob.jetpack")).toThrow();
+  });
+});
 
 describe("round trips", () => {
   it("round-trips directory -> Bundle -> zip -> Bundle", async () => {
