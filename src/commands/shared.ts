@@ -53,6 +53,17 @@ export class NotDetectedError extends Error {
   }
 }
 
+/** A failure the remote side of an ssh move reported with `--json`; it keeps that exit code. */
+export class RemoteError extends Error {
+  readonly exitCode: number;
+
+  constructor(host: string, code: number, message: string) {
+    super(`${host}: ${message}`);
+    this.name = "RemoteError";
+    this.exitCode = code;
+  }
+}
+
 /**
  * 0 is success (a hand-over included), 1 a bundle that is invalid or holds secrets and any
  * unexpected failure, 2 a bad flag, argument or adapter name, 3 an app that is not there.
@@ -60,6 +71,7 @@ export class NotDetectedError extends Error {
 export function exitCodeOf(error: unknown): number {
   if (error instanceof UsageError || error instanceof UnknownAdapterError) return 2;
   if (error instanceof NotDetectedError) return 3;
+  if (error instanceof RemoteError) return error.exitCode;
   return 1;
 }
 
@@ -139,21 +151,43 @@ const useColor = (): boolean => process.stdout.isTTY === true && !process.env.NO
  * The outcome of an export, import or move. With `--json` stdout carries only the report, and
  * the report file is mentioned on stderr unless `--quiet`. Otherwise the report is printed, then
  * where its file went (unless `--quiet`). The step a hand-over leaves to the user is part of the
- * report (its `Next step` line), so it is said once.
+ * report (its `Next step` line), so it is said once. With `stream: "stderr"` everything goes
+ * to stderr, for a command whose stdout carries the archive itself (`export --out -`).
  */
-export function printReport(report: MoveReport, opts: CommonOptions, reportPath?: string): void {
+export function printReport(
+  report: MoveReport,
+  opts: CommonOptions,
+  reportPath?: string,
+  stream: "stdout" | "stderr" = "stdout",
+): void {
   const written = `Report written to ${reportPath}`;
+  const out = (text: string) =>
+    stream === "stderr" ? process.stderr.write(`${text}\n`) : writeOut(text);
   if (opts.json === true) {
-    writeJson(report);
+    out(JSON.stringify(report, null, 2));
     if (opts.quiet !== true && reportPath !== undefined) process.stderr.write(`${written}\n`);
     return;
   }
-  const lines = [renderReportTerminal(report, { color: useColor() }), ""];
+  const lines = [renderReportTerminal(report, { color: useColor() && stream === "stdout" }), ""];
   if (opts.quiet !== true && reportPath !== undefined) lines.push(written);
-  writeOut(lines.join("\n").trimEnd());
+  out(lines.join("\n").trimEnd());
 }
 
 // -- Files ----------------------------------------------------------------------------------
+
+/** The whole of stdin, as bytes. */
+export async function readStdin(): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
+/** `bytes` to stdout, resolved once they are handed to the pipe or file behind it. */
+export function writeStdout(bytes: Uint8Array): Promise<void> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(bytes, (error) => (error == null ? resolve() : reject(error)));
+  });
+}
 
 /** What `inspect` and `validate` say about an agent folder that holds no `jetpack.json`. */
 export const NO_MANIFEST_WARNING = "no jetpack.json; manifest would be synthesized";
@@ -460,7 +494,7 @@ export function conflictMode(opts: WriteFlags & CommonOptions): WriteOpts["onCon
 export async function confirmReplace(
   opts: WriteFlags,
   agentName: string,
-  target: Adapter,
+  target: Pick<Adapter, "displayName">,
 ): Promise<void> {
   if (opts.yes === true) return;
   const answer = await confirm({

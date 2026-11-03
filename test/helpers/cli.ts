@@ -55,6 +55,9 @@ export type RunOptions = {
 
 export type RunResult = { exitCode: number; stdout: string; stderr: string };
 
+/** `run` with bytes on stdin and stdout kept as bytes, for `import -` and `export --out -`. */
+export type RunBytesResult = { exitCode: number; stdout: Uint8Array; stderr: string };
+
 /** The whole environment of a CLI run: a copy of the real one with the sandbox laid over it. */
 function sandboxEnv(box: Sandbox, opts: RunOptions): Record<string, string> {
   const extra = opts.extraAdapter === undefined ? MEMORY_ADAPTER : opts.extraAdapter;
@@ -101,6 +104,26 @@ export async function run(
     exitCode: result.exitCode ?? -1,
     stdout: String(result.stdout),
     stderr: String(result.stderr),
+  };
+}
+
+export async function runBytes(
+  box: Sandbox,
+  args: readonly string[],
+  opts: RunOptions & { input?: Uint8Array } = {},
+): Promise<RunBytesResult> {
+  const result = await execaNode(CLI, [...args], {
+    cwd: opts.cwd ?? box.cwd,
+    env: sandboxEnv(box, opts),
+    extendEnv: false,
+    reject: false,
+    encoding: "buffer",
+    ...(opts.input === undefined ? { stdin: "ignore" } : { input: opts.input }),
+  });
+  return {
+    exitCode: result.exitCode ?? -1,
+    stdout: new Uint8Array(result.stdout),
+    stderr: Buffer.from(result.stderr).toString("utf8"),
   };
 }
 

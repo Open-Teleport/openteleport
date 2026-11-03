@@ -2,9 +2,11 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { getAdapter } from "../adapters/registry.js";
 import type { Adapter, AgentRef, Ctx } from "../adapters/types.js";
-import { writeBundle } from "../core/bundle.js";
+import { bundleToZip, writeBundle } from "../core/bundle.js";
 import { exportBundle } from "../core/engine.js";
-import { writeReportFile } from "../core/report.js";
+import { type MoveReport, writeReportFile } from "../core/report.js";
+import type { Bundle } from "../core/schema.js";
+import { bundleAsAdapter, fetchRemoteBundle, parseTarget, targetLabel } from "./remote.js";
 import {
   type CommonOptions,
   UsageError,
@@ -16,6 +18,7 @@ import {
   resolveAgent,
   sideOf,
   saveReport,
+  writeStdout,
 } from "./shared.js";
 
 export type ExportOptions = CommonOptions & {
@@ -42,29 +45,53 @@ async function agentHere(folder: Adapter, ctx: Ctx): Promise<AgentRef> {
   return here;
 }
 
+/** The `--out` that means stdout: the archive's bytes and nothing else, the report on stderr. */
+export const STDOUT_OUT = "-";
+
 /**
  * `export --from <adapter> --agent <id|name>`: the agent as a `.jetpack` file, `--out` or
  * `<name>.jetpack` in the working directory, with `move-report.md` next to it. Without `--from`
- * (and `--agent`) it is the agent folder you are in.
+ * (and `--agent`) it is the agent folder you are in. `--out -` streams the archive to stdout,
+ * which is how a move over ssh fetches it.
  */
 export async function exportCommand(opts: ExportOptions): Promise<void> {
-  const from = getAdapter(opts.from ?? "folder");
+  const target = parseTarget(opts.from ?? "folder");
   const ctx = sideOf(buildCtx(opts), "source");
+  let from: Adapter;
   let agent: AgentRef;
-  if (opts.from === undefined && opts.agent === undefined) {
-    agent = await agentHere(from, ctx);
+  if (target.host !== undefined) {
+    // Fetched through ssh as a Bundle, then exported here as any local source would be.
+    getAdapter(target.adapter);
+    if (opts.agent === undefined) {
+      throw new UsageError("Missing --agent: a remote source cannot be browsed interactively");
+    }
+    const bundle = await fetchRemoteBundle(ctx, { ...target, host: target.host }, opts.agent, opts);
+    from = bundleAsAdapter(bundle, targetLabel(target));
+    agent = { id: opts.agent, name: bundle.manifest.name };
   } else {
-    await ensureDetected(from, ctx, "source");
-    agent = await resolveAgent(from, ctx, opts.agent, isInteractive(opts));
+    from = getAdapter(target.adapter);
+    if (opts.from === undefined && opts.agent === undefined) {
+      agent = await agentHere(from, ctx);
+    } else {
+      await ensureDetected(from, ctx, "source");
+      agent = await resolveAgent(from, ctx, opts.agent, isInteractive(opts));
+    }
   }
 
-  const { bundle, report } = await exportBundle({
+  const { bundle, report }: { bundle: Bundle; report: MoveReport } = await exportBundle({
     from,
     agent: agent.id,
     ctx,
     includeFiles: opts.includeFiles === true,
     includeMemory: opts.memory !== false,
   });
+  if (opts.out === STDOUT_OUT) {
+    // The archive is stdout; the report, which would corrupt it, goes to stderr, and its file
+    // to the home folder, since there is no folder next to the archive.
+    await writeStdout(bundleToZip(bundle));
+    printReport(report, opts, await saveReport(report, ctx.home, bundle.manifest.name), "stderr");
+    return;
+  }
   // Written here rather than by `exportBundle`, so that the folder of `--out` is only created
   // once the agent is known to be exportable.
   const out = resolve(ctx.cwd, opts.out ?? `${fileSlug(bundle.manifest.name)}.jetpack`);

@@ -64,6 +64,10 @@ PR #4 fixes duplicate runtime names on copies and preserves associated imported 
 
 `policy` in the manifest, the `## Permissions` text fallback and the per-rule report are covered by unit tests and adapter fixtures only (`test/core/policy.test.ts`, `test/core/engine.test.ts`, the adapter tests). No real app has been checked for them yet: whether Claude Code honours a written `permissionMode`/`disallowedTools`, whether OpenClaw accepts the written `tools.allow`/`tools.deny` on an agent entry, and whether Codex loads `features.shell_tool = false` from an agent file are the next things to verify on real installs. The mapping tables are in the design, `superpowers/specs/2026-11-03-permission-rules-design.md`.
 
+## SSH transport (2026-11-03, unreleased)
+
+`--from <app>@<host>` and `--to <app>@<host>` in `move`, `export`, `import` and `list` run `npx -y openteleport@<local version>` on the host over plain `ssh`, with the `.jetpack` streamed over stdin (to a remote target) or stdout (from a remote source); the design is `superpowers/specs/2026-11-03-ssh-transport-design.md`. **Verified only against a fake `ssh`**: the suite (`test/commands/ssh.test.ts`) puts a fake `ssh` on the sandbox `PATH` that runs the built CLI as the "remote" in another home folder, so the archive really crosses the pipe and the remote's JSON report really comes back, and `test/commands/remote.test.ts` covers the `<app>@<host>` parser, the POSIX quoting, the version pin and the error mapping (exit 3 for no `npx`, exit 1 for an unreachable host, the remote's own code for its `--json` errors). **Not verified**: any real ssh server, a real `npx` download on a remote, password or key prompts, and Windows OpenSSH as the local client. Also note that the remote runs the pinned version from npm, so the transport only works once a release with `import -` and `export --out -` is published.
+
 ## What is not verified yet
 
 Open verification issues include Grok Bot #17 and Codex roles #20 (labelled help wanted). Letta #18 is closed by PR #47 after the scoped local-backend checks passed. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.
@@ -84,10 +88,9 @@ PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attac
 
 1. Run the pilot in `docs/integrations/pilot.md` across technical users, personal assistants and teams.
 2. Verify remaining adapter assumptions on real installations.
-3. SSH transport (`--to openclaw@server`).
-4. An Ed25519 signature in the manifest (the field is reserved).
-5. Letta Cloud over REST, once its authorization header and `agents.update` are checked on a real account.
-6. Automating the remaining manual import steps before promoting `letta` or `openbot` from `handoff` to `done`; real-install verification alone does not remove a handoff. Add Codex automations once Codex documents a format.
+3. An Ed25519 signature in the manifest (the field is reserved).
+4. Letta Cloud over REST, once its authorization header and `agents.update` are checked on a real account.
+5. Automating the remaining manual import steps before promoting `letta` or `openbot` from `handoff` to `done`; real-install verification alone does not remove a handoff. Add Codex automations once Codex documents a format.
 7. The [nightly compatibility workflow](../.github/workflows/compatibility.yml) exercises OpenClaw 2026.10.8 and npm latest, with and without a Gateway, at 03:23 Europe/Warsaw. The first [four-job run](https://github.com/Open-Teleport/openteleport/actions/runs/41562041947) passed for 2026.10.8 and latest resolved to 2026.10.9. The first scheduled run caught 2026.10.10's new provider-auth preflight; [PR #46](https://github.com/Open-Teleport/openteleport/pull/46) supplies synthetic loopback-only providers and the [four-job retest](https://github.com/Open-Teleport/openteleport/actions/runs/41645003736) passed without model requests. Review failures before changing the pinned baseline; the workflow does not establish model-turn compatibility. Run the end-to-end test on each additional OpenClaw release the adapter claims. Both demo scripts have passed on Windows (PowerShell on 2026-10-30; Git Bash on 2026-11-01); repeat them when relevant behavior changes.
 
 ## Release

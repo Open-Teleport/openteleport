@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readBundle } from "../../src/core/bundle.js";
+import { readBundle, readBundleBytes } from "../../src/core/bundle.js";
 import type { MoveReport } from "../../src/core/report.js";
 import {
   ANSI,
@@ -10,6 +10,7 @@ import {
   type Sandbox,
   json,
   run,
+  runBytes,
   sandbox,
 } from "../helpers/cli.js";
 
@@ -21,6 +22,27 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await box.cleanup();
+});
+
+describe("export --out -", () => {
+  it("streams the archive to stdout and the report to stderr", async () => {
+    const result = await runBytes(box, ["export", "--from", "memory", "--agent", "ada", "--out", "-"]);
+    expect(result.exitCode).toBe(0);
+    const bundle = readBundleBytes(result.stdout, "stdout");
+    expect(bundle.manifest.name).toBe("Ada");
+    expect(bundle.persona).toBe("Calm and curious.");
+    expect(result.stderr).toMatch(/^Move report\nSource: memory \/ ada\nOutcome: exported/);
+    expect(result.stderr).toContain("Report written to ");
+    expect(await readdir(join(box.home, ".openteleport", "reports"))).toHaveLength(1);
+    expect(await readdir(box.cwd)).toEqual([]);
+  });
+
+  it("prints the report as JSON on stderr with --json", async () => {
+    const result = await runBytes(box, ["export", "--from", "memory", "--agent", "ada", "--out", "-", "--json", "--quiet"]);
+    expect(result.exitCode).toBe(0);
+    expect(readBundleBytes(result.stdout, "stdout").manifest.name).toBe("Ada");
+    expect(JSON.parse(result.stderr)).toMatchObject({ source: { app: "memory", agent: "ada" }, outcome: "exported" });
+  });
 });
 
 describe("export", () => {

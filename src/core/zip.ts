@@ -96,7 +96,22 @@ export async function readZipEntries(
   if (archiveBytes > MAX_ARCHIVE_BYTES) {
     throw new Error(`${source} is ${archiveBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`);
   }
-  const archive = await readFile(source);
+  return readZipBytes(source, await readFile(source), policy);
+}
+
+/**
+ * `readZipEntries` for an archive already in memory (one that arrived over a pipe): `source`
+ * names it in errors. The same limits and checks apply, in the same order.
+ */
+export function readZipBytes(
+  source: string,
+  archive: Uint8Array,
+  policy: ZipPolicy,
+): FileEntry[] {
+  const archiveBytes = archive.byteLength;
+  if (archiveBytes > MAX_ARCHIVE_BYTES) {
+    throw new Error(`${source} is ${archiveBytes} bytes, over the ${MAX_ARCHIVE_BYTES} byte limit`);
+  }
 
   // First pass: read the central directory only, so that unsafe names and sizes that are over
   // the limits are rejected before any of the content is inflated.
