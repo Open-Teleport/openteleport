@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,8 @@ let sharedMemory: string;
 let ctx: Ctx;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "openteleport-claude-git-"));
+  // Git (like native Claude) canonicalizes /var aliases and Windows 8.3 temp paths.
+  root = await realpath(await mkdtemp(join(tmpdir(), "openteleport-claude-git-")));
   home = join(root, "home");
   repo = join(root, "repo");
   linked = join(root, "linked");
@@ -115,6 +116,14 @@ describe("Claude Code repository memory", () => {
     await execa("git", ["init", "-b", "main", inner], { cwd: root, env: ctx.env });
     const context = { ...ctx, sourceDir: inner };
     expect(await claudeMemoryDir(context, claudePaths(context))).toBe(join(home, ".claude", "projects", sanitize(inner), "memory"));
+  });
+
+  it("loads repository memory when the checkout is opened through a directory alias", async () => {
+    await location("main");
+    const alias = join(root, "repo-alias");
+    await symlink(repo, alias, "junction");
+    const read = await claudeCodeAdapter.read({ ...ctx, sourceDir: alias }, "reviewer");
+    expect(read.bundle.facts).toContain("Shared repository fact.");
   });
 
   it("keeps agent identities separate between checkouts that share memory", async () => {

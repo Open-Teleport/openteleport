@@ -22,6 +22,8 @@ The baseline probe showed that the four Git locations loaded only the main-repos
 
 ## Regression coverage and limits
 
-Six new regression cases failed before the fix: reads and writes from subfolders, worktrees and worktree subfolders. Sixteen new tests now cover those paths, checkout-specific identities, Git failure before writes, inherited Git routing variables, nested repositories, plain folders and valid/invalid project-key overrides. The full local suite passed 2771 tests (12 skipped); type check, build and fresh installed-package verification passed.
+Six new regression cases failed before the fix: reads and writes from subfolders, worktrees and worktree subfolders. Seventeen new tests now cover those paths, checkout-specific identities, Git failure before writes, inherited Git routing variables, nested repositories, directory aliases, plain folders and valid/invalid project-key overrides. The full local suite initially passed 2771 tests (12 skipped); type check, build and fresh installed-package verification passed.
 
 This verifies prompt loading, not a live model's response or recall quality. The imported build was 0.4.4 plus the pending memory fix, intended for the next patch release. Custom `autoMemoryDirectory` settings and remote-memory overrides are not resolved. Old misplaced memory folders are not deleted or migrated automatically. Git lookup failures stop an import before any agent, skill or memory write; plain folders do not require Git. IDs remain keyed to the selected checkout so different agents with the same slug in two worktrees do not overwrite each other's identity records.
+
+CI exposed test fixtures keyed by temporary-path aliases on macOS (`/var`) and Windows (8.3 names), while Git correctly returned canonical paths. Fixture roots now use `realpath`, and a separate alias regression checks that repository memory is still loaded through a directory alias.
