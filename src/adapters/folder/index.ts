@@ -1,13 +1,16 @@
 // The universal adapter: an agent that lives in a plain folder, in the same layout a `.jetpack`
 // archive uses (`AGENTS.md`, `SOUL.md`, `MEMORY.md`, `skills/`, ...). It reads any folder with an
 // `AGENTS.md`, with or without a `jetpack.json`, and writes the full layout, `jetpack.json` too.
-import { readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+// For the tools that open such a folder (Cursor, Gemini CLI, Cline, Codex) it also mirrors the
+// skills to `.agents/skills/` and gives Gemini CLI a `GEMINI.md` that imports `AGENTS.md`.
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { bundleToEntries, readBundle, writeBundle } from "../../core/bundle.js";
-import type { Bundle } from "../../core/schema.js";
+import type { Bundle, Skill } from "../../core/schema.js";
 import { byCodeUnit, slugify } from "../../core/text.js";
 import { freeSibling, isFree, isNotFound, lstatIfAny, numberedSiblings } from "../fs.js";
+import { findSkillFolders, readSkillFiles } from "../skill-files.js";
 import type {
   Adapter,
   AdapterCapabilities,
@@ -21,6 +24,18 @@ const INSTRUCTIONS_FILE = "AGENTS.md";
 const MANIFEST_FILE = "jetpack.json";
 /** Files whose absence from a source folder is worth a warning. */
 const OPTIONAL_FILES = ["SOUL.md", "MEMORY.md"] as const;
+
+/**
+ * Where the tools that work from a folder look for skills: `.agents/skills/<name>/SKILL.md` is
+ * what Cursor, Gemini CLI, Cline and Codex all read (checked on Gemini CLI 0.66 and the `skills`
+ * CLI Cline 3.0 uses; none of them looks at `skills/`). A write keeps the layout's `skills/` as
+ * the record and mirrors each skill here; a read takes a skill that is only here, as a tool or
+ * `npx skills add` left it.
+ */
+const TOOL_SKILLS_DIR = join(".agents", "skills");
+/** Gemini CLI reads `GEMINI.md` by default, not `AGENTS.md`; this one-line file imports it. */
+const GEMINI_FILE = "GEMINI.md";
+const GEMINI_IMPORT = "@./AGENTS.md\n";
 
 const DETECT_HINT = "Pass --source-dir <folder> with an AGENTS.md inside";
 const ROUTINES_WARNING = "routines are stored in the folder; no app runs them from here yet";
@@ -276,6 +291,67 @@ async function claimTarget(
   };
 }
 
+// -- What the tools read -------------------------------------------------------------------------
+
+/**
+ * Mirrors the Bundle's skills to `.agents/skills/` and removes from there what an earlier export
+ * put in `skills/` and this Bundle no longer has (`removed`, as `writeBundle` reports it). A
+ * skill that is only in `.agents/skills/` is left alone: it came from a tool, not from here.
+ */
+async function mirrorSkills(
+  target: string,
+  skills: readonly Skill[],
+  removed: readonly string[],
+): Promise<void> {
+  const mirror = join(target, TOOL_SKILLS_DIR);
+  for (const path of removed) {
+    const [top, name] = path.split("/");
+    if (top === "skills" && name !== undefined) await rm(join(mirror, name), { recursive: true, force: true });
+  }
+  for (const skill of skills) {
+    const dir = join(mirror, skill.name);
+    await rm(dir, { recursive: true, force: true });
+    for (const file of skill.files) {
+      const absolute = join(dir, ...file.path.split("/"));
+      await mkdir(dirname(absolute), { recursive: true });
+      await writeFile(absolute, file.bytes);
+    }
+  }
+}
+
+/** Writes the `GEMINI.md` import unless the folder has a `GEMINI.md` of its own. */
+async function writeGeminiImport(target: string): Promise<void> {
+  const path = join(target, GEMINI_FILE);
+  if ((await lstatIfAny(path)) === undefined) await writeFile(path, GEMINI_IMPORT);
+}
+
+/** Whether `GEMINI.md` in `folder` is the import this adapter writes, not a file of the user's. */
+async function isGeminiImport(folder: string): Promise<boolean> {
+  try {
+    return (await readFile(join(folder, GEMINI_FILE), "utf8")) === GEMINI_IMPORT;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The skills of `.agents/skills/` that the layout's `skills/` does not have, in name order, as
+ * a tool or `npx skills add` left them there.
+ */
+async function toolOnlySkills(
+  folder: string,
+  have: readonly Skill[],
+  warnings: string[],
+): Promise<Skill[]> {
+  const known = new Set(have.map(({ name }) => name));
+  const skills: Skill[] = [];
+  for (const found of await findSkillFolders(join(folder, TOOL_SKILLS_DIR), warnings)) {
+    if (known.has(found.name)) continue;
+    skills.push({ name: found.name, files: await readSkillFiles(found.dir, found.name, warnings) });
+  }
+  return skills;
+}
+
 // -- The adapter ----------------------------------------------------------------------------
 
 export const folderAdapter: Adapter = {
@@ -321,6 +397,17 @@ export const folderAdapter: Adapter = {
     for (const file of OPTIONAL_FILES) {
       if (!(await isFile(join(folder, file)))) warnings.push(`${file} not found`);
     }
+
+    // What this adapter writes for the tools is part of the layout, not an unknown path, and a
+    // skill a tool added under `.agents/skills/` comes along.
+    const extra = await toolOnlySkills(folder, bundle.skills, warnings);
+    if (extra.length > 0) {
+      bundle.skills = [...bundle.skills, ...extra].sort((a, b) => byCodeUnit(a.name, b.name));
+    }
+    const geminiImport = await isGeminiImport(folder);
+    bundle.unknownPaths = bundle.unknownPaths.filter(
+      (path) => path !== ".agents" && !(geminiImport && path === GEMINI_FILE),
+    );
     return { bundle, warnings };
   },
 
@@ -334,6 +421,8 @@ export const folderAdapter: Adapter = {
     const wanted = resolve(ctx.cwd, ctx.targetDir ?? join(ctx.cwd, slug(bundle.manifest.name)));
     const { target, warning } = await claimTarget(ctx, wanted, opts.onConflict, prepared);
     const { removed } = await writeBundle(prepared, target, { asDirectory: true });
+    await mirrorSkills(target, prepared.skills, removed);
+    await writeGeminiImport(target);
 
     const warnings = warning === undefined ? [] : [warning];
     // Updating an earlier export clears its layout; what this Bundle no longer has is named.

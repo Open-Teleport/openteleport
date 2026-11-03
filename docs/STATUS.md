@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-10-30. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
+Last updated: 2026-11-03. This page says what exists, what is verified, and what comes next, so a new contributor can pick up work without reading the whole history.
 
 ## What is done
 
@@ -45,6 +45,7 @@ Hermes Agent and Codex were checked on real installs on 2026-10-29 (Windows). Th
   - With no `HERMES_HOME`, Hermes falls back to `~/.hermes` on every system, Windows included. On Windows the adapter now takes `~/.hermes` when it holds a profile, else `%LOCALAPPDATA%\hermes` (where the installer puts it).
 - **OpenClaw** (2026.5.28 and 2026.10.8, Windows): the end-to-end round trip passed on 2026.10.8 with the Gateway running: a Claude Code project into OpenClaw, back out into a folder, exported as the bundle that left, and two routines landed disabled with a two-line instruction whole. The first run, on 2026.5.28, found two wrong assumptions, fixed since: that version keeps the roster in `agents.list` (an array) and rejects `agents.entries`, which newer versions use, and its `agents list --json` names the workspace `location`. The adapter now reads both forms and sets model and runtime at the path the install keeps the agent under. The no-Gateway path also passed 6/6 on 2026-10-30; routine creation was explicitly skipped with a Gateway-start warning. The demo-script check is recorded separately.
 - **OpenBot** (0.58.0, Windows, 2026-11-02): both ways. The import zip went in through the server's Import page (Grok Bot entry) with the skill, the routine, the facts and the avatar; a Hermes profile folder that OpenTeleport wrote went in through the Hermes Agent entry; and `export --from openbot` on a copy of the database returned the instructions, the routine (schedule kept), the facts and, with this branch, the skill from the workspace. The database is at migration 49 and the warning about a newer schema fired. Two fixes came out of it: the persona layout and the workspace skills (PR #35).
+- **Folder, as Cursor, Gemini CLI and Cline open it** (2026-11-03, Windows): a folder written with `--to folder` showed its skill in Cursor 3.27.22 (Customize, Skills, under the workspace) and its `AGENTS.md` under Rules; `gemini skills list` (Gemini CLI 0.66.0) and `cline skill list` (the `skills` CLI Cline 3.0.74 forwards to) both listed the skill, from `.agents/skills/`. Before this check none of the three saw `skills/`, which is why the adapter now mirrors the skills there and writes the `GEMINI.md` import. Not checked: a model turn in any of the three (each needs a signed-in account), and Gemini CLI's loading of `AGENTS.md` through the `GEMINI.md` import (its docs say `@file` imports are followed; the session did not get past the sign-in prompt).
 - **Codex** (0.165): discovery only. A file in `agents/` is listed as a role named by its `name` field, not by the file name, and skills are read from `~/.agents/skills` and from `<CODEX_HOME>/skills`. The round trip is not verified; see the fixes and remaining verification below.
 
 ## Codex fixes

@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Folder: the tools that open an agent folder now find its skills. Cursor, Gemini CLI, Cline and Codex read `.agents/skills/<name>/SKILL.md` and none of them reads `skills/`, so a write mirrors each skill there (and clears a stale one on update, leaving a skill a tool added alone), and a read takes a skill that is only in `.agents/skills/`. Gemini CLI reads `GEMINI.md` rather than `AGENTS.md`, so a write adds a one-line `GEMINI.md` that imports it, unless the folder has one. Checked on Cursor 3.27, Gemini CLI 0.66 and the `skills` CLI Cline 3.0 uses.
+
 ## [0.4.3] - 2026-11-03
 
 ### Fixed
