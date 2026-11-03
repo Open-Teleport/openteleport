@@ -258,3 +258,11 @@ Fresh e2e state now gets synthetic OpenAI/Anthropic provider configuration point
 | Package | Application | Result | Scope |
 | --- | --- | --- | --- |
 | Fresh npm `openteleport@0.4.6` | Letta Code 0.34.39, Node 24.22.1, Linux | Generated Bash handoff, Git-backed native memory status/export, agent listing, facts/skills round trip and cron read/re-export passed | Disconnected container with synthetic data; no model or scheduler; cron fire count zero. Cloud and PowerShell execution remain unverified. [Evidence](superpowers/research/2026-11-03-letta-published-0.4.6-evidence.json). |
+
+### Real SSH follow-up (2026-11-04)
+
+| Package | Runtime | Verified | Limits |
+| --- | --- | --- | --- |
+| Public npm 0.4.7 | Windows OpenSSH 9.5p2 to Debian OpenSSH 9.2p1 / Node 24.22.0 | Cold remote npx, folder move both directions, list/export/import-copy, facts and skill preserved, space/apostrophe path, unconfirmed replace stopped before SSH | Temporary key and pinned host key; no interactive authentication or remote application model test. [Report](superpowers/research/2026-11-04-real-ssh-check.md). |
+
+Grok #17 and Codex #20 remain open; [2026-11-04 follow-up](superpowers/research/2026-11-04-grok-codex-follow-up.md) records the UI initialization failure, empty Codex memory store and ready synthetic Grok pack.

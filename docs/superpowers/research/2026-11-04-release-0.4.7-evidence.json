@@ -1,0 +1,18 @@
+{
+  "version": "0.4.7",
+  "gitHead": "82aa21f43df5325b9decb6155940195c9cd3822f",
+  "latest": "0.4.7",
+  "provenance": true,
+  "freshCacheInstall": true,
+  "cliVersion": true,
+  "folderRoundTrip": true,
+  "skillMirror": true,
+  "geminiImport": true,
+  "editedSkillPreserved": true,
+  "sourcePreserved": true,
+  "sharedWorktreeMemory": true,
+  "worktreeMemoryReexport": true,
+  "releaseWorkflow": "https://github.com/Open-Teleport/openteleport/actions/runs/41727274016",
+  "productionHttpStatus": 200,
+  "productionVersion": "0.4.7"
+}
