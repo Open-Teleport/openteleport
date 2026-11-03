@@ -25,3 +25,7 @@ All cron commands were comments by default. One generated command was deliberate
 This verifies the local backend and generated Bash handoff, not Cloud, live model recall, scheduler execution or a real PowerShell handoff. PowerShell script rendering has unit coverage. The adapter still returns `handoff`; verification does not turn it into an automatic API transfer. Imported instructions are core memory, while the native Letta system prompt takes precedence on re-export with an explicit warning. Git is required by the handoff; no remote or global user identity is configured.
 
 Sources: [official quickstart](https://docs.letta.com/quickstart), [App Server local backend](https://docs.letta.com/self-hosting/app-server/quickstart), and the installed CLI's `agents create`, `memory` and `cron` help. The installed CLI's behavior, not help omissions, established the required cron description.
+
+## Published-package repeat
+
+The same generated-script check passed again with a fresh installation of public npm `openteleport@0.4.6`, using new synthetic home and output paths. Networking was enabled only to install the public package, then disconnected before executing the handoff. See [the sanitized result](2026-11-03-letta-published-0.4.6-evidence.json). The disposable container was removed after verification.
