@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- SSH transport. `--from <app>@<host>` and `--to <app>@<host>` (`move`, `export`, `import`, `list`) run `npx -y openteleport@<the same version>` on the host over plain `ssh`, with the `.jetpack` streamed over stdin or stdout and the remote's report printed here; the host is any ssh destination, configured in `~/.ssh/config`. The secret scan runs before anything leaves the machine that reads. A host without `npx` is exit code 3. `import -` reads a `.jetpack` from stdin and `export --out -` writes one to stdout, which is what the remote side runs. Verified against a fake `ssh` in the test suite only, not against a real server.
+
 ## [0.4.6] - 2026-11-03
 
 ### Fixed

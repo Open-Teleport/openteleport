@@ -61,6 +61,8 @@ npx openteleport import --to <app> <file.jetpack|folder>
 
 Every app is found where it normally keeps its data; `--source-dir` and `--target-dir` point OpenTeleport somewhere else (another project, a state directory, a mounted volume). After `move` and `import` the report is printed and saved under `~/.openteleport/reports/`. Without `--agent`, a terminal lets you pick from a list; a script gets an error that names the agents there are. `--json` prints the result as JSON on stdout, and `--quiet` leaves out everything but the result.
 
+`<app>@<host>` in `--from` or `--to` names an app on another machine, reached over ssh; see [Remote installs over SSH](#remote-installs-over-ssh).
+
 - `openteleport list --from <app>` lists the agents an app has.
 - `openteleport inspect <file|folder>` shows what a `.jetpack` file or an agent folder holds.
 - `openteleport validate <file|folder>` checks a bundle against the format and scans it for secrets.
@@ -122,18 +124,24 @@ An unzipped .jetpack is a working agent folder for any AGENTS.md-aware tool. It 
 
 The manifest is described by a JSON Schema, [`schema/jetpack.schema.json`](schema/jetpack.schema.json), published as `https://openteleport.dev/schema/0.1/jetpack.json`. Its `id` is a ULID given on the first export and kept on every later one, so moving the same agent again updates it in place. `models` lists preferences in order, each with an optional `runtime` (such as `claude-code` or `codex`), and `capabilities` says what the agent needs (`browser`, `shell`, `filesystem`, `network`, `computerUse`, `scheduler`), not what it is granted. Fields only one app understands go under `x-<vendor>` keys, which other apps ignore.
 
-## Remote installs
+## Remote installs over SSH
 
-OpenTeleport works on the local file system. For an app on another machine, carry the file:
+An app on another machine is named `<app>@<host>`, where the host is anything `ssh` accepts (`server`, `deploy@10.0.0.4`, an alias from `~/.ssh/config`; the text after the first `@` is the host). OpenTeleport then runs `npx -y openteleport@<its own version>` on that machine over plain `ssh`, streams the `.jetpack` over the connection, and prints the usual report here. Nothing but `ssh` and, on the host, Node.js 24+ is needed; keys, ports and jump hosts come from `~/.ssh/config`.
 
 ```bash
-# on your laptop
-npx openteleport export --from claude-code --agent reviewer --out reviewer.jetpack
-scp reviewer.jetpack server:
+# laptop -> server
+npx openteleport move --from claude-code --agent reviewer --to openclaw@server
 
-# on the server
-npx openteleport import --to openclaw reviewer.jetpack
+# server -> laptop
+npx openteleport move --from openclaw@server --agent reviewer --to folder
+
+# the same, in two steps through a file
+npx openteleport export --from hermes@server --agent reviewer --out reviewer.jetpack
+npx openteleport import --to openclaw@server reviewer.jetpack
+npx openteleport list --from openclaw@server
 ```
+
+The secret scan runs on the side that reads, before anything crosses the connection; a remote source needs `--agent` (there is no interactive pick over ssh); both sides always run the same version, so a move needs that version on npm; the remote shell must be POSIX (Windows as a remote host is not supported). A host without `npx` is exit code `3`, like an app that is not installed. Without ssh, carry the file yourself: `export` here, `scp`, `import` there.
 
 For an app in Docker or on a network drive, point `--source-dir` or `--target-dir` at the mounted folder (OpenClaw also needs its `openclaw` CLI on the machine that runs OpenTeleport).
 
