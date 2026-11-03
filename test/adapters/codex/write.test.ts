@@ -151,6 +151,7 @@ describe("the adapter", () => {
       avatar: false,
       models: true,
       schedules: [],
+      policy: "text",
     });
   });
 

@@ -16,6 +16,7 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: true,
   models: true,
   schedules: ["cron", "every", "at"],
+  policy: "text",
 };
 
 const HINT = "Install OpenClaw or pass --source-dir <state dir>";

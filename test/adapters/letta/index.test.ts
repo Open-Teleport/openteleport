@@ -64,6 +64,7 @@ describe("letta adapter", () => {
       avatar: false,
       models: true,
       schedules: ["cron", "every", "at"],
+      policy: "text",
     });
   });
 

@@ -7,7 +7,7 @@ import type { Adapter } from "../../src/adapters/types.js";
 const adapter: Adapter = {
   name: "slow", displayName: "Controlled test destination",
   capabilities: { persona: true, instructions: true, skills: true, routines: true, facts: true,
-    notes: true, files: true, avatar: true, models: true, schedules: ["cron", "every", "at"] },
+    notes: true, files: true, avatar: true, models: true, schedules: ["cron", "every", "at"], policy: "text" },
   detect: async () => ({ found: true }),
   list: async () => [],
   read: async () => { throw new Error("This fixture is destination-only"); },

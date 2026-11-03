@@ -81,6 +81,7 @@ describe("claude-code adapter", () => {
       avatar: false,
       models: true,
       schedules: [],
+      policy: "text",
     });
   });
 });

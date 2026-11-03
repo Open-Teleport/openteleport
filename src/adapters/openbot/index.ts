@@ -31,6 +31,7 @@ export const openbotAdapter: Adapter = {
     avatar: true,
     models: false,
     schedules: ["cron", "every"],
+    policy: "text",
   },
   createsOnWrite: true,
   handoff: true,

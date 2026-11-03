@@ -1142,6 +1142,7 @@ describe("hermesAdapter", () => {
       avatar: false,
       models: true,
       schedules: ["cron", "every", "at"],
+      policy: "text",
     });
     expect(typeof hermesAdapter.cacheIdentity).toBe("function");
   });

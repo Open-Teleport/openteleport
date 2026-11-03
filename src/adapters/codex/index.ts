@@ -24,6 +24,7 @@ export const codexAdapter: Adapter = {
     avatar: false,
     models: true,
     schedules: [],
+    policy: "text",
   },
   // The agent file goes into Codex's own folder, which has to be there.
   createsOnWrite: false,

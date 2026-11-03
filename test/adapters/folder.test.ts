@@ -132,6 +132,7 @@ describe("folder adapter: identity", () => {
       avatar: true,
       models: true,
       schedules: ["cron", "every", "at"],
+      policy: "text",
     });
   });
 });

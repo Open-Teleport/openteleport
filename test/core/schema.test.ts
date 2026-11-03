@@ -31,6 +31,33 @@ describe("parseManifest", () => {
     expect(parseManifest(MIN).name).toBe("Ada");
   });
 
+  it("accepts a policy with a mode and rules", () => {
+    const policy = {
+      mode: "ask",
+      rules: [
+        { effect: "deny", on: "files.write", pattern: "./.env" },
+        { effect: "ask", on: "shell", pattern: "git push *" },
+        { effect: "allow", on: "shell", pattern: "npm test" },
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+      ],
+    };
+    expect(parseManifest({ ...MIN, policy }).policy).toEqual(policy);
+    expect(parseManifest({ ...MIN, policy: { rules: [{ effect: "deny", on: "network" }] } }).policy)
+      .toEqual({ rules: [{ effect: "deny", on: "network" }] });
+    expect(parseManifest({ ...MIN, policy: { mode: "readOnly", rules: [] } }).policy)
+      .toEqual({ mode: "readOnly", rules: [] });
+  });
+
+  it("rejects a policy that says nothing, a tool rule without a tool, and a tool off a tool rule", () => {
+    expect(() => parseManifest({ ...MIN, policy: { rules: [] } })).toThrow(ZodError);
+    expect(() => parseManifest({ ...MIN, policy: { rules: [{ effect: "deny", on: "tool" }] } })).toThrow(ZodError);
+    expect(() =>
+      parseManifest({ ...MIN, policy: { rules: [{ effect: "deny", on: "shell", tool: "exec" }] } }),
+    ).toThrow(ZodError);
+    expect(() => parseManifest({ ...MIN, policy: { rules: [{ effect: "block", on: "shell" }] } })).toThrow(ZodError);
+    expect(() => parseManifest({ ...MIN, policy: { mode: "yolo", rules: [] } })).toThrow(ZodError);
+  });
+
   it("accepts every optional field", () => {
     const manifest = parseManifest({
       ...MIN,

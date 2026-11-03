@@ -13,6 +13,7 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: false,
   models: false,
   schedules: ["cron", "every", "at"],
+  policy: "text",
 };
 
 /**

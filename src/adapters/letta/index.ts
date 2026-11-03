@@ -16,6 +16,7 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: false,
   models: true,
   schedules: ["cron", "every", "at"],
+  policy: "text",
 };
 
 const HINT = "Install Letta Code (npm i -g @letta-ai/letta-code) or pass --source-dir <~/.letta>";
