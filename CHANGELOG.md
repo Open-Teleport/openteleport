@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Maintenance
+
+- Keep Shift as the single production brand and archive superseded concepts outside the public site. The landing and current assets remain byte-identical; the Shift generator no longer depends on the archived Aperture kit.
+
 ## [0.4.7] - 2026-11-03
 
 ### Added
