@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Folder: refuse tool-skill updates through linked `.agents` directories and stop before changing the export if a same-name mirror contains foreign or edited files. Stale edited mirrors are preserved with a warning; linked tool-skill roots are skipped on export.
+- Folder: the tools that open an agent folder now find its skills. Cursor, Gemini CLI, Cline and Codex read `.agents/skills/<name>/SKILL.md` and none of them reads `skills/`, so a write mirrors each skill there (and clears a stale one on update, leaving a skill a tool added alone), and a read takes a skill that is only in `.agents/skills/`. Gemini CLI reads `GEMINI.md` rather than `AGENTS.md`, so a write adds a one-line `GEMINI.md` that imports it, unless the folder has one. Checked on Cursor 3.27, Gemini CLI 0.66 and the `skills` CLI Cline 3.0 uses.
+
 ### Documentation
 
 - Record the Codex 0.166 runtime checks: native role discovery, imported instructions/facts, shared-skill execution and actual child-model selection passed, alongside copy/discovery and skill re-export. UI-specific invocation and generated-memory filenames remain unverified.
