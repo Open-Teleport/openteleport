@@ -1,6 +1,6 @@
 # X draft — letta-verified
 
-Status: Prepared, not posted. Publish after the patch reaches npm.
+Status: Ready, not posted. Public npm 0.4.6 verified.
 
 ## Post
 

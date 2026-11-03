@@ -1,0 +1,20 @@
+{
+  "version": "0.4.6",
+  "gitHead": "43f741457a3cf6f3552fb06d8493fe5fe4a04024",
+  "latest": "0.4.6",
+  "provenance": true,
+  "freshCacheInstall": true,
+  "cliVersion": true,
+  "folderRoundTrip": true,
+  "skillMirror": true,
+  "geminiImport": true,
+  "editedSkillPreserved": true,
+  "sourcePreserved": true,
+  "sharedWorktreeMemory": true,
+  "worktreeMemoryReexport": true,
+  "releaseWorkflow": "https://github.com/Open-Teleport/openteleport/actions/runs/41648568429",
+  "ci": "https://github.com/Open-Teleport/openteleport/actions/runs/41648033984",
+  "productionHttpStatus": 200,
+  "productionVersion": "0.4.6",
+  "lettaPublicPackageRoundTrip": true
+}
