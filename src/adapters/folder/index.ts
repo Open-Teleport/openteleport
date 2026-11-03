@@ -293,21 +293,82 @@ async function claimTarget(
 
 // -- What the tools read -------------------------------------------------------------------------
 
+/** Refuse links in either parent before reading, deleting or writing a tool skill. */
+async function mirrorRootProblem(target: string): Promise<string | undefined> {
+  for (const path of [join(target, ".agents"), join(target, TOOL_SKILLS_DIR)]) {
+    const info = await lstatIfAny(path);
+    if (info === undefined) return undefined;
+    if (info.isSymbolicLink()) return `${path} is a symbolic link`;
+    if (!info.isDirectory()) return `${path} is not a folder`;
+  }
+  return undefined;
+}
+
+/** Exact file/tree comparison, including extra files; no links are followed on either side. */
+async function sameSkillTree(left: string, right: string): Promise<boolean> {
+  const a = await lstatIfAny(left);
+  const b = await lstatIfAny(right);
+  if (!a || !b || a.isSymbolicLink() || b.isSymbolicLink()) return false;
+  if (a.isFile() && b.isFile()) {
+    return a.size === b.size && (await readFile(left)).equals(await readFile(right));
+  }
+  if (!a.isDirectory() || !b.isDirectory()) return false;
+  const names = (await readdir(left)).sort(byCodeUnit);
+  const other = (await readdir(right)).sort(byCodeUnit);
+  if (names.length !== other.length || names.some((name, i) => name !== other[i])) return false;
+  for (const name of names) {
+    if (!(await sameSkillTree(join(left, name), join(right, name)))) return false;
+  }
+  return true;
+}
+
 /**
- * Mirrors the Bundle's skills to `.agents/skills/` and removes from there what an earlier export
- * put in `skills/` and this Bundle no longer has (`removed`, as `writeBundle` reports it). A
- * skill that is only in `.agents/skills/` is left alone: it came from a tool, not from here.
+ * Plan before writeBundle replaces the old layout. A mirror belongs to the earlier export only
+ * while it exactly matches that export's canonical skill. A same-name foreign or edited skill
+ * blocks the update; an edited stale mirror stays, with a warning. Nothing is removed on refusal.
  */
+async function planSkillMirrors(
+  target: string,
+  skills: readonly Skill[],
+  warnings: string[],
+): Promise<string[]> {
+  const problem = await mirrorRootProblem(target);
+  if (problem !== undefined) throw new Error(`Refusing skill mirror update: ${problem}`);
+  const canonical = join(target, "skills");
+  const info = await lstatIfAny(canonical);
+  const plainCanonical = info?.isDirectory() === true && !info.isSymbolicLink();
+  const oldNames = plainCanonical ? await readdir(canonical) : [];
+  const incoming = new Set(skills.map(({ name }) => name));
+  const remove: string[] = [];
+  for (const name of new Set([...oldNames, ...incoming])) {
+    const mirror = join(target, TOOL_SKILLS_DIR, name);
+    if ((await lstatIfAny(mirror)) === undefined) continue;
+    const owned = plainCanonical && (await sameSkillTree(join(canonical, name), mirror));
+    if (!owned) {
+      if (incoming.has(name)) {
+        throw new Error(
+          `Skill mirror conflict at ${mirror}: an existing or edited skill would be overwritten. ` +
+            "Use --copy or resolve the conflict first.",
+        );
+      }
+      warnings.push(`kept modified or unowned skill mirror '${name}'`);
+    } else if (!incoming.has(name)) {
+      remove.push(name);
+    }
+  }
+  return remove;
+}
+
+/** Apply the preflighted mirror update after the canonical layout has been written. */
 async function mirrorSkills(
   target: string,
   skills: readonly Skill[],
   removed: readonly string[],
 ): Promise<void> {
+  const problem = await mirrorRootProblem(target);
+  if (problem !== undefined) throw new Error(`Refusing skill mirror update: ${problem}`);
   const mirror = join(target, TOOL_SKILLS_DIR);
-  for (const path of removed) {
-    const [top, name] = path.split("/");
-    if (top === "skills" && name !== undefined) await rm(join(mirror, name), { recursive: true, force: true });
-  }
+  for (const name of removed) await rm(join(mirror, name), { recursive: true, force: true });
   for (const skill of skills) {
     const dir = join(mirror, skill.name);
     await rm(dir, { recursive: true, force: true });
@@ -343,6 +404,11 @@ async function toolOnlySkills(
   have: readonly Skill[],
   warnings: string[],
 ): Promise<Skill[]> {
+  const problem = await mirrorRootProblem(folder);
+  if (problem !== undefined) {
+    warnings.push(`${problem}; tool skills not exported`);
+    return [];
+  }
   const known = new Set(have.map(({ name }) => name));
   const skills: Skill[] = [];
   for (const found of await findSkillFolders(join(folder, TOOL_SKILLS_DIR), warnings)) {
@@ -420,11 +486,12 @@ export const folderAdapter: Adapter = {
     const prepared = prepareBundle(bundle, opts);
     const wanted = resolve(ctx.cwd, ctx.targetDir ?? join(ctx.cwd, slug(bundle.manifest.name)));
     const { target, warning } = await claimTarget(ctx, wanted, opts.onConflict, prepared);
+    const warnings = warning === undefined ? [] : [warning];
+    const staleMirrors = await planSkillMirrors(target, prepared.skills, warnings);
     const { removed } = await writeBundle(prepared, target, { asDirectory: true });
-    await mirrorSkills(target, prepared.skills, removed);
+    await mirrorSkills(target, prepared.skills, staleMirrors);
     await writeGeminiImport(target);
 
-    const warnings = warning === undefined ? [] : [warning];
     // Updating an earlier export clears its layout; what this Bundle no longer has is named.
     for (const path of removed) warnings.push(`removed stale ${path}`);
     if (prepared.routines.length > 0) warnings.push(ROUTINES_WARNING);

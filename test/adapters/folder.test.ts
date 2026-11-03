@@ -675,6 +675,99 @@ describe("folder adapter: write", () => {
       expect(await exists(join(target, ".agents", "skills", "theirs", "SKILL.md"))).toBe(true);
     });
 
+    it("updates an unchanged mirror when the incoming skill changes", async () => {
+      const target = join(root, "out");
+      const source = await ada();
+      await folderAdapter.write({ ...ctx, targetDir: target }, source, WRITE);
+      const updated: Bundle = { ...source, skills: [{ name: "web-brief", files: [
+        { path: "SKILL.md", bytes: encoder.encode("Updated skill.\n") },
+      ] }] };
+      await folderAdapter.write({ ...ctx, targetDir: target }, updated, WRITE);
+      expect(await text(join(target, ".agents", "skills", "web-brief", "SKILL.md"))).toBe("Updated skill.\n");
+      expect(await readdir(join(target, ".agents", "skills", "web-brief"))).toEqual(["SKILL.md"]);
+    });
+
+    it.each(["SKILL.md", "extra/note.txt"])("keeps an edited mirror (%s) on conflict and when the skill is dropped", async (file) => {
+      const target = join(root, "out");
+      const source = await ada();
+      await folderAdapter.write({ ...ctx, targetDir: target }, source, WRITE);
+      const edited = join(target, ".agents", "skills", "web-brief", file);
+      await put(edited, "User content.\n");
+      const before = await text(join(target, "AGENTS.md"));
+      await expect(folderAdapter.write({ ...ctx, targetDir: target }, {
+        ...source, instructions: "Changed.\n",
+      }, WRITE)).rejects.toThrow(/skill.*conflict/i);
+      expect(await text(join(target, "AGENTS.md"))).toBe(before);
+      const result = await folderAdapter.write({ ...ctx, targetDir: target }, { ...source, skills: [] }, WRITE);
+      expect(await text(edited)).toBe("User content.\n");
+      expect(result.items.warnings).toContain("kept modified or unowned skill mirror 'web-brief'");
+    });
+
+    it.skipIf(!LINKS_WORK)("does not replace a linked skill or read its files", async () => {
+      const target = join(root, "out");
+      const source = await ada();
+      await folderAdapter.write({ ...ctx, targetDir: target }, { ...source, skills: [] }, WRITE);
+      const outside = join(root, "outside");
+      await put(join(outside, "SKILL.md"), "External skill.\n");
+      const mirror = join(target, ".agents", "skills");
+      await mkdir(mirror, { recursive: true });
+      await symlink(outside, join(mirror, "web-brief"), "junction");
+      await expect(folderAdapter.write({ ...ctx, targetDir: target }, source, WRITE)).rejects.toThrow(/skill.*conflict/i);
+      expect((await lstat(join(mirror, "web-brief"))).isSymbolicLink()).toBe(true);
+      expect(await text(join(outside, "SKILL.md"))).toBe("External skill.\n");
+      const read = await folderAdapter.read({ ...ctx, sourceDir: target }, ".");
+      expect(read.bundle.skills).toEqual([]);
+      expect(read.warnings.some((warning) => /symlink/.test(warning))).toBe(true);
+    });
+
+    it.skipIf(!LINKS_WORK).each([".agents", ".agents/skills"])("does not export tool skills through a linked %s", async (linked) => {
+      const target = join(root, "out");
+      await put(join(target, "AGENTS.md"), "Project.\n");
+      const outside = join(root, "outside");
+      const externalSkill = join(outside, ...(linked === ".agents" ? ["skills"] : []), "external", "SKILL.md");
+      await put(externalSkill, "External skill.\n");
+      await mkdir(join(target, linked, ".."), { recursive: true });
+      await symlink(outside, join(target, linked), "junction");
+      const result = await folderAdapter.read({ ...ctx, sourceDir: target }, ".");
+      expect(result.bundle.skills).toEqual([]);
+      expect(result.warnings.some((warning) => /symbolic link.*not exported/.test(warning))).toBe(true);
+    });
+
+    it("refuses a same-name tool skill collision before changing the export", async () => {
+      const target = join(root, "out");
+      const source = await ada();
+      await folderAdapter.write({ ...ctx, targetDir: target }, { ...source, skills: [] }, WRITE);
+      await put(join(target, ".agents", "skills", "web-brief", "SKILL.md"), "My own skill.\n");
+      const before = await text(join(target, "AGENTS.md"));
+
+      await expect(folderAdapter.write({ ...ctx, targetDir: target }, {
+        ...source, instructions: "Changed.\n",
+      }, WRITE)).rejects.toThrow(/skill.*conflict/i);
+      expect(await text(join(target, ".agents", "skills", "web-brief", "SKILL.md"))).toBe("My own skill.\n");
+      expect(await text(join(target, "AGENTS.md"))).toBe(before);
+    });
+
+    it.skipIf(!LINKS_WORK).each([".agents", ".agents/skills"])(
+      "refuses a linked %s before writing or removing anything outside the export",
+      async (linked) => {
+        const target = join(root, "out");
+        const source = await ada();
+        await folderAdapter.write({ ...ctx, targetDir: target }, { ...source, skills: [] }, WRITE);
+        const outside = join(root, "outside");
+        const externalSkill = join(outside, ...(linked === ".agents" ? ["skills"] : []), "web-brief", "SKILL.md");
+        await put(externalSkill, "External skill.\n");
+        await mkdir(join(target, linked, ".."), { recursive: true });
+        await symlink(outside, join(target, linked), "junction");
+        const before = await text(join(target, "AGENTS.md"));
+
+        await expect(folderAdapter.write({ ...ctx, targetDir: target }, {
+          ...source, instructions: "Changed.\n",
+        }, WRITE)).rejects.toThrow(/symlink|symbolic link/i);
+        expect(await text(externalSkill)).toBe("External skill.\n");
+        expect(await text(join(target, "AGENTS.md"))).toBe(before);
+      },
+    );
+
     it("update writes another agent of the same name next to it as -2, saying why", async () => {
       const source = await ada();
       const other: Bundle = { ...source, manifest: { ...source.manifest, id: OTHER_ID } };
