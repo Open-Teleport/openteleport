@@ -171,8 +171,6 @@ const EVERYTHING: Adapter["capabilities"] = {
   files: true,
   avatar: true,
   models: true,
-  // Capabilities describe a target; this adapter is only ever a source.
-  policy: "native",
   schedules: ["cron", "every", "at"],
 };
 
