@@ -1,0 +1,14 @@
+{
+  "codexVersion": "0.166.0-alpha.5.1",
+  "openteleportVersion": "0.4.3",
+  "roleDiscovery": "native user agents folder",
+  "parentModel": "gpt-6-astra",
+  "childModel": "gpt-6.1-sol",
+  "instructionProof": true,
+  "factProof": true,
+  "skillProof": true,
+  "skillReadExitCode": 0,
+  "approvalsRequested": 0,
+  "testFilesRemoved": true,
+  "configTomlHashUnchanged": true
+}

@@ -9,7 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Documentation
 
-- Record the scoped Codex 0.166 runtime check: role instructions and an imported fact ran, copy/discovery and skill re-export passed, while skill execution, actual child-model selection and UI invocation remain unverified.
+- Record the Codex 0.166 runtime checks: native role discovery, imported instructions/facts, shared-skill execution and actual child-model selection passed, alongside copy/discovery and skill re-export. UI-specific invocation and generated-memory filenames remain unverified.
 
 ## [0.4.3] - 2026-11-03
 
