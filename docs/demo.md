@@ -4,6 +4,16 @@ Four things live here: the 60-second recording, the demo scripts it is recorded 
 
 Versions on the machine the demo and the e2e were written on (from `openclaw --version` and `claude --version`): OpenClaw 2026.5.28 (e932160), Claude Code 2.1.273, Node.js 24.11.1, Windows 11. The e2e passed on 2026-10-29 on the same machine against OpenClaw 2026.10.8 (dc2523e), Claude Code 2.1.273 and Node.js 26.13.0; the first run that day, on 2026.5.28, found the two defects the table at the end records. The e2e prints the versions it ran against.
 
+## Nightly compatibility checks
+
+[The compatibility workflow](../.github/workflows/compatibility.yml) runs daily at **03:23 Europe/Warsaw** and can be started from GitHub Actions with **Run workflow**. It also runs for PRs changing the workflow, the e2e suite or the OpenClaw adapter. GitHub schedules can be delayed; the workflow runs against the current default branch ([GitHub scheduling reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)).
+
+The four Linux jobs combine OpenClaw **2026.10.8** (the verified baseline) and npm **latest** with Gateway **off** and **on**. Each installs a real OpenClaw CLI in the hosted runner's temporary directory and records the resolved version. Both version lanes fail visibly on incompatibility; latest is not allowed to fail silently. Two jobs run at a time, each with a 35-minute deadline.
+
+The existing six-step e2e uses a synthetic Claude Code project, transfers its instructions, memory and skills through OpenClaw into a folder and back to an archive, checks the agent model/runtime fields, and verifies that imported routines are disabled (or explicitly skipped without a Gateway). This does not run Claude Code or a model turn and needs no model-provider credentials. The test creates isolated app state and a loopback Gateway, then removes it. No application state, archives or Gateway logs are uploaded as artifacts; the Actions log and job summary retain test outcomes and the resolved version.
+
+The `latest` lane detects upstream drift; it does not make every upstream version supported automatically. Update the pinned baseline only after reviewing a passing real-install run. This workflow requires no npm release.
+
 ## The 60-second recording
 
 The story: one person has five agents in a Claude Code project and wants them in OpenClaw too, and one of them as a plain folder that any tool can open. Record `scripts/demo.sh` (or `scripts/demo.ps1`) in a terminal about 110 columns wide. The setup lines it prints first are cut; the rest is shown as it runs, sped up where the five moves repeat.

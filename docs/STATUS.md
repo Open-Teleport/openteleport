@@ -76,7 +76,7 @@ PRs #26–#29 fix invalid Codex TOML overwrites, excluded oversized folder attac
 4. An Ed25519 signature in the manifest (the field is reserved).
 5. Letta Cloud over REST, once its authorization header and `agents.update` are checked on a real account.
 6. Automating the remaining manual import steps before promoting `letta` or `openbot` from `handoff` to `done`; real-install verification alone does not remove a handoff. Add Codex automations once Codex documents a format.
-7. Run the end-to-end test on each OpenClaw release the adapter claims. Both demo scripts have passed on Windows (PowerShell on 2026-10-30; Git Bash on 2026-11-01); repeat them when relevant behavior changes.
+7. The [nightly compatibility workflow](../.github/workflows/compatibility.yml) exercises OpenClaw 2026.10.8 and npm latest, with and without a Gateway, at 03:23 Europe/Warsaw. Review failures before changing the pinned baseline; the workflow does not establish model-turn compatibility. Run the end-to-end test on each additional OpenClaw release the adapter claims. Both demo scripts have passed on Windows (PowerShell on 2026-10-30; Git Bash on 2026-11-01); repeat them when relevant behavior changes.
 
 ## Release
 

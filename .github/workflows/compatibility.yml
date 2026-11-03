@@ -1,0 +1,69 @@
+name: Nightly compatibility
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+      timezone: Europe/Warsaw
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/compatibility.yml'
+      - 'test/e2e/**'
+      - 'src/adapters/openclaw/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  openclaw:
+    name: OpenClaw ${{ matrix.version }} / gateway ${{ matrix.gateway }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        version: ['2026.10.8', 'latest']
+        gateway: ['0', '1']
+    env:
+      OPENCLAW_SPEC: ${{ matrix.version }}
+      OPENTELEPORT_E2E: '1'
+      OPENTELEPORT_E2E_GATEWAY: ${{ matrix.gateway }}
+      OPENTELEPORT_E2E_KEEP: '0'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install the real OpenClaw CLI in the runner's temporary directory
+        run: |
+          npm install --prefix "$RUNNER_TEMP/openclaw-runtime" --no-audit --no-fund "openclaw@$OPENCLAW_SPEC"
+          echo "$RUNNER_TEMP/openclaw-runtime/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Record the resolved upstream version
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const pkg = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'openclaw-runtime/node_modules/openclaw/package.json'), 'utf8'));
+          const details = { requested: process.env.OPENCLAW_SPEC, installed: pkg.version, node: process.version, gateway: process.env.OPENTELEPORT_E2E_GATEWAY === '1' };
+          console.log(JSON.stringify(details));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## OpenClaw compatibility\n\n```json\n' + JSON.stringify(details, null, 2) + '\n```\n');
+          JS
+      - name: Transfer synthetic agents, memory, skills and disabled routines
+        run: npm exec -- vitest run test/e2e/roundtrip.test.ts --reporter=verbose
+      - name: Record the result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          printf '\nResult: **%s**. See the test step for assertions and sanitized diagnostics.\n' "$JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nThis checks a Claude Code fixture through a real OpenClaw installation and back to a folder. No model API calls or user credentials. Temporary application state and Gateway logs are not uploaded.\n' >> "$GITHUB_STEP_SUMMARY"

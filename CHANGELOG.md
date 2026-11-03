@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Maintenance
+
+- Add nightly OpenClaw compatibility checks against the verified 2026.10.8 baseline and npm latest, with and without a Gateway. Each hosted-runner job uses synthetic data and records the resolved upstream version; no provider credentials or state artifacts are required.
+
 ## [0.4.4] - 2026-11-03
 
 ### Fixed
