@@ -1,6 +1,6 @@
 # X draft — Claude Code worktree memory
 
-Status: Prepared, not posted. The code fix is for the next patch release, 0.4.5; the upcoming-version wording is intentional until npm publication is verified.
+Status: Ready, not posted. npm 0.4.5 publication and the production site were verified on 2026-11-03.
 
 ## Post
 
@@ -8,7 +8,7 @@ Switching worktrees shouldn't lose your agent's memory.
 
 OpenTeleport now imports Claude Code memory into the shared repository location. Verified in the real CLI across five folder layouts.
 
-Open source. Coming in 0.4.5.
+Open source. New in OpenTeleport 0.4.5.
 
 https://openteleport.dev
 

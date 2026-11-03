@@ -1,0 +1,50 @@
+{
+  "version": "0.4.5",
+  "gitHead": "4f587c6c314e3355c9a6ca5a9eec9ce022cd77de",
+  "latest": "0.4.5",
+  "provenance": true,
+  "freshCacheInstall": true,
+  "cliVersion": true,
+  "folderRoundTrip": true,
+  "skillMirror": true,
+  "geminiImport": true,
+  "editedSkillPreserved": true,
+  "sourcePreserved": true,
+  "sharedWorktreeMemory": true,
+  "worktreeMemoryReexport": true,
+  "verifiedOn": "2026-11-03",
+  "releaseWorkflow": "https://github.com/Open-Teleport/openteleport/actions/runs/41564702826",
+  "releaseUrl": "https://github.com/Open-Teleport/openteleport/releases/tag/v0.4.5",
+  "production": {
+    "url": "https://openteleport.dev",
+    "httpStatus": 200,
+    "displayedVersion": "0.4.5",
+    "schemaVersion": "0.4.5"
+  },
+  "localSuite": {
+    "passed": 2772,
+    "skipped": 12
+  },
+  "ci": {
+    "platforms": [
+      "Linux",
+      "macOS",
+      "Windows"
+    ],
+    "result": "success",
+    "url": "https://github.com/Open-Teleport/openteleport/actions/runs/41564284648"
+  },
+  "compatibility": {
+    "openclawVersions": [
+      "2026.10.8",
+      "2026.10.9"
+    ],
+    "gatewayModes": [
+      "on",
+      "off"
+    ],
+    "passedJobs": 4,
+    "url": "https://github.com/Open-Teleport/openteleport/actions/runs/41563811918"
+  },
+  "scope": "Synthetic fixtures in isolated temporary directories; public-package round trip does not claim model execution. Claude Code detection used an initialized isolated config directory. Temporary state removed."
+}
