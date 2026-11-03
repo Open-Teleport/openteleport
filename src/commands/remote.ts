@@ -172,6 +172,8 @@ const EVERYTHING: Adapter["capabilities"] = {
   avatar: true,
   models: true,
   schedules: ["cron", "every", "at"],
+  // The remote side fits the policy to its own app and reports it; here nothing is rewritten.
+  policy: "native",
 };
 
 /**
