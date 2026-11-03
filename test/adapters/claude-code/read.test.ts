@@ -81,7 +81,7 @@ describe("claude-code adapter", () => {
       avatar: false,
       models: true,
       schedules: [],
-      policy: "text",
+      policy: "native",
     });
   });
 });
@@ -461,6 +461,151 @@ describe("read", () => {
     await claudeCodeAdapter.read(ctx, "user:reviewer");
 
     expect({ project: await snapshot(project), home: await snapshot(home) }).toEqual(before);
+  });
+});
+
+describe("read: policy", () => {
+  const agentsDir = () => join(project, ".claude", "agents");
+  const settingsFile = () => join(project, ".claude", "settings.json");
+  const SETTINGS_WARNING =
+    "permission rules in .claude/settings.json are project-wide in Claude Code; exported with the agent";
+
+  async function agentWith(frontmatter: string): Promise<void> {
+    await writeFile(
+      join(agentsDir(), "guard.md"),
+      `---\nname: guard\n${frontmatter}\n---\n\nGuard.\n`,
+    );
+  }
+
+  it("exports no policy key at all when the agent sets nothing", async () => {
+    const { bundle } = await claudeCodeAdapter.read(ctx, "reviewer");
+    expect("policy" in bundle.manifest).toBe(false);
+    expect(bundle.manifest["x-claude-code"]).not.toHaveProperty("permissionMode");
+    expect(bundle.manifest["x-claude-code"]).not.toHaveProperty("disallowedTools");
+    expect(bundle.manifest["x-claude-code"]).not.toHaveProperty("settingsPermissions");
+  });
+
+  it.each([
+    ["default", "ask"],
+    ["manual", "ask"],
+    ["auto", "auto"],
+    ["dontAsk", "auto"],
+    ["bypassPermissions", "auto"],
+    ["plan", "readOnly"],
+  ])("maps permissionMode %s to mode %s", async (permissionMode, mode) => {
+    await agentWith(`permissionMode: ${permissionMode}`);
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "guard");
+    expect(bundle.manifest.policy).toEqual({ mode, rules: [] });
+    expect(bundle.manifest["x-claude-code"]).toMatchObject({ permissionMode });
+    expect(warnings).not.toContain("frontmatter fields not exported: permissionMode");
+  });
+
+  it("maps acceptEdits to ask plus a first rule that allows writing files", async () => {
+    await agentWith("permissionMode: acceptEdits\ndisallowedTools: WebFetch");
+    const { bundle } = await claudeCodeAdapter.read(ctx, "guard");
+    expect(bundle.manifest.policy).toEqual({
+      mode: "ask",
+      rules: [
+        { effect: "allow", on: "files.write" },
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+      ],
+    });
+  });
+
+  it("warns about a permissionMode it does not know and keeps the raw value", async () => {
+    await agentWith("permissionMode: yolo");
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "guard");
+    expect("policy" in bundle.manifest).toBe(false);
+    expect(warnings).toContain("permissionMode 'yolo' is not known; not exported");
+    expect(bundle.manifest["x-claude-code"]).toMatchObject({ permissionMode: "yolo" });
+  });
+
+  it("reads disallowedTools as deny rules on each tool, as a list or a comma string", async () => {
+    await agentWith("disallowedTools:\n  - WebFetch\n  - Bash(rm:*)");
+    const { bundle } = await claudeCodeAdapter.read(ctx, "guard");
+    expect(bundle.manifest.policy).toEqual({
+      rules: [
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+        { effect: "deny", on: "tool", tool: "Bash(rm:*)" },
+      ],
+    });
+    expect(bundle.manifest["x-claude-code"]).toMatchObject({
+      disallowedTools: ["WebFetch", "Bash(rm:*)"],
+    });
+
+    await agentWith("disallowedTools: WebFetch, WebSearch");
+    const again = await claudeCodeAdapter.read(ctx, "guard");
+    expect(again.bundle.manifest.policy?.rules.map((rule) => rule.tool)).toEqual([
+      "WebFetch",
+      "WebSearch",
+    ]);
+  });
+
+  it("reads the project settings permissions as tool rules after the agent's own, deny first", async () => {
+    await agentWith("permissionMode: default\ndisallowedTools: WebFetch");
+    await writeFile(
+      settingsFile(),
+      JSON.stringify({
+        permissions: {
+          allow: ["Bash(npm test)", "Read"],
+          ask: ["Bash(git push *)"],
+          deny: ["Bash(rm -rf *)", 42],
+          additionalDirectories: ["../lib"],
+        },
+      }),
+    );
+
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "guard");
+
+    expect(bundle.manifest.policy).toEqual({
+      mode: "ask",
+      rules: [
+        { effect: "deny", on: "tool", tool: "WebFetch" },
+        { effect: "deny", on: "tool", tool: "Bash(rm -rf *)" },
+        { effect: "ask", on: "tool", tool: "Bash(git push *)" },
+        { effect: "allow", on: "tool", tool: "Bash(npm test)" },
+        { effect: "allow", on: "tool", tool: "Read" },
+      ],
+    });
+    expect(bundle.manifest["x-claude-code"]).toMatchObject({
+      permissionMode: "default",
+      disallowedTools: ["WebFetch"],
+      settingsPermissions: {
+        allow: ["Bash(npm test)", "Read"],
+        ask: ["Bash(git push *)"],
+        deny: ["Bash(rm -rf *)"],
+      },
+    });
+    expect(warnings.filter((warning) => warning === SETTINGS_WARNING)).toHaveLength(1);
+  });
+
+  it("reads the settings permissions for an agent that sets nothing itself", async () => {
+    await writeFile(settingsFile(), JSON.stringify({ permissions: { deny: ["WebFetch"] } }));
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "reviewer");
+    expect(bundle.manifest.policy).toEqual({
+      rules: [{ effect: "deny", on: "tool", tool: "WebFetch" }],
+    });
+    expect(warnings).toContain(SETTINGS_WARNING);
+  });
+
+  it("tolerates a settings file that is not JSON, with a warning, and one without permissions", async () => {
+    await writeFile(settingsFile(), "{ not json");
+    const broken = await claudeCodeAdapter.read(ctx, "reviewer");
+    expect("policy" in broken.bundle.manifest).toBe(false);
+    expect(broken.warnings.some((warning) => /settings\.json is not valid JSON/.test(warning))).toBe(true);
+
+    await writeFile(settingsFile(), JSON.stringify({ permissions: { allow: [] }, model: "opus" }));
+    const empty = await claudeCodeAdapter.read(ctx, "reviewer");
+    expect("policy" in empty.bundle.manifest).toBe(false);
+    expect(empty.warnings.some((warning) => /settings\.json/.test(warning))).toBe(false);
+  });
+
+  it("keeps tools and capabilities as they were beside the policy", async () => {
+    await agentWith("tools: Read, Bash\npermissionMode: plan");
+    const { bundle, warnings } = await claudeCodeAdapter.read(ctx, "guard");
+    expect(bundle.manifest.capabilities).toEqual(["shell", "filesystem"]);
+    expect(bundle.manifest["x-claude-code"]).toMatchObject({ tools: ["Read", "Bash"] });
+    expect(warnings).toContain("capabilities are derived from the tools list");
   });
 });
 
