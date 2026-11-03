@@ -1,0 +1,25 @@
+{
+  "version": "0.4.4",
+  "gitHead": "7f8bccd587bbd227caa7c806de6b7afe61e559b7",
+  "latest": "0.4.4",
+  "provenance": true,
+  "freshCacheInstall": true,
+  "cliVersion": true,
+  "folderRoundTrip": true,
+  "skillMirror": true,
+  "geminiImport": true,
+  "editedSkillPreserved": true,
+  "sourcePreserved": true,
+  "checkedAt": "2026-11-03",
+  "releaseWorkflow": "https://github.com/Open-Teleport/openteleport/actions/runs/41557884961",
+  "productionSite": {
+    "url": "https://openteleport.dev",
+    "status": 200,
+    "version": "0.4.4"
+  },
+  "localTests": {
+    "passed": 2755,
+    "skipped": 12
+  },
+  "realAppScope": "Cursor/Gemini/Cline discovery checks only; no additional model turns"
+}
