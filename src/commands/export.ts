@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { getAdapter } from "../adapters/registry.js";
 import type { Adapter, AgentRef, Ctx } from "../adapters/types.js";
-import { writeBundle } from "../core/bundle.js";
+import { bundleToZip, writeBundle } from "../core/bundle.js";
 import { exportBundle } from "../core/engine.js";
 import { writeReportFile } from "../core/report.js";
 import {
@@ -16,6 +16,7 @@ import {
   resolveAgent,
   sideOf,
   saveReport,
+  writeStdout,
 } from "./shared.js";
 
 export type ExportOptions = CommonOptions & {
@@ -42,10 +43,14 @@ async function agentHere(folder: Adapter, ctx: Ctx): Promise<AgentRef> {
   return here;
 }
 
+/** The `--out` that means stdout: the archive's bytes and nothing else, the report on stderr. */
+export const STDOUT_OUT = "-";
+
 /**
  * `export --from <adapter> --agent <id|name>`: the agent as a `.jetpack` file, `--out` or
  * `<name>.jetpack` in the working directory, with `move-report.md` next to it. Without `--from`
- * (and `--agent`) it is the agent folder you are in.
+ * (and `--agent`) it is the agent folder you are in. `--out -` streams the archive to stdout,
+ * which is how a move over ssh fetches it.
  */
 export async function exportCommand(opts: ExportOptions): Promise<void> {
   const from = getAdapter(opts.from ?? "folder");
@@ -65,6 +70,13 @@ export async function exportCommand(opts: ExportOptions): Promise<void> {
     includeFiles: opts.includeFiles === true,
     includeMemory: opts.memory !== false,
   });
+  if (opts.out === STDOUT_OUT) {
+    // The archive is stdout; the report, which would corrupt it, goes to stderr, and its file
+    // to the home folder, since there is no folder next to the archive.
+    await writeStdout(bundleToZip(bundle));
+    printReport(report, opts, await saveReport(report, ctx.home, bundle.manifest.name), "stderr");
+    return;
+  }
   // Written here rather than by `exportBundle`, so that the folder of `--out` is only created
   // once the agent is known to be exportable.
   const out = resolve(ctx.cwd, opts.out ?? `${fileSlug(bundle.manifest.name)}.jetpack`);

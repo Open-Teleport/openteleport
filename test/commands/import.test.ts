@@ -1,7 +1,7 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readBundle, writeBundle } from "../../src/core/bundle.js";
+import { bundleToZip, readBundle, writeBundle } from "../../src/core/bundle.js";
 import type { MoveReport } from "../../src/core/report.js";
 import type { Bundle } from "../../src/core/schema.js";
 import {
@@ -13,6 +13,7 @@ import {
   adapterModule,
   json,
   run,
+  runBytes,
   sandbox,
 } from "../helpers/cli.js";
 
@@ -40,6 +41,53 @@ async function adaJetpack(
 }
 
 const reportsDir = (): string => join(box.home, ".openteleport", "reports");
+
+describe("import -", () => {
+  it("reads the .jetpack from stdin and writes it into the target", async () => {
+    const bytes = bundleToZip(await readBundle(ADA_DIR));
+    const result = await runBytes(box, ["import", "--to", "folder", "--json", "-"], { input: bytes });
+    expect(result.stderr).toMatch(/^Report written to /);
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(Buffer.from(result.stdout).toString("utf8")) as MoveReport;
+    expect(report).toMatchObject({
+      source: { app: "jetpack", agent: "Ada" },
+      target: { app: "folder", agent: join(box.cwd, "ada") },
+      outcome: "done",
+    });
+    expect(await readFile(join(box.cwd, "ada", "AGENTS.md"), "utf8")).toContain("# Instructions");
+  });
+
+  it("leaves files/ behind unless --include-files", async () => {
+    const ada = await readBundle(ADA_DIR);
+    const bytes = bundleToZip({
+      ...ada,
+      files: [{ path: "notes.txt", bytes: new TextEncoder().encode("hello") }],
+    });
+    const without = await runBytes(box, ["import", "--to", "folder", "--json", "-"], { input: bytes });
+    expect(without.exitCode).toBe(0);
+    const withFiles = await runBytes(
+      box,
+      ["import", "--to", "folder", "--target-dir", "with", "--include-files", "--json", "-"],
+      { input: bytes },
+    );
+    expect(withFiles.exitCode).toBe(0);
+    const fields = (result: { stdout: Uint8Array }) =>
+      (JSON.parse(Buffer.from(result.stdout).toString("utf8")) as MoveReport).moved.map(
+        (item) => item.field,
+      );
+    expect(fields(without)).not.toContain("files");
+    expect(fields(withFiles)).toContain("files");
+  });
+
+  it("names stdin, and exits 1, when the bytes are not a .jetpack", async () => {
+    const result = await runBytes(box, ["import", "--to", "folder", "-"], {
+      input: new TextEncoder().encode("not a zip"),
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/^error: Cannot read the \.jetpack on stdin: stdin is not a valid zip/);
+    expect(result.stderr).not.toMatch(STACK_LINE);
+  });
+});
 
 describe("import", () => {
   it("writes a .jetpack into the target and the report into the home folder", async () => {

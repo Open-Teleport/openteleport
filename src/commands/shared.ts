@@ -139,21 +139,43 @@ const useColor = (): boolean => process.stdout.isTTY === true && !process.env.NO
  * The outcome of an export, import or move. With `--json` stdout carries only the report, and
  * the report file is mentioned on stderr unless `--quiet`. Otherwise the report is printed, then
  * where its file went (unless `--quiet`). The step a hand-over leaves to the user is part of the
- * report (its `Next step` line), so it is said once.
+ * report (its `Next step` line), so it is said once. With `stream: "stderr"` everything goes
+ * to stderr, for a command whose stdout carries the archive itself (`export --out -`).
  */
-export function printReport(report: MoveReport, opts: CommonOptions, reportPath?: string): void {
+export function printReport(
+  report: MoveReport,
+  opts: CommonOptions,
+  reportPath?: string,
+  stream: "stdout" | "stderr" = "stdout",
+): void {
   const written = `Report written to ${reportPath}`;
+  const out = (text: string) =>
+    stream === "stderr" ? process.stderr.write(`${text}\n`) : writeOut(text);
   if (opts.json === true) {
-    writeJson(report);
+    out(JSON.stringify(report, null, 2));
     if (opts.quiet !== true && reportPath !== undefined) process.stderr.write(`${written}\n`);
     return;
   }
-  const lines = [renderReportTerminal(report, { color: useColor() }), ""];
+  const lines = [renderReportTerminal(report, { color: useColor() && stream === "stdout" }), ""];
   if (opts.quiet !== true && reportPath !== undefined) lines.push(written);
-  writeOut(lines.join("\n").trimEnd());
+  out(lines.join("\n").trimEnd());
 }
 
 // -- Files ----------------------------------------------------------------------------------
+
+/** The whole of stdin, as bytes. */
+export async function readStdin(): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
+/** `bytes` to stdout, resolved once they are handed to the pipe or file behind it. */
+export function writeStdout(bytes: Uint8Array): Promise<void> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(bytes, (error) => (error == null ? resolve() : reject(error)));
+  });
+}
 
 /** What `inspect` and `validate` say about an agent folder that holds no `jetpack.json`. */
 export const NO_MANIFEST_WARNING = "no jetpack.json; manifest would be synthesized";
