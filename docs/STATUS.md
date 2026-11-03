@@ -60,6 +60,10 @@ On 2026-11-03, native Claude Code 2.1.273 loaded the main repository's auto-memo
 
 PR #4 fixes duplicate runtime names on copies and preserves associated imported skills on re-export. Regression tests cover both. The 2026-11-03 check also verified distinct names in installed Codex discovery and skill re-export. The authorized follow-up also verified live instruction/fact use, shared-skill execution and the configured child model. UI invocation and generated memories remain outside this check.
 
+## Permission rules (2026-11-03, unreleased)
+
+`policy` in the manifest, the `## Permissions` text fallback and the per-rule report are covered by unit tests and adapter fixtures only (`test/core/policy.test.ts`, `test/core/engine.test.ts`, the adapter tests). No real app has been checked for them yet: whether Claude Code honours a written `permissionMode`/`disallowedTools`, whether OpenClaw accepts the written `tools.allow`/`tools.deny` on an agent entry, and whether Codex loads `features.shell_tool = false` from an agent file are the next things to verify on real installs. The mapping tables are in the design, `superpowers/specs/2026-11-03-permission-rules-design.md`.
+
 ## What is not verified yet
 
 Open verification issues include Grok Bot #17 and Codex roles #20 (labelled help wanted). Letta #18 is closed by PR #47 after the scoped local-backend checks passed. Settled since: #21, #23, #24 by PRs #26 to #30; #19 (Hermes cron) by #32; #22 (the demo scripts) by #33; #16 (OpenBot) by #35 and #36. Closing an issue records the scoped check; the remaining cases below are still unverified.

@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Permission rules travel with the agent. `jetpack.json` gains an optional `policy` (a `mode` and `rules` with `effect`, scope and `pattern`); `inspect` shows it. Claude Code reads a subagent's `permissionMode` and `disallowedTools` (and the project's `.claude/settings.json` rules, with a warning that they are project-wide) and writes them back; OpenClaw reads and writes the agent entry's `tools.allow`/`tools.deny` and `sandbox.workspaceAccess`; Codex reads its global approval and sandbox posture (with a warning) and writes `features.shell_tool = false` for a shell deny; Hermes reads its global approvals; Letta lists the tools to set to ask in the handoff script, as a comment, since its CLI has no approval command. Every rule a target cannot enforce, and the whole policy for a target without per-agent rules, is written as a `## Permissions` section at the end of `AGENTS.md` and listed in the report as approximated, rule by rule, with the reason. No app's project or user settings are ever edited. OpenTeleport 0.4.6 and older refuse an archive that has `policy`; it is written only when the agent has rules.
+
 ## [0.4.6] - 2026-11-03
 
 ### Fixed
