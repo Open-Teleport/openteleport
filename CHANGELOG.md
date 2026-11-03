@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-03
+
+### Fixed
+
+- Claude Code: resolve auto memory to the primary repository checkout for worktrees and subfolders, while keeping imported agent identities separate per checkout. Honor a valid project-key override beside `CLAUDE_CONFIG_DIR`; refuse a failed Git lookup before writing. Native Claude Code 2.1.273 loaded imported memory in five temporary layouts through a local transport probe, without a model call.
+
 ### Maintenance
 
 - Add nightly OpenClaw compatibility checks against the verified 2026.10.8 baseline and npm latest, with and without a Gateway. Each hosted-runner job uses synthetic data and records the resolved upstream version; no provider credentials or state artifacts are required.
@@ -203,3 +209,5 @@ First release.
 [0.4.2]: https://github.com/Open-Teleport/openteleport/compare/v0.4.1...v0.4.2
 
 [0.4.4]: https://github.com/Open-Teleport/openteleport/compare/v0.4.3...v0.4.4
+
+[0.4.5]: https://github.com/Open-Teleport/openteleport/compare/v0.4.4...v0.4.5

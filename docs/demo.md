@@ -12,6 +12,8 @@ The four Linux jobs combine OpenClaw **2026.10.8** (the verified baseline) and n
 
 The existing six-step e2e uses a synthetic Claude Code project, transfers its instructions, memory and skills through OpenClaw into a folder and back to an archive, checks the agent model/runtime fields, and verifies that imported routines are disabled (or explicitly skipped without a Gateway). This does not run Claude Code or a model turn and needs no model-provider credentials. The test creates isolated app state and a loopback Gateway, then removes it. No application state, archives or Gateway logs are uploaded as artifacts; the Actions log and job summary retain test outcomes and the resolved version.
 
+The first [four-job verification](https://github.com/Open-Teleport/openteleport/actions/runs/41562041947) passed on 2026-11-03: six tests per job, OpenClaw 2026.10.8 and latest resolved to 2026.10.9, each with Gateway off/on.
+
 The `latest` lane detects upstream drift; it does not make every upstream version supported automatically. Update the pinned baseline only after reviewing a passing real-install run. This workflow requires no npm release.
 
 ## The 60-second recording
@@ -238,3 +240,9 @@ The no-Gateway e2e passed all six checks on Windows, OpenClaw 2026.10.8 (dc2523e
 An earlier attempt passed 5/6: its outer CLI wrapper timed out at 300 seconds while a composed transfer was still running. PR #30 separates the 15-minute transfer budget from the five-minute individual host-command budget; the test budget is 20 minutes. The repeat's first transfer took 317 seconds, confirming why the old outer deadline was insufficient. No product timeout was increased by this test fix.
 
 The unmodified PowerShell demo (`pwsh -File scripts/demo.ps1`) also completed with exit code 0 on the same Windows/OpenClaw installation: all five agents (reviewer, planner, tester, docs-writer and release-manager) were created and reviewer returned to a plain folder. The final report recorded instructions, persona, one skill, two facts, three notes and one model preference. Without a Gateway, routine discovery warned that no routines were exported. The five-agent roster and returned AGENTS.md were checked after completion, then the isolated demo directory (including its Gateway token) was removed. The run took approximately 27 minutes; the 60-second recording outline is an edited presentation, not an execution-time promise. The Bash demo was subsequently run in Git Bash on Windows on 2026-11-01 and completed with exit code 0; see the verification table above for its scope and Gateway warning.
+
+### Claude Code repository memory check (2026-11-03)
+
+| Native CLI | Layouts | Result | Scope |
+| --- | --- | --- | --- |
+| Claude Code 2.1.273, Windows | Main checkout, subfolder, linked worktree, worktree subfolder, plain folder | Imported fact loaded in all five outgoing native prompts; the four Git layouts share the main repository memory | Synthetic files, isolated config, dummy key and loopback HTTP endpoint; response deliberately rejected before any model execution. See [report and evidence](superpowers/research/2026-11-03-claude-worktree-memory.md). |

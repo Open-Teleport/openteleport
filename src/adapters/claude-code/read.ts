@@ -15,7 +15,7 @@ import { readIds } from "../marker.js";
 import { readSkillFolders } from "../skill-files.js";
 import type { AgentRef, Ctx } from "../types.js";
 import { type AgentFile, parseAgentFile } from "./frontmatter.js";
-import { type ClaudePaths, claudePaths } from "./paths.js";
+import { type ClaudePaths, claudeMemoryDir, claudePaths } from "./paths.js";
 import { idsFileOf, isNoteLink } from "./write.js";
 
 const APP = "claude-code";
@@ -235,7 +235,7 @@ export async function readAgent(
   const { skills, warnings: skillWarnings } = await readSkillFolders(paths.projectSkills);
   warnings.push(...skillWarnings);
   if (skills.length > 0) warnings.push("Claude Code skills are project-wide; all were exported");
-  const { facts, notes } = await readMemory(paths.memoryDir(paths.projectDir), warnings);
+  const { facts, notes } = await readMemory(await claudeMemoryDir(ctx, paths), warnings);
 
   const { description } = file;
   const title = description === undefined ? undefined : truncate(description, MAX_TITLE_CHARS);
