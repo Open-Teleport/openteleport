@@ -143,6 +143,8 @@ A target that enforces rules per agent gets them natively: Claude Code (`permiss
 
 ## Remote installs over SSH
 
+The folder round trip was [verified with public 0.4.7 over real Windows OpenSSH to Linux](docs/superpowers/research/2026-11-04-real-ssh-check.md), including the first remote npm download. This check does not verify each application adapter on a server.
+
 An app on another machine is named `<app>@<host>`, where the host is anything `ssh` accepts (`server`, `deploy@10.0.0.4`, an alias from `~/.ssh/config`; the text after the first `@` is the host). OpenTeleport then runs `npx -y openteleport@<its own version>` on that machine over plain `ssh`, streams the `.jetpack` over the connection, and prints the usual report here. Nothing but `ssh` and, on the host, Node.js 24+ is needed; keys, ports and jump hosts come from `~/.ssh/config`.
 
 ```bash

@@ -1,0 +1,29 @@
+{
+  "version": "0.4.7",
+  "localClient": "Windows OpenSSH",
+  "remote": "Debian Linux OpenSSH in disposable Docker container",
+  "loopbackOnly": true,
+  "temporaryKey": true,
+  "hostKeyPinned": true,
+  "personalSshConfigChanged": false,
+  "launcher": "ssh.cmd adds only -F for an isolated test config and invokes the real Windows ssh.exe",
+  "freshPublicPackage": true,
+  "remoteColdNpxDownload": true,
+  "moveToRemote": true,
+  "remoteList": true,
+  "remoteExport": true,
+  "importCopyToRemote": true,
+  "moveFromRemote": true,
+  "spaceAndApostrophePath": true,
+  "factsAndSkillsRoundTrip": true,
+  "replaceRefusedBeforeSsh": true,
+  "remaining": [
+    "Interactive password/key-passphrase prompts",
+    "Remote application adapters beyond folder",
+    "Windows as remote (unsupported by design)"
+  ],
+  "localClientVersion": "OpenSSH_for_Windows_9.5p2",
+  "remoteSshVersion": "OpenSSH_9.2p1 Debian-2+deb12u10",
+  "remoteNodeVersion": "24.22.0",
+  "testContainerRemoved": true
+}

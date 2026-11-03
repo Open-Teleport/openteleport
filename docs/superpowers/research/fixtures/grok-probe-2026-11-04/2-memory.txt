@@ -1,0 +1,2 @@
+In the synthetic OpenTeleport test project Cedar, the project color is violet.
+In the synthetic OpenTeleport test project Cedar, the checkpoint word is compass.
