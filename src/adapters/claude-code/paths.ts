@@ -1,4 +1,5 @@
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { lstatIfAny } from "../fs.js";
 import type { Ctx } from "../types.js";
 
 /** Claude Code cuts a sanitized project path to this length and appends a hash. */
@@ -33,7 +34,7 @@ export type ClaudePaths = {
   userDir: string;
   userAgents: string;
   userSkills: string;
-  /** Where Claude Code keeps `MEMORY.md` and the other memory files for a project. */
+  /** Map an already resolved project root to its memory path; see `claudeMemoryDir`. */
   memoryDir(projectDir: string): string;
 };
 
@@ -58,4 +59,51 @@ export function claudePaths(
     userSkills: join(userDir, "skills"),
     memoryDir: (dir) => join(userDir, "projects", sanitize(resolve(ctx.cwd, dir)), "memory"),
   };
+}
+
+/**
+ * Claude Code shares auto memory across a repository's main checkout, worktrees and subfolders.
+ * Git's NUL-delimited worktree listing identifies the primary checkout even with spaces,
+ * non-ASCII paths, nested repositories or a separate Git directory. Plain folders need no Git.
+ */
+async function memoryRoot(ctx: Ctx, project: string): Promise<string> {
+  let directory = project;
+  for (;;) {
+    if ((await lstatIfAny(join(directory, ".git"))) !== undefined) break;
+    const parent = dirname(directory);
+    if (parent === directory) return project;
+    directory = parent;
+  }
+  // Caller-provided Git routing variables must not point this lookup at an unrelated repo.
+  const env = Object.fromEntries(
+    Object.entries(ctx.env).filter(([name]) => !/^GIT_/i.test(name)),
+  );
+  let primary: string | undefined;
+  try {
+    const result = await ctx.exec(
+      "git", ["--no-optional-locks", "-C", directory, "worktree", "list", "--porcelain", "-z"],
+      { env: { ...env, HOME: ctx.home, USERPROFILE: ctx.home, GIT_TERMINAL_PROMPT: "0" },
+        extendEnv: false, timeout: 5000, maxBuffer: 1024 * 1024, reject: false },
+    );
+    const first = result.stdout.split("\0")[0];
+    if (result.exitCode === 0 && first?.startsWith("worktree ")) primary = first.slice(9);
+  } catch (error) {
+    throw new Error(`Cannot resolve Claude Code memory for ${project}: Git lookup failed.`, { cause: error });
+  }
+  if (!primary || !isAbsolute(primary)) {
+    throw new Error(`Cannot resolve Claude Code memory for ${project}: Git did not report a primary worktree.`);
+  }
+  return resolve(primary);
+}
+
+/** Native auto-memory location; agent identity sidecars remain scoped to each checkout. */
+export async function claudeMemoryDir(ctx: Ctx, paths: ClaudePaths): Promise<string> {
+  // Native Claude Code 2.1.273 accepts this override only beside CLAUDE_CONFIG_DIR and with
+  // this portable component grammar. Invalid values fall back to the repository-derived key.
+  const override = ctx.env.CLAUDE_CODE_PROJECT_DIR_NAME;
+  if (ctx.env.CLAUDE_CONFIG_DIR && override && /^[A-Za-z0-9_-]{1,64}$/.test(override) &&
+      !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(override)) {
+    return join(paths.userDir, "projects", override, "memory");
+  }
+  return paths.memoryDir(await memoryRoot(ctx, paths.projectDir));
 }

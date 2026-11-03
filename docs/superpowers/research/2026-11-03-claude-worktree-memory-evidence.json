@@ -1,0 +1,102 @@
+{
+  "checkedAt": "2026-11-03",
+  "platform": "Windows",
+  "claudeVersion": "2.1.273",
+  "modelExecution": false,
+  "credentialsCopied": false,
+  "temporaryStateRemoved": true,
+  "baseline": [
+    {
+      "case": "main",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE"
+      ],
+      "exitCode": 1
+    },
+    {
+      "case": "subfolder",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE"
+      ],
+      "exitCode": 1
+    },
+    {
+      "case": "worktree",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE"
+      ],
+      "exitCode": 1
+    },
+    {
+      "case": "worktree-subfolder",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE"
+      ],
+      "exitCode": 1
+    },
+    {
+      "case": "outside-git",
+      "requests": 2,
+      "markers": [
+        "MEMORY_OUTSIDE_GIT_STONE"
+      ],
+      "exitCode": 1
+    }
+  ],
+  "imported": [
+    {
+      "case": "main",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE",
+        "MEMORY_IMPORTED_STONE"
+      ],
+      "importedFactLoaded": true,
+      "localTransportStopped": true
+    },
+    {
+      "case": "subfolder",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE",
+        "MEMORY_IMPORTED_STONE"
+      ],
+      "importedFactLoaded": true,
+      "localTransportStopped": true
+    },
+    {
+      "case": "worktree",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE",
+        "MEMORY_IMPORTED_STONE"
+      ],
+      "importedFactLoaded": true,
+      "localTransportStopped": true
+    },
+    {
+      "case": "worktree-subfolder",
+      "requests": 2,
+      "markers": [
+        "MEMORY_MAIN_STONE",
+        "MEMORY_IMPORTED_STONE"
+      ],
+      "importedFactLoaded": true,
+      "localTransportStopped": true
+    },
+    {
+      "case": "outside-git",
+      "requests": 2,
+      "markers": [
+        "MEMORY_OUTSIDE_GIT_STONE",
+        "MEMORY_IMPORTED_STONE"
+      ],
+      "importedFactLoaded": true,
+      "localTransportStopped": true
+    }
+  ]
+}

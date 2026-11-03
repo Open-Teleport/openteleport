@@ -9,7 +9,7 @@ import { freeName, recordedCopy } from "../names.js";
 import { writeSkills } from "../skills.js";
 import type { Ctx, WriteOpts, WriteResult } from "../types.js";
 import { renderAgentFile } from "./frontmatter.js";
-import { type ClaudePaths, claudePaths } from "./paths.js";
+import { type ClaudePaths, claudeMemoryDir, claudePaths } from "./paths.js";
 
 const MAX_DESCRIPTION_CHARS = 120;
 const MEMORY_FILE = "MEMORY.md";
@@ -274,7 +274,7 @@ function unsupported(bundle: Bundle, opts: WriteOpts): Item[] {
   return skipped;
 }
 
-/** Where the ids of a project's agents are recorded: beside its memory directory. */
+/** Per-checkout identity sidecar, independent of the repository-shared auto-memory root. */
 export function idsFileOf(paths: ClaudePaths): string {
   return join(dirname(paths.memoryDir(paths.projectDir)), IDS_FILE);
 }
@@ -283,14 +283,14 @@ export function idsFileOf(paths: ClaudePaths): string {
  * Writes a Bundle as a project subagent of `ctx.targetDir` (or `ctx.cwd`): the agent file in
  * `.claude/agents/`, its skills in `.claude/skills/`, its facts and notes in the project's memory
  * directory under the user's Claude Code directory (each note linked from `MEMORY.md`, which is
- * only appended to), and its id in `IDS_FILE` beside that memory directory. Nothing else of the
+ * only appended to), and its id in the checkout-specific `IDS_FILE`. Nothing else of the
  * user's directory is touched, and `bundle` is not changed.
  */
 export async function writeAgent(ctx: Ctx, bundle: Bundle, opts: WriteOpts): Promise<WriteResult> {
   const paths = claudePaths(ctx, ctx.targetDir ?? ctx.cwd);
   const items: Items = { approximated: [], skipped: [], warnings: [] };
 
-  const memoryDir = paths.memoryDir(paths.projectDir);
+  const memoryDir = await claudeMemoryDir(ctx, paths);
   const idsFile = idsFileOf(paths);
 
   const ids = await readIds(idsFile);
