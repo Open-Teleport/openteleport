@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "smol-toml";
 import { MAX_TEXT_ENTRY_BYTES } from "../../core/paths.js";
-import type { Bundle, ModelPref } from "../../core/schema.js";
+import { renderPolicySection, withPolicySection } from "../../core/policy.js";
+import type { Bundle, ModelPref, Policy } from "../../core/schema.js";
 import { factsToProse, mergeInstructions, slugify, truncate } from "../../core/text.js";
 import { isRecord } from "../../core/values.js";
 import { entriesOf, lstatIfAny, replaceFile } from "../fs.js";
@@ -188,12 +189,45 @@ function descriptionOf(bundle: Bundle): string {
   return truncate(chosen ?? name, MAX_DESCRIPTION_CHARS);
 }
 
+/** The reason a rule a Codex agent file cannot hold goes to text. */
+const RULE_AS_TEXT = "a Codex agent file cannot set approval or sandbox rules";
+
 /**
- * The persona and instructions in the layout `readCodexAgent` splits again, then the facts as a
- * `# Facts` section. Codex has no place for facts of its own, so they are part of the text.
+ * Fits the policy to an agent file: a `deny` on the whole shell is `features.shell_tool = false`
+ * (`shellTool`), and every other rule, and the mode (approval and sandbox are set only in
+ * `config.toml`), goes into the instructions as the `## Permissions` section, listed in `items`.
+ * Without a policy the instructions are left as they are.
  */
-function developerInstructions(bundle: Bundle, items: Items): string {
-  const merged = mergeInstructions(bundle.persona, bundle.instructions);
+export function fitCodexPolicy(
+  policy: Policy | undefined,
+  instructions: string,
+  items: Items,
+): { instructions: string; shellTool: false | undefined } {
+  if (policy === undefined) return { instructions, shellTool: undefined };
+  let shellTool: false | undefined;
+  const asText: number[] = [];
+  for (const [index, rule] of policy.rules.entries()) {
+    if (rule.effect === "deny" && rule.on === "shell" && rule.pattern === undefined) {
+      shellTool = false;
+    } else {
+      asText.push(index + 1);
+      items.approximated.push({ field: `rule:${index + 1}`, detail: RULE_AS_TEXT });
+    }
+  }
+  if (policy.mode !== undefined) {
+    items.approximated.push({ field: "policy", detail: `mode ${policy.mode} is global in Codex` });
+  }
+  const section = renderPolicySection(policy, { mode: true, rules: asText });
+  return { instructions: withPolicySection(instructions, section), shellTool };
+}
+
+/**
+ * The persona and instructions in the layout `readCodexAgent` splits again, with the rules the
+ * file cannot hold as a `## Permissions` section, then the facts as a `# Facts` section. Codex
+ * has no place for facts of its own, so they are part of the text.
+ */
+function developerInstructions(bundle: Bundle, items: Items, instructions: string): string {
+  const merged = mergeInstructions(bundle.persona, instructions);
   if ((bundle.persona?.trim() ?? "") !== "") {
     items.approximated.push({
       field: "persona",
@@ -279,11 +313,12 @@ function renderBundle(
   const settings = isRecord(vendor) ? vendor : {};
   const { reasoningEffort, skillsConfig } = settings;
   const nicknames = nicknamesOf(settings.nickname_candidates, items);
+  const policy = fitCodexPolicy(manifest.policy, bundle.instructions, items);
 
   const agent: CodexAgentFile = {
     name,
     description: descriptionOf(bundle),
-    developer_instructions: developerInstructions(bundle, items),
+    developer_instructions: developerInstructions(bundle, items, policy.instructions),
     ...(model === undefined ? {} : { model }),
     ...(typeof reasoningEffort === "string" && reasoningEffort !== ""
       ? { model_reasoning_effort: reasoningEffort }
@@ -293,6 +328,10 @@ function renderBundle(
   const hasSkillsConfig =
     Array.isArray(skillsConfig) && skillsConfig.length > 0 && skillsConfig.every(isRecord);
   const rest = { ...kept };
+  if (policy.shellTool === false) {
+    // The file's other features stay; only the shell tool is switched off.
+    rest.features = { ...(isRecord(kept.features) ? kept.features : {}), shell_tool: false };
+  }
   if (hasSkillsConfig) {
     // The Bundle's skills config replaces the file's own; its other `skills` settings stay.
     rest.skills = { ...(isRecord(kept.skills) ? kept.skills : {}), config: skillsConfig };

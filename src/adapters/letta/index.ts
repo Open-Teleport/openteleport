@@ -16,7 +16,9 @@ const CAPABILITIES: AdapterCapabilities = {
   avatar: false,
   models: true,
   schedules: ["cron", "every", "at"],
-  policy: "text",
+  // Nothing is enforced: an `ask` on a tool is a marked comment in the handoff script and every
+  // rule goes to text, each reported; see `fitLettaPolicy`.
+  policy: "native",
 };
 
 const HINT = "Install Letta Code (npm i -g @letta-ai/letta-code) or pass --source-dir <~/.letta>";

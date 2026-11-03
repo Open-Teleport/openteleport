@@ -425,16 +425,18 @@ describe("the policy", () => {
     to.write = async (c, b, o) => {
       const result = await original(c, b, o);
       result.items.approximated.push({ field: "rule:2", detail: "OpenClaw has no WebFetch" });
+      result.items.approximated.push({ field: "policy", detail: "mode ask is global there" });
       return result;
     };
     const report = await move({ from: source(withPolicy()), to, agent: "ada", ctx, write: WRITE });
     expect(writtenTo(to).instructions).not.toContain("## Permissions");
     expect(report.approximated).toEqual([
       { field: "rule:2", detail: "written as text in AGENTS.md; OpenClaw has no WebFetch" },
+      { field: "policy", detail: "mode ask written as text in AGENTS.md; is global there" },
     ]);
     expect(report.moved).toContainEqual({
       field: "policy",
-      detail: "mode ask, 1 rule enforced by In-memory dst",
+      detail: "1 rule enforced by In-memory dst",
     });
   });
 

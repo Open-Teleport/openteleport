@@ -609,3 +609,84 @@ describe("read leaves the source alone", () => {
     expect(await readdir(codex)).not.toContain("openteleport-ids.json");
   });
 });
+
+describe("policy", () => {
+  const GLOBAL = "approval policy and sandbox mode are global in Codex, not per agent";
+
+  it("reads approval_policy = on-request of config.toml as mode ask, with the global warning", async () => {
+    const { bundle, warnings } = await readCodexAgent(ctx, "default");
+
+    expect(bundle.manifest.policy).toEqual({ mode: "ask", rules: [] });
+    expect(warnings).toContain(GLOBAL);
+    // The raw values stay where they were.
+    expect(bundle.manifest["x-codex"]).toMatchObject({ approvalPolicy: "on-request" });
+  });
+
+  it.each([
+    ['approval_policy = "never"', "auto"],
+    ['approval_policy = "on-failure"', "ask"],
+    ['approval_policy = "untrusted"', "ask"],
+    ['sandbox_mode = "read-only"', "readOnly"],
+    ['approval_policy = "never"\nsandbox_mode = "read-only"', "readOnly"],
+  ])("reads %s as mode %s", async (toml, mode) => {
+    await writeFile(join(codex, "config.toml"), `${toml}\n`);
+
+    const { bundle, warnings } = await readCodexAgent(ctx, "default");
+
+    expect(bundle.manifest.policy).toEqual({ mode, rules: [] });
+    expect(warnings.filter((warning) => warning === GLOBAL)).toHaveLength(1);
+  });
+
+  it.each([
+    'sandbox_mode = "workspace-write"',
+    'approval_policy = "something-new"',
+    "[approval_policy]\nshell = \"ask\"",
+    "",
+  ])("derives no mode from %j", async (toml) => {
+    await writeFile(join(codex, "config.toml"), `${toml}\n`);
+
+    const { bundle, warnings } = await readCodexAgent(ctx, "default");
+
+    expect(bundle.manifest.policy).toBeUndefined();
+    expect(warnings).not.toContain(GLOBAL);
+  });
+
+  it("reads features.shell_tool = false of an agent file as deny shell", async () => {
+    await writeFile(
+      join(codex, "agents", "quiet.toml"),
+      [
+        'name = "Quiet"',
+        'description = "No shell."',
+        'developer_instructions = "Think only."',
+        "",
+        "[features]",
+        "shell_tool = false",
+        "memories = true",
+        "",
+      ].join("\n"),
+    );
+
+    const { bundle, warnings } = await readCodexAgent(ctx, "quiet");
+
+    expect(bundle.manifest.policy).toEqual({ rules: [{ effect: "deny", on: "shell" }] });
+    expect(warnings).toContain("agent file settings not exported: features.memories");
+    expect(warnings).not.toContain(GLOBAL);
+  });
+
+  it("reads no policy from an agent file with the shell tool on", async () => {
+    await writeFile(
+      join(codex, "agents", "loud.toml"),
+      'name = "Loud"\ndescription = "d"\ndeveloper_instructions = "Run things."\n\n[features]\nshell_tool = true\n',
+    );
+
+    const { bundle, warnings } = await readCodexAgent(ctx, "loud");
+
+    expect(bundle.manifest.policy).toBeUndefined();
+    expect(warnings.some((warning) => warning.includes("features"))).toBe(false);
+  });
+
+  it("reads no policy from the fixture's agent file", async () => {
+    const { bundle } = await readCodexAgent(ctx, "reviewer");
+    expect(bundle.manifest.policy).toBeUndefined();
+  });
+});

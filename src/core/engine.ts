@@ -272,7 +272,13 @@ const RULE_OR_POLICY = /^(?:rule:[1-9]\d*|policy)$/;
 const asTextItems = (items: readonly Item[]): Item[] =>
   items.map((item) =>
     RULE_OR_POLICY.test(item.field) && !item.detail.includes(AS_TEXT)
-      ? { ...item, detail: item.field === "policy" ? item.detail.replace(/ /, ` ${AS_TEXT}`) : `${AS_TEXT}${item.detail}` }
+      ? {
+          ...item,
+          detail:
+            item.field === "policy"
+              ? item.detail.replace(/^(mode \S+) /, `$1 ${AS_TEXT}`)
+              : `${AS_TEXT}${item.detail}`,
+        }
       : item,
   );
 

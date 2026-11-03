@@ -24,7 +24,8 @@ export const codexAdapter: Adapter = {
     avatar: false,
     models: true,
     schedules: [],
-    policy: "text",
+    // `deny shell` is `features.shell_tool = false`; the rest goes to text, see `fitCodexPolicy`.
+    policy: "native",
   },
   // The agent file goes into Codex's own folder, which has to be there.
   createsOnWrite: false,
