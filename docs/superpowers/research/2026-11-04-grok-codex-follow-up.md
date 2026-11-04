@@ -1,6 +1,8 @@
 # Grok Bot and Codex follow-up — 2026-11-04
 
-## Grok Bot #17
+Later result: the desktop restart restored UI access. [The live Grok test](2026-11-04-grok-live-check.md) passed paste, fresh-Bot shared-memory recall and a genuine export/folder round trip. The blocked attempt below is historical; Codex #20 remains unresolved.
+
+## Grok Bot #17 — earlier blocked attempt
 
 The installed Grok Bot process was running. The supported computer-use runtime failed before accessing a window with `failed to write kernel assets` / Windows error 3. Reset/retry and the alternate entry point produced the same initialization failure. No message was sent to a Bot and no app state was changed.
 

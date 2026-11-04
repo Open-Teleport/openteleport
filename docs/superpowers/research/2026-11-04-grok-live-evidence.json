@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-04",
+  "platform": "Windows",
+  "appVersion": "Grok Bot 0.78.1",
+  "cliVersion": "OpenTeleport 0.4.7",
+  "sourceZipBytes": 618,
+  "sourceZipSHA256": "a70c0134d39a4d1a631fc67f8fa5aff1ac909aaf28c36e41a8554d339f2ac2ec",
+  "sourceFormat": "openbot-agent-import",
+  "sourceAgentCount": 1,
+  "factsRetained": 3,
+  "instructionMarker": "GROK_PORTABLE_CEDAR",
+  "sharedMemoryControl": "lantern-47",
+  "steps": [
+    {
+      "step": "list-real-export",
+      "exitCode": 0
+    },
+    {
+      "step": "export-real-bot",
+      "exitCode": 0
+    },
+    {
+      "step": "inspect-original",
+      "exitCode": 0
+    },
+    {
+      "step": "import-folder",
+      "exitCode": 0
+    },
+    {
+      "step": "list-folder",
+      "exitCode": 0
+    },
+    {
+      "step": "export-folder",
+      "exitCode": 0
+    },
+    {
+      "step": "inspect-roundtrip",
+      "exitCode": 0
+    },
+    {
+      "step": "grok-return-pack",
+      "exitCode": 0
+    }
+  ],
+  "instructionsByteIdenticalThroughFolder": true,
+  "memoryByteIdenticalThroughFolder": true,
+  "identityPreservedThroughFolder": true,
+  "returnPastePackFactsExact": true,
+  "sourceUnchanged": true,
+  "limitations": [
+    "title not accessible to exporter and omitted",
+    "avatar, files, skills, routines, channels intentionally excluded",
+    "no native profile dump: Bot-produced OpenBot-format export of synthetic conversation instructions and memory",
+    "fresh-Bot memory recall verified; persistence across app restart not tested"
+  ],
+  "cliSourceCommit": "aeadcf0ebc314b59e780bc809c0a5d323ccfd1f3",
+  "liveChecks": {
+    "pastePackInstructionsAndFacts": "passed",
+    "importTextSubmittedViaGeneralSettings": "passed",
+    "importRecipient": "main Bot, not the currently open test Bot",
+    "importConfirmation": "three synthetic facts saved in shared memory",
+    "freshBotRecall": {
+      "promptIncludedExpectedValues": false,
+      "projectColor": "violet",
+      "checkpoint": "compass",
+      "memoryImportOnlyChecksum": "lantern-47"
+    },
+    "exportDownloadedFromApp": true
+  },
+  "regression": {
+    "codexPassed": 175,
+    "grokBotPassed": 102,
+    "totalPassed": 277,
+    "failed": 0
+  },
+  "codexRemaining": {
+    "version": "0.166.0-alpha.5.1",
+    "memoryV1Files": 0,
+    "memoryV2Exists": false,
+    "explicitMemoryFeatureInConfig": "not set",
+    "uiMentionObservation": "pending user observation; desktop self-automation not performed",
+    "settingsChanged": false
+  },
+  "cleanup": "Two synthetic Bots and three shared test facts retained pending action-time cleanup confirmation."
+}
