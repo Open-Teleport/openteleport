@@ -8,6 +8,10 @@ The generated handoff now says to paste the contents of `2-memory.txt`, explains
 
 Evidence locations in the installed 0.78.1 package: `dist/renderer/assets/chunk-general-pane-BoaLGkwd.js` (import component), `dist/renderer/assets/index.eager-app-D25OYGQG.js` (memory prompt construction and instructions). Proprietary bundled code is not copied into this repository.
 
-## Still open: issue #17
+## Later live verification
+
+The [2026-11-04 live check](2026-11-04-grok-live-check.md) confirmed pasted instructions/facts, shared-memory recall by a fresh Bot and a genuine Bot-produced ZIP/folder round trip. General import routed to the main Bot in the tested installation. The earlier blocker below is superseded.
+
+## Earlier blocker: issue #17
 
 A genuine Bot-produced OpenBot export ZIP and a live memory import/recollection check remain required. Both supported computer-use entry points failed during kernel initialization with `failed to write kernel assets` / Windows error 3, including a reset/retry. No UI action or model request was sent. This inspection is evidence about the installed implementation, not a live end-to-end pass.
