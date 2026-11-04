@@ -9,7 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Maintenance
 
-- Record Grok Bot 0.78.1 live paste, fresh-Bot shared-memory recall and genuine export/folder round-trip evidence; correct stale memory-import caveats in README/demo. No runtime behavior changed.
+- Record Grok Bot 0.78.4 live paste, fresh-Bot shared-memory recall and genuine export/folder round-trip evidence; correct stale memory-import caveats in README/demo. No runtime behavior changed.
 
 - Keep Shift as the single production brand and archive superseded concepts outside the public site. The landing and current assets remain byte-identical; the Shift generator no longer depends on the archived Aperture kit.
 
