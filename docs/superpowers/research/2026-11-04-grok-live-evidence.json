@@ -80,9 +80,9 @@
     "memoryV1Files": 0,
     "memoryV2Exists": false,
     "explicitMemoryFeatureInConfig": "not set",
-    "uiMentionObservation": "pending user observation; desktop self-automation not performed",
+    "uiMentionObservation": "User screenshot: visible portion of @ menu shows files, integrations and modes; no agent selection is visible there. Full menu/custom-role semantics remain unverified.",
     "settingsChanged": false
   },
-  "cleanup": "Two synthetic Bots and three shared test facts retained pending action-time cleanup confirmation.",
+  "cleanup": "The main Bot confirmed deletion of the three synthetic Cedar shared-memory facts; both synthetic Bots were deleted and no longer visible. Original export and evidence retained.",
   "appVersionSource": "Windows executable product/file metadata, checked after live run; executable timestamp predates process launch"
 }
