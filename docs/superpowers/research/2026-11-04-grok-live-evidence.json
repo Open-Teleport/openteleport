@@ -1,7 +1,7 @@
 {
   "date": "2026-11-04",
   "platform": "Windows",
-  "appVersion": "Grok Bot 0.78.1",
+  "appVersion": "Grok Bot 0.78.4",
   "cliVersion": "OpenTeleport 0.4.7",
   "sourceZipBytes": 618,
   "sourceZipSHA256": "a70c0134d39a4d1a631fc67f8fa5aff1ac909aaf28c36e41a8554d339f2ac2ec",
@@ -83,5 +83,6 @@
     "uiMentionObservation": "pending user observation; desktop self-automation not performed",
     "settingsChanged": false
   },
-  "cleanup": "Two synthetic Bots and three shared test facts retained pending action-time cleanup confirmation."
+  "cleanup": "Two synthetic Bots and three shared test facts retained pending action-time cleanup confirmation.",
+  "appVersionSource": "Windows executable product/file metadata, checked after live run; executable timestamp predates process launch"
 }

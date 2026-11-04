@@ -8,7 +8,7 @@ A fresh Grok Bot remembered facts imported with OpenTeleport.
 
 Then we exported the test agent back: its instructions and all 3 facts survived the folder round trip.
 
-Tested on Grok Bot 0.78.1 with OpenTeleport 0.4.7.
+Tested on Grok Bot 0.78.4 with OpenTeleport 0.4.7.
 Open source.
 https://openteleport.dev
 

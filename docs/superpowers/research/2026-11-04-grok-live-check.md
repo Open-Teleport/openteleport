@@ -1,6 +1,8 @@
 # Grok Bot live verification — 2026-11-04
 
-Grok Bot 0.78.1 on Windows and a local build of OpenTeleport 0.4.7 at `aeadcf0` passed the scoped live handoff and export checks for issue #17. The earlier UI initialization blocker cleared after restarting the desktop app. [Sanitized evidence](2026-11-04-grok-live-evidence.json) and the [unchanged genuine export](fixtures/grok-live-2026-11-04/README.md) are preserved.
+Grok Bot 0.78.4 on Windows and a local build of OpenTeleport 0.4.7 at `aeadcf0` passed the scoped live handoff and export checks for issue #17. The earlier UI initialization blocker cleared after restarting the desktop app. [Sanitized evidence](2026-11-04-grok-live-evidence.json) and the [unchanged genuine export](fixtures/grok-live-2026-11-04/README.md) are preserved.
+
+Version provenance: Windows executable metadata reports 0.78.4 (the executable timestamp predates this process launch). The earlier blocked/source-inspection runs used 0.78.1; they are not the version of this live retry.
 
 ## Observed results
 

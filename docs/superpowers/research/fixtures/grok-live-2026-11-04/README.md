@@ -1,6 +1,6 @@
 # Genuine Grok Bot test export
 
-Downloaded through Grok Bot 0.78.1 on Windows on 2026-11-04. This is the unchanged 618-byte Bot-produced archive, not a locally manufactured ZIP.
+Downloaded through Grok Bot 0.78.4 on Windows on 2026-11-04. This is the unchanged 618-byte Bot-produced archive, not a locally manufactured ZIP.
 
 SHA-256: `a70c0134d39a4d1a631fc67f8fa5aff1ac909aaf28c36e41a8554d339f2ac2ec`.
 

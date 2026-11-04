@@ -6,7 +6,7 @@ Updated 2026-11-04. Continue in separate `codex/` branches; check open PRs befor
 | --- | --- | --- | --- |
 | 1 | Public release consistency | npm latest/provenance/gitHead, fresh install, production version and release notes agree; STATUS reflects 0.4.7 | Public package and production verified; documentation in this change |
 | 2 | Real SSH | Published CLI transfers both directions through an actual server, including cold npx and quoted path | Passed on Windows OpenSSH to Linux, folder adapter; see research report |
-| 3 | Grok Bot #17 | Synthetic paste import persists, fresh-chat recall succeeds, genuine export ZIP is read, demo table records actual behavior | Passed on Grok Bot 0.78.1: paste, fresh-Bot memory recall, genuine ZIP and folder round trip; scoped evidence recorded |
+| 3 | Grok Bot #17 | Synthetic paste import persists, fresh-chat recall succeeds, genuine export ZIP is read, demo table records actual behavior | Passed on Grok Bot 0.78.4: paste, fresh-Bot memory recall, genuine ZIP and folder round trip; scoped evidence recorded |
 | 4 | Codex #20 | UI invocation is observed or explicitly established unsupported, generated memory filenames are observed, report/demo updated | Core runtime passed earlier; UI unverified and memory store empty |
 | 5 | Enforced permission rules | Claude Code denies a harmless prohibited tool action, OpenClaw loads per-agent deny/allow, Codex role lacks the denied shell tool; allowed controls still work | Unit/fixture coverage only; real application tests pending |
 | 6 | Pilot | One technical user, one personal-assistant scenario and one team scenario record transfer time, losses and actual reuse | Use docs/integrations/pilot.md |
