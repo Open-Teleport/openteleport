@@ -754,6 +754,29 @@ describe("writeOpenClawAgent: policy", () => {
     expect(await text(join(stateDir, "workspace-ada", "AGENTS.md"))).toBe(ada().instructions);
   });
 
+  it("writes a tool rule with a matcher in its name as text, since it is another app's rule", async () => {
+    const result = await writeOpenClawAgent(
+      makeCtx(),
+      policyBundle({
+        rules: [
+          { effect: "deny", on: "tool", tool: "WebFetch" },
+          { effect: "deny", on: "tool", tool: "Read(./.env)" },
+          { effect: "allow", on: "tool", tool: "Bash(npm test)" },
+        ],
+      }),
+      OPTS,
+    );
+    expect(toolsSet()).toEqual({ deny: ["WebFetch"] });
+    const reason = "OpenClaw tool lists take tool names, not matchers; a rule with one is from another app";
+    expect(result.items.approximated).toEqual([
+      { field: "rule:2", detail: reason },
+      { field: "rule:3", detail: reason },
+    ]);
+    const agents = await text(join(stateDir, "workspace-ada", "AGENTS.md"));
+    expect(agents).toContain("- Never use the tool `Read(./.env)`.");
+    expect(agents).toContain("- The tool `Bash(npm test)` is allowed without asking.");
+  });
+
   it("sets the workspace read-only for mode readOnly, with the write denies", async () => {
     const result = await writeOpenClawAgent(
       makeCtx(),

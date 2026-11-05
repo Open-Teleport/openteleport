@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenClaw: a tool rule whose name holds a matcher (`Read(./.env)`, `Bash(npm test)`, as Claude Code writes them) is written to the `## Permissions` section, not to `tools.allow`/`tools.deny`, where OpenClaw would read it as a tool name. Found in a live Claude Code to OpenClaw round trip on OpenClaw 2026.10.8; the round trip is recorded in `docs/demo.md` and `docs/STATUS.md`.
+
 ### Maintenance
 
 - Record Grok Bot 0.78.4 live paste, fresh-Bot shared-memory recall and genuine export/folder round-trip evidence; correct stale memory-import caveats in README/demo. No runtime behavior changed.
