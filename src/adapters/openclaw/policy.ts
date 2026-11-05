@@ -10,6 +10,9 @@ import type { OpenClawAgentEntry } from "./paths.js";
 
 /** Why a rule OpenClaw cannot hold per agent went to text. */
 export const TEXT_REASON = "OpenClaw sets ask and exec approvals globally, not per agent";
+/** A tool name with a matcher in it (`Bash(git push *)`) is another app's rule, not an OpenClaw tool. */
+export const SPECIFIER_REASON =
+  "OpenClaw tool lists take tool names, not matchers; a rule with one is from another app";
 
 /** `agents.entries.<id>.tools`, the parts the adapter carries. */
 export type OpenClawTools = { allow?: string[]; deny?: string[]; profile?: string };
@@ -127,7 +130,7 @@ export function planPolicy(
 
   const allow: string[] = [];
   const deny: string[] = [];
-  const textRules: number[] = [];
+  const textRules: { n: number; reason: string }[] = [];
   let modeToText = false;
   let readOnly = false;
 
@@ -139,13 +142,15 @@ export function planPolicy(
     policy.rules.forEach((rule, i) => {
       const n = i + 1;
       if (rule.effect === "ask" || rule.pattern !== undefined) {
-        textRules.push(n);
+        textRules.push({ n, reason: TEXT_REASON });
+      } else if (rule.on === "tool" && (rule.tool ?? "").includes("(")) {
+        textRules.push({ n, reason: SPECIFIER_REASON });
       } else if (rule.on === "tool") {
         (rule.effect === "allow" ? allow : deny).push(rule.tool ?? "");
       } else if (rule.effect === "deny" && SCOPE_DENIES[rule.on] !== undefined) {
         deny.push(...SCOPE_DENIES[rule.on]);
       } else {
-        textRules.push(n);
+        textRules.push({ n, reason: TEXT_REASON });
       }
     });
     if (policy.mode === "readOnly") {
@@ -173,12 +178,15 @@ export function planPolicy(
     values.push(["sandbox", { ...sandbox, workspaceAccess: READ_ONLY }]);
   }
 
-  const section = renderPolicySection(policy, { mode: modeToText, rules: textRules });
+  const section = renderPolicySection(policy, {
+    mode: modeToText,
+    rules: textRules.map(({ n }) => n),
+  });
   const approximated: Item[] = [
     ...(modeToText
       ? [{ field: "policy", detail: `mode ${policy.mode} is not a per-agent setting in OpenClaw` }]
       : []),
-    ...textRules.map((n) => ({ field: `rule:${n}`, detail: TEXT_REASON })),
+    ...textRules.map(({ n, reason }) => ({ field: `rule:${n}`, detail: reason })),
   ];
   return { values, instructions: withPolicySection(instructions, section), approximated };
 }
